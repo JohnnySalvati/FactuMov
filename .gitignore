@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# Entorno
+.env
+
+# Herramientas
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Node / frontend
+node_modules/
+dist/
+
+# private
+backend/tests/samples/
+
+# Config local de Claude Code (permisos de esta máquina, no del proyecto)
+.claude/settings.local.json

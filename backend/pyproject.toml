@@ -1,0 +1,51 @@
+[project]
+name = "factumov"
+version = "0.1.0"
+description = "Invoice template manager and e-invoicing app"
+readme = "README.md"
+authors = [
+    { name = "MiguelSalvati", email = "miguelsalvati@gmail.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi[standard]",
+    "sqlalchemy>=2.0",
+    "alembic",
+    "psycopg[binary]",
+    "pydantic>=2.0",
+    "pydantic-settings",
+    "python-multipart",
+    "pdfplumber>=0.11.9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "httpx",
+    "ruff",
+    "mypy",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.7,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+# Las migraciones las genera Alembic con su propio estilo; env.py sí se lintea.
+extend-exclude = ["migrations/versions"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]  # errores pycodestyle, pyflakes, isort
+
+[tool.ruff.format]
+line-ending = "lf"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
