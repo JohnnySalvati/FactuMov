@@ -31,8 +31,7 @@ from factumov.services.invoice_parser import parse_invoice_pdf
                 "customer_doc_type": "CUIT",
                 "customer_doc_number": "30714455113",
                 "number_of_lines": 1,
-                "customer_address":
-                  "Rivadavia M. Cdro. 1350 - Capital Federal, Ciudad de Buenos Aires",
+                "customer_address": "Rivadavia M. Cdro. 1350 - Capital Federal, Ciudad de Buenos Aires",
                 "first_line_unit_price": Decimal(1520000),
             },
         ),
