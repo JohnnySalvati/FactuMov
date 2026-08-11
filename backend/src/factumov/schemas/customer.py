@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
 from factumov.enums import CondicionIva, DocType
 
@@ -12,13 +12,18 @@ class CustomerCreate(BaseModel):
     doc_type: DocType
     doc_number: str | None = Field(default=None, max_length=11)
     address: str | None = Field(default=None, max_length=200)
-    email: str | None = Field(default=None, max_length=254)
+    email: EmailStr | None = Field(default=None, max_length=254)
 
     @model_validator(mode="after")
     def check_doc_number(self) -> "CustomerCreate":
         if not self.doc_number and not self.doc_type == DocType.FINAL:
             raise ValueError("Se requiere numero de documento/CUIT")
         return self
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: EmailStr) -> EmailStr:
+        return value.strip().lower()
 
 
 class CustomerRead(BaseModel):
@@ -40,4 +45,9 @@ class CustomerUpdate(BaseModel):
     doc_type: DocType | None = None
     doc_number: str | None = Field(default=None, max_length=11)
     address: str | None = Field(default=None, max_length=200)
-    email: str | None = Field(default=None, max_length=254)
+    email: EmailStr | None = Field(default=None, max_length=254)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: EmailStr) -> EmailStr:
+        return value.strip().lower()
