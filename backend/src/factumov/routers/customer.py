@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from factumov.crud import customer as customer_crud
 from factumov.database import get_db
+from factumov.exceptions import CustomerInUseError, DuplicateCustomerError
 from factumov.models import Customer
 from factumov.schemas.customer import CustomerCreate, CustomerRead, CustomerUpdate
 
@@ -37,12 +38,20 @@ def get_customer(customer: CustomerDep) -> Customer:
 
 @router.post("", response_model=CustomerRead, status_code=201)
 def create_customer(data: CustomerCreate, db: SessionDep) -> Customer:
-    return customer_crud.create(db, data)
+    try:
+        customer = customer_crud.create(db, data)
+    except DuplicateCustomerError:
+        raise HTTPException(status_code=409, detail="Numero de documento/CUIT duplicado")
+    return customer
 
 
 @router.patch("/{customer_id}", response_model=CustomerRead)
 def update_customer(data: CustomerUpdate, customer: CustomerDep, db: SessionDep) -> Customer:
-    return customer_crud.update(db, customer, data)
+    try:
+        customer = customer_crud.update(db, customer, data)
+    except DuplicateCustomerError:
+        raise HTTPException(status_code=409, detail="Numero de documento/CUIT duplicado")
+    return customer
 
 
 @router.delete("/{customer_id}", status_code=204)
@@ -50,4 +59,9 @@ def delete_customer(
     customer: CustomerDep,
     db: SessionDep,
 ) -> None:
-    customer_crud.delete(db, customer)
+    try:
+        customer_crud.delete(db, customer)
+    except CustomerInUseError:
+        raise HTTPException(
+            status_code=409, detail="No se puede eliminar un cliente con modelos asociados"
+        )

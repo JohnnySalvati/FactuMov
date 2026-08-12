@@ -31,4 +31,6 @@ class Customer(Base, TimestampMixin):
     address: Mapped[str | None] = mapped_column(String(200))
     email: Mapped[str | None] = mapped_column(String(254))
 
-    invoice_templates: Mapped[list["InvoiceTemplate"]] = relationship(back_populates="customer")
+    invoice_templates: Mapped[list["InvoiceTemplate"]] = relationship(
+        back_populates="customer", passive_deletes="all"
+    )
