@@ -46,6 +46,21 @@ line-ending = "lf"
 python_version = "3.11"
 strict = true
 ignore_missing_imports = true
+# tests/ no tiene __init__.py, así que por defecto mypy nombraría sus módulos por
+# archivo ("conftest") y el override de abajo no engancharía. Con estas dos opciones
+# el nombre se deriva de la raíz: "src" primero para que el paquete siga siendo
+# factumov.*, y "." para que los tests sean tests.*.
+mypy_path = "src:."
+explicit_package_bases = true
+
+# Los tests quedan fuera de `strict`: anotar cada test con `-> None` y cada fixture
+# con su Generator es ruido, no seguridad. El resto de strict sigue activo acá —
+# solo se apagan las reglas que exigen anotaciones. src/ no cambia.
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_calls = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

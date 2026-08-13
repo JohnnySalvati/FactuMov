@@ -22,8 +22,8 @@ class CustomerCreate(BaseModel):
 
     @field_validator("email")
     @classmethod
-    def validate_email(cls, value: EmailStr) -> EmailStr:
-        return value.strip().lower()
+    def validate_email(cls, value: EmailStr | None) -> EmailStr | None:
+        return value.strip().lower() if value else None
 
 
 class CustomerRead(BaseModel):
@@ -49,5 +49,5 @@ class CustomerUpdate(BaseModel):
 
     @field_validator("email")
     @classmethod
-    def validate_email(cls, value: EmailStr) -> EmailStr:
-        return value.strip().lower()
+    def validate_email(cls, value: EmailStr | None) -> EmailStr | None:
+        return value.strip().lower() if value else None
