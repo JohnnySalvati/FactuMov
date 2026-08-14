@@ -27,6 +27,7 @@ class CustomerCreate(BaseModel):
 
 
 class CustomerRead(BaseModel):
+    id: uuid.UUID
     model_config = ConfigDict(from_attributes=True)
     name: str
     condicion_iva: CondicionIva
@@ -34,7 +35,6 @@ class CustomerRead(BaseModel):
     doc_number: str | None = None
     address: str | None = None
     email: str | None = None
-    id: uuid.UUID
     created_at: datetime
     updated_at: datetime
 

@@ -23,5 +23,5 @@ class FiscalIdentity(Base, TimestampMixin):
     start_date: Mapped[date | None] = mapped_column(Date)
 
     invoice_templates: Mapped[list["InvoiceTemplate"]] = relationship(
-        back_populates="fiscal_identity"
+        back_populates="fiscal_identity", passive_deletes="all"
     )

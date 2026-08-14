@@ -1,25 +1,18 @@
 from uuid import UUID
 
-from psycopg.errors import ForeignKeyViolation, UniqueViolation
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from factumov.crud.base import db_flush
 from factumov.enums import DocType
 from factumov.exceptions import CustomerInUseError, DuplicateCustomerError
 from factumov.models.customer import Customer
 from factumov.schemas.customer import CustomerCreate, CustomerUpdate
 
-
-def db_flush(db: Session) -> None:
-    try:
-        db.flush()
-    except IntegrityError as exc:
-        if isinstance(exc.orig, UniqueViolation):
-            raise DuplicateCustomerError(str(exc)) from exc
-        elif isinstance(exc.orig, ForeignKeyViolation):
-            raise CustomerInUseError(str(exc)) from exc
-        raise
+exception_map = {
+    "uq_customers_doc_type_doc_number": DuplicateCustomerError,
+    "invoice_templates_customer_id_fkey": CustomerInUseError,
+}
 
 
 def get_all(db: Session) -> list[Customer]:
@@ -34,14 +27,14 @@ def get_by_id(db: Session, customer_id: UUID) -> Customer | None:
 def create(db: Session, data: CustomerCreate) -> Customer:
     db_customer = Customer(**data.model_dump())
     db.add(db_customer)
-    db_flush(db)
+    db_flush(db, exception_map)
     return db_customer
 
 
 def update(db: Session, customer: Customer, data: CustomerUpdate) -> Customer:
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(customer, field, value)
-    db_flush(db)
+    db_flush(db, exception_map)
     return customer
 
 
@@ -64,10 +57,10 @@ def update_or_create(db: Session, data: CustomerCreate) -> Customer:
 
     for field, value in data.model_dump(exclude_none=True).items():
         setattr(db_customer, field, value)
-    db_flush(db)
+    db_flush(db, exception_map)
     return db_customer
 
 
 def delete(db: Session, customer: Customer) -> None:
     db.delete(customer)
-    db_flush(db)
+    db_flush(db, exception_map)
