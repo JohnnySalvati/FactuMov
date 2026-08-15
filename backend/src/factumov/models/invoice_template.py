@@ -1,7 +1,7 @@
 import uuid
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Enum, ForeignKey, Integer, String, Uuid
+from sqlalchemy import Enum, ForeignKey, Integer, String, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from factumov.models.base import Base, TimestampMixin
@@ -15,6 +15,11 @@ from factumov.enums import Concepto, VoucherType
 
 class InvoiceTemplate(Base, TimestampMixin):
     __tablename__ = "invoice_templates"
+    __table_args__ = (
+        UniqueConstraint(
+            "fiscal_identity_id", "name", name="uq_invoice_templates_fiscal_identity_id_name"
+        ),
+    )
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(200))
     fiscal_identity_id: Mapped[uuid.UUID] = mapped_column(

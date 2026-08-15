@@ -93,7 +93,6 @@ def test_update_tax(db):
         fiscal_identity_crud.update(db, identity, fiscal)
 
 
-
 def test_tax_schema():
     with pytest.raises(ValidationError):
         FiscalIdentityUpdate(tax_id="0182810674")

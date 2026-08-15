@@ -205,6 +205,26 @@ Emitir = tomar un `InvoiceTemplate`, permitir retoques, y crear una `Invoice` nu
 | `InvoiceTemplate` | Emisor + cliente + tipo de comprobante + punto de venta + concepto |
 | `InvoiceTemplateLine` | Descripción, cantidad, precio unitario, alícuota, posición |
 
+### Decisiones sobre `InvoiceTemplate` (2026-08-15)
+- **Nombre único por identidad fiscal** — `UniqueConstraint(fiscal_identity_id, name)`, no un
+  índice parcial como el de `Customer`: acá no hay ninguna fila exenta de la regla. Dos
+  razones sociales sí pueden tener cada una su "Alquiler mensual".
+- **Sin unique sobre `(template_id, position)`.** Es correcta en teoría y cara en la práctica:
+  reordenar las líneas dentro de un mismo flush deja transitoriamente dos líneas en la misma
+  posición. El invariante se mantiene en el CRUD, que asigna `position` con `enumerate()`.
+- **`position` no es campo de entrada.** El cliente manda un array ordenado; el orden del
+  array *es* la posición. Aceptarla del cliente obligaría a validar huecos, duplicados y
+  negativos sin ganar nada: el editor es una lista drag-and-drop que siempre conoce el orden
+  completo.
+- **`template_id` no va en los schemas de línea.** En create todavía no existe el padre, y en
+  update el padre viene del path: tenerlo en el body solo abre la puerta a que discrepen.
+- **Las líneas se reemplazan enteras en el update**, apoyándose en el `delete-orphan` de la
+  relación. Diferenciar altas/bajas/modificaciones por id es más código y no aporta nada a un
+  formulario que siempre manda el estado completo.
+- **`lines` con `min_length=1` en create y update, y `None` como "no tocar".** Un template sin
+  líneas no se puede emitir, así que `[]` es 422 y el CRUD solo distingue entre `None` y una
+  lista no vacía.
+
 ## Notas
 - Este archivo es un documento vivo — editalo a medida que el proyecto avance.
 - Convenciones de código, estructura de carpetas y decisiones técnicas que se vayan

@@ -24,3 +24,7 @@ class DuplicateCustomerError(DuplicateError):
 
 class CustomerInUseError(InUseError):
     pass
+
+
+class DuplicateInvoiceTemplateNameError(DuplicateError):
+    pass
