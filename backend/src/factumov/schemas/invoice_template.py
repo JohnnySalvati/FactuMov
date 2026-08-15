@@ -29,7 +29,7 @@ class InvoiceTemplateRead(BaseModel):
     customer_id: UUID
     voucher_type: VoucherType
     pos: int
-    concepto: Concepto 
+    concepto: Concepto
     created_at: datetime
     updated_at: datetime
 

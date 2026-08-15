@@ -28,3 +28,15 @@ class CustomerInUseError(InUseError):
 
 class DuplicateInvoiceTemplateNameError(DuplicateError):
     pass
+
+
+class UnknownReferenceError(Exception):
+    pass
+
+
+class UnknownCustomerError(UnknownReferenceError):
+    pass
+
+
+class UnknownFiscalIdentityError(UnknownReferenceError):
+    pass

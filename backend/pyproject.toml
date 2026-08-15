@@ -64,3 +64,7 @@ disallow_untyped_calls = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Sin esto, pytest solo agrega tests/ al sys.path y los helpers habría que importarlos como
+# `import factories`. mypy, en cambio, los nombra tests.* (ver el override de arriba). Con la
+# raíz en el path, `from tests import factories` funciona en los dos lados.
+pythonpath = ["."]

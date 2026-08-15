@@ -4,6 +4,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from factumov.models.base import Base
+from tests import factories
 
 
 class Settings(BaseSettings):
@@ -36,3 +37,13 @@ def db(engine, tables):
     session.close()
     transaction.rollback()
     connection.close()
+
+
+@pytest.fixture
+def fiscal_identity(db):
+    return factories.make_fiscal_identity(db)
+
+
+@pytest.fixture
+def customer(db):
+    return factories.make_customer(db)
