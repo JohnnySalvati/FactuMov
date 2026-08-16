@@ -17,9 +17,13 @@ class IvaAliquot(Enum):
     standard = (5, Decimal("21"))
     higher = (6, Decimal("27"))
 
-    def __init__(self, arca_code: int, rate: Decimal):
-        self.arca_code = arca_code
-        self.rate = rate
+    rate: Decimal
+
+    def __new__(cls, arca_code: int, rate: Decimal) -> "IvaAliquot":
+        member = object.__new__(cls)
+        member._value_ = arca_code
+        member.rate = rate
+        return member
 
 
 class Concepto(Enum):
