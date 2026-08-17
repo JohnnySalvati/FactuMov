@@ -9,9 +9,8 @@ from factumov.schemas.invoice_template_draft import (
 from factumov.services.invoice_parser import ParsedInvoice
 
 
-def invoice_draft(
+def build_draft(
     parsed_invoice: ParsedInvoice,
-    invoice_draft_name: str | None = None,
     customer_id: UUID | None = None,
     fiscal_identity_id: UUID | None = None,
 ) -> InvoiceTemplateDraft:
@@ -28,17 +27,11 @@ def invoice_draft(
             description=line.description,
             quantity=line.quantity,
             unit_price=line.unit_price,
-            iva_aliquot=next(
-                (aliquot for aliquot in IvaAliquot if aliquot.rate == line.iva_rate),
-                None,
-            ),
+            iva_aliquot=IvaAliquot.get_by_rate(line.iva_rate),
         )
         for line in parsed_invoice.lines
     ]
     invoice_template_draft = InvoiceTemplateDraft(
-        name=invoice_draft_name
-        if invoice_draft_name
-        else f"{parsed_invoice.issuer_name} - {parsed_invoice.customer_name}",
         fiscal_identity_id=fiscal_identity_id,
         issuer_tax_id=parsed_invoice.issuer_cuit,
         customer_id=customer_id,
