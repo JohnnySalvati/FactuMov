@@ -171,14 +171,14 @@ def test_delete_in_use(db):
 
 def test_update_no_number(db):
     customer = factories.make_customer(db, doc_type=DocType.FINAL, doc_number=None)
+    data = CustomerUpdate(doc_type=DocType.CUIT)
     with pytest.raises(DocNumberCheckError):
-        customer_crud.update(db, customer, CustomerUpdate(doc_type=DocType.CUIT))
+        customer_crud.update(db, customer, data)
 
 
-def test_doc_number_None(db):
-    customer = factories.make_customer(db)
+def test_doc_number_none():
     with pytest.raises(ValidationError):
-        customer_crud.update(db, customer, CustomerUpdate(doc_type=DocType.CUIT, doc_number=None))
+        CustomerUpdate(doc_type=DocType.CUIT, doc_number=None)
 
 
 def test_doc_number_alone(db):
@@ -188,7 +188,7 @@ def test_doc_number_alone(db):
     assert customer.doc_number is not None
 
 
-def test_final_doc_number_None(db):
+def test_final_doc_number_none(db):
     customer = factories.make_customer(db)
     customer_crud.update(db, customer, CustomerUpdate(doc_type=DocType.FINAL, doc_number=None))
     assert customer.doc_type == DocType.FINAL

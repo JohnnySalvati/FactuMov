@@ -25,6 +25,13 @@ class IvaAliquot(Enum):
         member.rate = rate
         return member
 
+    @classmethod
+    def get_by_rate(cls, rate: Decimal) -> "IvaAliquot | None":
+        return next(
+            (aliquot for aliquot in cls if rate == aliquot.rate),
+            None,
+        )
+
 
 class Concepto(Enum):
     products = "products"
