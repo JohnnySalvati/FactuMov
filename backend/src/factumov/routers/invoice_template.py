@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from factumov.crud import invoice_template as invoice_template_crud
 from factumov.database import get_db
 from factumov.exceptions import (
+    DuplicateError,
     DuplicateInvoiceTemplateNameError,
     UnknownCustomerError,
     UnknownFiscalIdentityError,
@@ -56,6 +57,9 @@ def create_invoice_template(data: InvoiceTemplateCreate, db: SessionDep) -> Invo
         raise HTTPException(status_code=422, detail="Referencia desconocida")
     except DuplicateInvoiceTemplateNameError:
         raise HTTPException(status_code=409, detail="Nombre duplicado")
+    except DuplicateError:
+        raise HTTPException(status_code=409, detail="Duplicado")
+
     return invoice_template
 
 
@@ -73,6 +77,8 @@ def update_invoice_template(
         raise HTTPException(status_code=422, detail="Referencia desconocida")
     except DuplicateInvoiceTemplateNameError:
         raise HTTPException(status_code=409, detail="Nombre duplicado")
+    except DuplicateError:
+        raise HTTPException(status_code=409, detail="Duplicado")
     return invoice_template
 
 
