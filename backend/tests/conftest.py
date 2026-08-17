@@ -1,8 +1,11 @@
 import pytest
+from fastapi.testclient import TestClient
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
+from factumov.database import get_db
+from factumov.main import app
 from factumov.models.base import Base
 from tests import factories
 
@@ -37,6 +40,26 @@ def db(engine, tables):
     session.close()
     transaction.rollback()
     connection.close()
+
+
+@pytest.fixture
+def client(db):
+    """A TestClient whose requests run inside the test's own transaction.
+
+    Overriding `get_db` is what ties the two together: without it the app would open its
+    own session against the real database, so nothing the request wrote would be visible
+    to `db` and nothing `db` arranged would be visible to the request.
+
+    The override deliberately does not commit, unlike the real `get_db`. Rolling the whole
+    thing back is the `db` fixture's job.
+    """
+
+    def get_test_db():
+        yield db
+
+    app.dependency_overrides[get_db] = get_test_db
+    yield TestClient(app)
+    app.dependency_overrides.clear()
 
 
 @pytest.fixture

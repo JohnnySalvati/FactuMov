@@ -1,11 +1,14 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
+from factumov.crud import customer as customer_crud
+from factumov.crud import fiscal_identity as fiscal_identity_crud
 from factumov.crud import invoice_template as invoice_template_crud
 from factumov.database import get_db
+from factumov.enums import DocType
 from factumov.exceptions import (
     DuplicateError,
     DuplicateInvoiceTemplateNameError,
@@ -19,6 +22,9 @@ from factumov.schemas.invoice_template import (
     InvoiceTemplateRead,
     InvoiceTemplateUpdate,
 )
+from factumov.schemas.invoice_template_draft import InvoiceTemplateDraft
+from factumov.services.invoice_draft import build_draft
+from factumov.services.invoice_parser import parse_invoice_pdf
 
 router = APIRouter(prefix="/invoice-templates", tags=["invoice_templates"])
 
@@ -40,11 +46,6 @@ def list_invoice_templates(db: SessionDep) -> list[InvoiceTemplate]:
     return invoice_template_crud.get_all(db)
 
 
-@router.get("/{invoice_template_id}", response_model=InvoiceTemplateRead)
-def get_invoice_template(invoice_template: InvoiceTemplateDep) -> InvoiceTemplate:
-    return invoice_template
-
-
 @router.post("", response_model=InvoiceTemplateRead, status_code=201)
 def create_invoice_template(data: InvoiceTemplateCreate, db: SessionDep) -> InvoiceTemplate:
     try:
@@ -59,7 +60,35 @@ def create_invoice_template(data: InvoiceTemplateCreate, db: SessionDep) -> Invo
         raise HTTPException(status_code=409, detail="Nombre duplicado")
     except DuplicateError:
         raise HTTPException(status_code=409, detail="Duplicado")
+    return invoice_template
 
+
+@router.post("/import", response_model=InvoiceTemplateDraft)
+def import_invoice_template(
+    file: UploadFile,
+    db: SessionDep,
+) -> InvoiceTemplateDraft:
+    customer = None
+    parsed_invoice = parse_invoice_pdf(file.file.read())
+    if parsed_invoice.customer_doc_type and parsed_invoice.customer_doc_number:
+        if parsed_invoice.customer_doc_type is not DocType.FINAL:
+            customer = customer_crud.get_by_doc(
+                db, parsed_invoice.customer_doc_type, parsed_invoice.customer_doc_number
+            )
+    fiscal_identity = (
+        fiscal_identity_crud.get_by_tax_id(db, parsed_invoice.issuer_cuit)
+        if parsed_invoice.issuer_cuit
+        else None
+    )
+    return build_draft(
+        parsed_invoice=parsed_invoice,
+        customer_id=customer.id if customer else None,
+        fiscal_identity_id=fiscal_identity.id if fiscal_identity else None,
+    )
+
+
+@router.get("/{invoice_template_id}", response_model=InvoiceTemplateRead)
+def get_invoice_template(invoice_template: InvoiceTemplateDep) -> InvoiceTemplate:
     return invoice_template
 
 
