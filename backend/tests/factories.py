@@ -38,14 +38,14 @@ def make_fiscal_identity(db, name=None, tax_id=None, condicion_iva=CondicionIva.
 def make_customer(
     db,
     name=None,
-    doc_number=None,
+    doc_number: str | None = "",
     doc_type=DocType.CUIT,
     condicion_iva=CondicionIva.INSCRIPTO,
 ):
     n = next(_sequence)
     customer = Customer(
         name=f"Customer {n}" if name is None else name,
-        doc_number=f"27{n:09d}" if doc_number is None else doc_number,
+        doc_number=f"27{n:09d}" if doc_number == "" else doc_number,
         doc_type=doc_type,
         condicion_iva=condicion_iva,
     )

@@ -1,11 +1,13 @@
 import pytest
+from pydantic import ValidationError
 
 from factumov.crud import customer as customer_crud
 from factumov.enums import Concepto, CondicionIva, DocType, VoucherType
-from factumov.exceptions import CustomerInUseError, DuplicateCustomerError
+from factumov.exceptions import CustomerInUseError, DocNumberCheckError, DuplicateCustomerError
 from factumov.models.fiscal_identity import FiscalIdentity
 from factumov.models.invoice_template import InvoiceTemplate
-from factumov.schemas.customer import CustomerCreate
+from factumov.schemas.customer import CustomerCreate, CustomerUpdate
+from tests import factories
 
 
 def customer_create(
@@ -165,3 +167,29 @@ def test_delete_in_use(db):
 
     with pytest.raises(CustomerInUseError):
         customer_crud.delete(db, customer)
+
+
+def test_update_no_number(db):
+    customer = factories.make_customer(db, doc_type=DocType.FINAL, doc_number=None)
+    with pytest.raises(DocNumberCheckError):
+        customer_crud.update(db, customer, CustomerUpdate(doc_type=DocType.CUIT))
+
+
+def test_doc_number_None(db):
+    customer = factories.make_customer(db)
+    with pytest.raises(ValidationError):
+        customer_crud.update(db, customer, CustomerUpdate(doc_type=DocType.CUIT, doc_number=None))
+
+
+def test_doc_number_alone(db):
+    customer = factories.make_customer(db)
+    customer_crud.update(db, customer, CustomerUpdate(doc_type=DocType.CUIT))
+    assert customer.doc_type == DocType.CUIT
+    assert customer.doc_number is not None
+
+
+def test_final_doc_number_None(db):
+    customer = factories.make_customer(db)
+    customer_crud.update(db, customer, CustomerUpdate(doc_type=DocType.FINAL, doc_number=None))
+    assert customer.doc_type == DocType.FINAL
+    assert customer.doc_number is None
