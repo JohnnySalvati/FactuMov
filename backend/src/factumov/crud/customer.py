@@ -24,6 +24,18 @@ def get_by_id(db: Session, customer_id: UUID) -> Customer | None:
     return db.get(Customer, customer_id)
 
 
+def get_by_doc(db: Session, doc_type: DocType, doc_number: str | None) -> Customer | None:
+    if doc_number is None:
+        return None
+    return (
+        db.execute(
+            select(Customer).where(Customer.doc_type == doc_type, Customer.doc_number == doc_number)
+        )
+        .scalars()
+        .first()
+    )
+
+
 def create(db: Session, data: CustomerCreate) -> Customer:
     db_customer = Customer(**data.model_dump())
     db.add(db_customer)
@@ -42,15 +54,7 @@ def update_or_create(db: Session, data: CustomerCreate) -> Customer:
     if data.doc_type == DocType.FINAL:
         return create(db, data)
 
-    db_customer = (
-        db.execute(
-            select(Customer).where(
-                Customer.doc_type == data.doc_type, Customer.doc_number == data.doc_number
-            )
-        )
-        .scalars()
-        .first()
-    )
+    db_customer = get_by_doc(db, data.doc_type, data.doc_number)
 
     if not db_customer:
         return create(db, data)
