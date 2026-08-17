@@ -21,6 +21,8 @@ import re
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 
+from factumov.enums import CondicionIva, DocType, VoucherType
+
 
 @dataclass
 class ParsedInvoiceLine:
@@ -32,20 +34,20 @@ class ParsedInvoiceLine:
 
 @dataclass
 class ParsedInvoice:
-    voucher_type: str | None = None
+    voucher_type: VoucherType | None = None
     pos: int | None = None
     number: int | None = None
     date: datetime.date | None = None
     issuer_cuit: str | None = None
     issuer_name: str | None = None
-    issuer_condicion_iva: str | None = None
+    issuer_condicion_iva: CondicionIva | None = None
     issuer_address: str | None = None
     issuer_iibb: str | None = None
     issuer_start_date: datetime.date | None = None
-    customer_doc_type: str | None = None
+    customer_doc_type: DocType | None = None
     customer_doc_number: str | None = None
     customer_name: str | None = None
-    customer_condicion_iva: str | None = None
+    customer_condicion_iva: CondicionIva | None = None
     customer_address: str | None = None
     from_date: datetime.date | None = None
     to_date: datetime.date | None = None
@@ -250,7 +252,8 @@ def _extract_issuer(result: ParsedInvoice, lines: list[str], zone: str) -> None:
 
     issuer_condicion = _ISSUER_CONDICION.search(zone)
     if issuer_condicion:
-        result.issuer_condicion_iva = _condicion_iva(issuer_condicion.group(1))
+        condicion_iva = _condicion_iva(issuer_condicion.group(1))
+        result.issuer_condicion_iva = CondicionIva[condicion_iva] if condicion_iva else None
 
     issuer_iibb = _ISSUER_IIBB.search(zone)
     if issuer_iibb:
@@ -275,14 +278,15 @@ def _extract_customer(result: ParsedInvoice, lines: list[str]) -> None:
     found = _find_line(lines, _CUSTOMER)
     if found:
         _, match = found
-        result.customer_doc_type = match.group("doc_type")
+        result.customer_doc_type = DocType[match.group("doc_type")]
         result.customer_doc_number = match.group("doc_number")
         result.customer_name = match.group("name").strip() or None
 
     found = _find_line(lines, _CUSTOMER_CONDICION)
     if found:
         index, match = found
-        result.customer_condicion_iva = _condicion_iva(match.group(1))
+        condicion_iva = _condicion_iva(match.group(1))
+        result.customer_condicion_iva = CondicionIva[condicion_iva] if condicion_iva else None
         address = match.group(2).strip()
         tail = _wrapped_tail(lines, index)
         result.customer_address = f"{address} {tail}".strip() if tail else address
@@ -307,7 +311,8 @@ def parse_invoice_pdf(file_bytes: bytes) -> ParsedInvoice:
 
     cod = _COD.search(text)
     if cod:
-        result.voucher_type = _ARCA_VOUCHER_TYPE.get(int(cod.group(1)))
+        arca_voucher_type = _ARCA_VOUCHER_TYPE.get(int(cod.group(1)))
+        result.voucher_type = VoucherType(arca_voucher_type) if arca_voucher_type else None
 
     pos_number = _POS_NUMBER.search(text)
     if pos_number:
@@ -336,7 +341,7 @@ def parse_invoice_pdf(file_bytes: bytes) -> ParsedInvoice:
     _extract_issuer(result, lines, issuer_zone)
     _extract_customer(result, lines)
 
-    letter = (result.voucher_type or "")[-1:]
+    letter = result.voucher_type.value[-1:] if result.voucher_type else ""
     result.lines = _extract_items(lines, _IVA_BY_LETTER.get(letter, Decimal("21")))
     result.needs_manual_items = not result.lines
 

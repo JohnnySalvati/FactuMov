@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from factumov.enums import DocType, VoucherType
 from factumov.services.invoice_parser import parse_invoice_pdf
 
 
@@ -12,10 +13,10 @@ from factumov.services.invoice_parser import parse_invoice_pdf
         (
             "20206205297_011_00001_00000205.pdf",
             {
-                "voucher_type": "C",
+                "voucher_type": VoucherType.C,
                 "pos": int(1),
                 "number": int(205),
-                "customer_doc_type": "CUIT",
+                "customer_doc_type": DocType.CUIT,
                 "customer_doc_number": "30714597066",
                 "number_of_lines": 1,
                 "customer_address": "Ibera 4947 - Capital Federal, Ciudad de Buenos Aires",
@@ -25,10 +26,10 @@ from factumov.services.invoice_parser import parse_invoice_pdf
         (
             "20206205297_011_00001_00000207.pdf",
             {
-                "voucher_type": "C",
+                "voucher_type": VoucherType.C,
                 "pos": int(1),
                 "number": int(207),
-                "customer_doc_type": "CUIT",
+                "customer_doc_type": DocType.CUIT,
                 "customer_doc_number": "30714455113",
                 "number_of_lines": 1,
                 "customer_address": "Rivadavia M. Cdro. 1350 - "
@@ -39,10 +40,10 @@ from factumov.services.invoice_parser import parse_invoice_pdf
         (
             "30714597066_006_00010_00000055.pdf",
             {
-                "voucher_type": "B",
+                "voucher_type": VoucherType.B,
                 "pos": int(10),
                 "number": int(55),
-                "customer_doc_type": "CUIT",
+                "customer_doc_type": DocType.CUIT,
                 "customer_doc_number": "30535621159",
                 "number_of_lines": 2,
                 "customer_address": "Cazadores De Coquimbo 2841 Piso:2 - Munro, Buenos Aires",
