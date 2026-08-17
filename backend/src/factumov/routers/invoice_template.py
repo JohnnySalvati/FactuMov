@@ -26,6 +26,8 @@ from factumov.schemas.invoice_template_draft import InvoiceTemplateDraft
 from factumov.services.invoice_draft import build_draft
 from factumov.services.invoice_parser import parse_invoice_pdf
 
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+
 router = APIRouter(prefix="/invoice-templates", tags=["invoice_templates"])
 
 SessionDep = Annotated[Session, Depends(get_db)]
@@ -68,9 +70,18 @@ def import_invoice_template(
     file: UploadFile,
     db: SessionDep,
 ) -> InvoiceTemplateDraft:
+    file_bytes = file.file.read(MAX_UPLOAD_BYTES + 1)
+    if len(file_bytes) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="El archivo excede el límite de 10 MB")
+    if file_bytes[:5] != b"%PDF-":
+        raise HTTPException(status_code=415, detail="El formato no coincide con PDF")
+    parsed_invoice = parse_invoice_pdf(file_bytes)
+
     customer = None
-    parsed_invoice = parse_invoice_pdf(file.file.read())
-    if parsed_invoice.customer_doc_type and parsed_invoice.customer_doc_number:
+    if (
+        parsed_invoice.customer_doc_type is not None
+        and parsed_invoice.customer_doc_number is not None
+    ):
         if parsed_invoice.customer_doc_type is not DocType.FINAL:
             customer = customer_crud.get_by_doc(
                 db, parsed_invoice.customer_doc_type, parsed_invoice.customer_doc_number

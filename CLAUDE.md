@@ -113,8 +113,10 @@ FactuMov/
 │   │   ├── crud/
 │   │   ├── routers/     # solo JSON
 │   │   └── services/
-│   │       └── invoice_parser.py
+│   │       ├── invoice_parser.py   # PDF → ParsedInvoice
+│   │       └── invoice_draft.py    # ParsedInvoice → InvoiceTemplateDraft
 │   └── tests/
+│       └── samples/                # 9 facturas PDF reales
 └── frontend/
 ```
 
@@ -133,8 +135,8 @@ Ruta real: `E:\Capacitacion\InSoft\Balance360\Balance360\src\balance360\services
 (parsing), el segundo *genera* el QR de una factura propia. Los nombres chocan por accidente.
 
 ## Parser (`services/invoice_parser.py`) — estado al 2026-08-09
-Reescrito a partir del de Balance360 y verificado contra las 9 muestras de `samples/`.
-Extrae todo: emisor, receptor, período, CAE e items.
+Reescrito a partir del de Balance360 y verificado contra las 9 muestras de
+`backend/tests/samples/`. Extrae todo: emisor, receptor, período, CAE e items.
 
 - **Un solo layout: ARCA "Comprobantes en línea".** Todas las facturas de Miguel salen de
   ahí. Se borraron los otros nueve layouts de Balance360: un regex que no se puede verificar
@@ -224,6 +226,78 @@ Emitir = tomar un `InvoiceTemplate`, permitir retoques, y crear una `Invoice` nu
 - **`lines` con `min_length=1` en create y update, y `None` como "no tocar".** Un template sin
   líneas no se puede emitir, así que `[]` es 422 y el CRUD solo distingue entre `None` y una
   lista no vacía.
+
+## Endpoint de importación (2026-08-17)
+`POST /invoice-templates/import` recibe un PDF y devuelve un `InvoiceTemplateDraft`. Cierra
+la funcionalidad #1 del lado del backend: parser + draft + HTTP.
+
+- **Responde 200, no 201.** No persiste nada. El draft es una propuesta que el usuario
+  revisa en el editor y recién después confirma con `POST /invoice-templates`. Acá POST
+  significa "procesá esto", no "creá esto".
+- **Lee la base pero no escribe.** Resuelve el emisor por CUIT (`get_by_tax_id`) y el
+  receptor por documento (`get_by_doc`), y devuelve esos ids dentro del draft. No llama a
+  `update_or_create`: dar de alta un cliente que el usuario todavía no confirmó convierte
+  una vista previa en un efecto secundario, y reimportar el mismo PDF le forkearía la
+  historia. El test lo fija contando filas de `customers` después del request.
+- **Los datos parseados del receptor viajan igual cuando la fila ya existe**, al lado del
+  `customer_id`. El editor los muestra contra lo guardado para que el usuario vea si cambió
+  el domicilio o la razón social.
+- **El draft sale sin nombre.** El nombre del template lo elige el usuario en el editor; el
+  PDF no lo trae. Por eso `build_draft` no recibe ningún `name`.
+- **La ruta literal va declarada antes que `/{invoice_template_id}`.** FastAPI resuelve en
+  orden de declaración y `GET /{invoice_template_id}` matchea el path
+  `/invoice-templates/import`: con la literal abajo, el POST responde 405.
+- **Endpoint sync (`def`), no `async def`.** `SessionDep` es una `Session` sincrónica y
+  pdfplumber es CPU-intensivo; en un `def` FastAPI lo corre en el threadpool y el event loop
+  queda libre. Consecuencia: los bytes se leen con `file.file.read(...)`, no con `await`.
+- **Un PDF ilegible no es un error.** El parser devuelve todo en `None` en vez de tirar
+  excepción, así que el endpoint responde 200 con un draft vacío y la UI ofrece carga
+  manual. `needs_manual_items` no se propaga al draft porque es exactamente `lines == []`.
+- **413 y 415 se resuelven antes de parsear**, el tamaño primero porque es el chequeo que
+  acota el trabajo, el tipo después aprovechando los bytes ya leídos. El límite se aplica
+  leyendo un byte de más (`MAX_UPLOAD_BYTES + 1`): si vuelven más bytes que el límite,
+  sobra. Una sola llamada, una sola comparación, y sin el `int | None` de `UploadFile.size`
+  que en mypy strict obliga a un guard aparte. El truco se apoya en que un `read(n)` corto
+  solo puede significar EOF: cierto para el spool de Starlette (`BytesIO` antes del
+  rollover, `BufferedRandom` después), falso en un stream sin buffer.
+- **El tipo se decide por los magic bytes, no por `content_type`.** El header lo pone el
+  archivo; el `Content-Type` lo declara el cliente y miente en las dos direcciones — httpx
+  manda `application/octet-stream` cuando no se especifica, así que chequearlo rechazaría
+  PDFs legítimos. Se compara contra `%PDF-` con guion: la versión va siempre pegada al
+  marcador, y sin el guion cualquier cosa que empiece con `%PDF` pasaría el filtro.
+- **415 y "PDF ilegible" no son lo mismo.** Un JPEG o un .docx no son de este tipo de medio
+  y se rechazan con 415. Un PDF escaneado o corrupto sí lo es, y cae en el 200 con draft
+  vacío del punto anterior. Rechazar y ofrecer carga manual son respuestas a situaciones
+  distintas y no deberían colapsar en una sola.
+- **`MAX_UPLOAD_BYTES` es una constante del módulo, leída adentro de la función.** No va en
+  el `Settings` de `database.py`, que es sobre la base. Que sea un global resuelto en tiempo
+  de llamada es además lo que deja parchearlo desde un test: como valor por defecto de un
+  parámetro, o importado por nombre en otro módulo, el test parchearía una copia que nadie
+  mira.
+
+**Pendiente:** el guard acota lo que el proceso copia y parsea, no lo que el server ingiere.
+Para cuando la función corre, Starlette ya volcó el body entero a un `SpooledTemporaryFile`
+—memoria hasta 1 MB, disco después—. El techo real va en el borde: `client_max_body_size`
+de nginx, o un middleware ASGI que cuente los chunks de `http.request` y corte en el medio.
+El `max_part_size` de Starlette no alcanza: solo mide las partes que no son archivo.
+
+## Tests
+- **Los tests de CRUD no pasan por HTTP; los de router sí**, con el fixture `client` de
+  `conftest.py`. Ese fixture depende de `db` y sobreescribe `get_db` con
+  `app.dependency_overrides`: sin eso el request abriría su propia sesión contra la base
+  real y no vería nada de lo que el test armó. El override no commitea a propósito —
+  revertir es trabajo del fixture `db`. La limpieza final no es opcional: `app` es un
+  singleton de módulo y un override olvidado se filtra a todos los tests siguientes.
+- **Ninguna de las 9 muestras es a consumidor final**, así que la rama `DocType.FINAL` del
+  endpoint de importación no se puede ejercitar end-to-end. Si hace falta cubrirla, sacar la
+  resolución de ids del router a una función propia y testearla con un `ParsedInvoice`
+  armado a mano.
+- **`Decimal` viaja como string en JSON** (`"1.00"`, no `1.0`): Pydantic lo serializa así
+  para no perder la escala. Los asserts sobre importes comparan strings.
+- **El cliente de test es `httpx2`.** Starlette 1.5 importa `httpx2` primero y solo cae a
+  `httpx` con un `StarletteDeprecationWarning`; la rama de fallback ya tiene un
+  `RuntimeError` para cuando no esté ninguno. `httpx` igual sigue instalado porque
+  `fastapi[standard]` lo requiere: es esperable, no un resto sin limpiar.
 
 ## Notas
 - Este archivo es un documento vivo — editalo a medida que el proyecto avance.
