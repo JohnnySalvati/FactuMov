@@ -51,3 +51,12 @@ class CustomerUpdate(BaseModel):
     @classmethod
     def validate_email(cls, value: EmailStr | None) -> EmailStr | None:
         return value.strip().lower() if value else None
+
+    @model_validator(mode="after")
+    def check_doc_number(self) -> "CustomerUpdate":
+        doc_type_given = "doc_type" in self.model_fields_set
+        doc_number_given = "doc_number" in self.model_fields_set
+        if doc_type_given and doc_number_given:
+            if self.doc_type != DocType.FINAL and self.doc_number is None:
+                raise ValueError("Se requiere numero de documento/CUIT")
+        return self

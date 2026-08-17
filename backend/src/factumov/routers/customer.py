@@ -8,6 +8,7 @@ from factumov.crud import customer as customer_crud
 from factumov.database import get_db
 from factumov.exceptions import (
     CustomerInUseError,
+    DocNumberCheckError,
     DuplicateCustomerError,
     DuplicateError,
     InUseError,
@@ -49,6 +50,8 @@ def create_customer(data: CustomerCreate, db: SessionDep) -> Customer:
         raise HTTPException(status_code=409, detail="Numero de documento/CUIT duplicado")
     except DuplicateError:
         raise HTTPException(status_code=409, detail="Duplicado")
+    except DocNumberCheckError:
+        raise HTTPException(status_code=400, detail="Numero CUIT requerido")
     return customer
 
 
@@ -60,6 +63,8 @@ def update_customer(data: CustomerUpdate, customer: CustomerDep, db: SessionDep)
         raise HTTPException(status_code=409, detail="Numero de documento/CUIT duplicado")
     except DuplicateError:
         raise HTTPException(status_code=409, detail="Duplicado")
+    except DocNumberCheckError:
+        raise HTTPException(status_code=400, detail="Numero CUIT requerido")
     return customer
 
 

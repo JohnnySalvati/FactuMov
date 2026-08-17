@@ -1,7 +1,7 @@
 import uuid
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Enum, Index, String, Uuid, text
+from sqlalchemy import CheckConstraint, Enum, Index, String, Uuid, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from factumov.enums import CondicionIva, DocType
@@ -20,6 +20,10 @@ class Customer(Base, TimestampMixin):
             "doc_number",
             unique=True,
             postgresql_where=text("doc_type <> 'FINAL'"),
+        ),
+        CheckConstraint(
+            "doc_type = 'FINAL' OR doc_number IS NOT NULL",
+            name="ck_customers_doc_number_required",
         ),
     )
 

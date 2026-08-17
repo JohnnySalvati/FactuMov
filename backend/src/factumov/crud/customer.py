@@ -5,11 +5,12 @@ from sqlalchemy.orm import Session
 
 from factumov.crud.base import db_flush
 from factumov.enums import DocType
-from factumov.exceptions import CustomerInUseError, DuplicateCustomerError
+from factumov.exceptions import CustomerInUseError, DocNumberCheckError, DuplicateCustomerError
 from factumov.models.customer import Customer
 from factumov.schemas.customer import CustomerCreate, CustomerUpdate
 
 exception_map = {
+    "ck_customers_doc_number_required": DocNumberCheckError,
     "uq_customers_doc_type_doc_number": DuplicateCustomerError,
     "invoice_templates_customer_id_fkey": CustomerInUseError,
 }
