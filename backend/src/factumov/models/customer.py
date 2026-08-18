@@ -1,7 +1,7 @@
 import uuid
 from typing import TYPE_CHECKING
 
-from sqlalchemy import CheckConstraint, Enum, Index, String, Uuid, text
+from sqlalchemy import Enum, String, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from factumov.enums import CondicionIva, DocType
@@ -14,16 +14,10 @@ if TYPE_CHECKING:
 class Customer(Base, TimestampMixin):
     __tablename__ = "customers"
     __table_args__ = (
-        Index(
-            "uq_customers_doc_type_doc_number",
+        UniqueConstraint(
             "doc_type",
             "doc_number",
-            unique=True,
-            postgresql_where=text("doc_type <> 'FINAL'"),
-        ),
-        CheckConstraint(
-            "doc_type = 'FINAL' OR doc_number IS NOT NULL",
-            name="ck_customers_doc_number_required",
+            name="uq_customers_doc_type_doc_number",
         ),
     )
 
@@ -31,7 +25,7 @@ class Customer(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(150))
     condicion_iva: Mapped[CondicionIva] = mapped_column(Enum(CondicionIva))
     doc_type: Mapped[DocType] = mapped_column(Enum(DocType))
-    doc_number: Mapped[str | None] = mapped_column(String(11))
+    doc_number: Mapped[str] = mapped_column(String(11))
     address: Mapped[str | None] = mapped_column(String(200))
     email: Mapped[str | None] = mapped_column(String(254))
 

@@ -10,15 +10,9 @@ class CustomerCreate(BaseModel):
     name: str = Field(max_length=150)
     condicion_iva: CondicionIva
     doc_type: DocType
-    doc_number: str | None = Field(default=None, max_length=11)
+    doc_number: str = Field(max_length=11)
     address: str | None = Field(default=None, max_length=200)
     email: EmailStr | None = Field(default=None, max_length=254)
-
-    @model_validator(mode="after")
-    def check_doc_number(self) -> "CustomerCreate":
-        if not self.doc_number and not self.doc_type == DocType.FINAL:
-            raise ValueError("Se requiere numero de documento/CUIT")
-        return self
 
     @field_validator("email")
     @classmethod
@@ -32,7 +26,7 @@ class CustomerRead(BaseModel):
     name: str
     condicion_iva: CondicionIva
     doc_type: DocType
-    doc_number: str | None = None
+    doc_number: str
     address: str | None = None
     email: str | None = None
     created_at: datetime
@@ -54,9 +48,7 @@ class CustomerUpdate(BaseModel):
 
     @model_validator(mode="after")
     def check_doc_number(self) -> "CustomerUpdate":
-        doc_type_given = "doc_type" in self.model_fields_set
         doc_number_given = "doc_number" in self.model_fields_set
-        if doc_type_given and doc_number_given:
-            if self.doc_type != DocType.FINAL and self.doc_number is None:
-                raise ValueError("Se requiere numero de documento/CUIT")
+        if doc_number_given and self.doc_number is None:
+            raise ValueError("Se requiere numero de documento/CUIT")
         return self

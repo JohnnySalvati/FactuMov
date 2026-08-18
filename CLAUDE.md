@@ -190,6 +190,34 @@ decisión al empezar la funcionalidad #4.
   receptor es justamente el dato que FactuMov necesita, porque el emisor siempre es el usuario.
 - FactuMov es **multi-entidad**, como Balance360: varias razones sociales / CUIT emisores.
 
+### FactuMov no admite clientes sin documento (2026-08-18)
+El alcance es la emisión repetida a **clientes habituales**, y un comprador anónimo no tiene
+modelo guardado que reutilizar — la misma lógica por la que un `InvoiceTemplate` no guarda
+`date` ni `number`. Se borró `DocType.FINAL` (código 99 de ARCA, "sin identificar") y
+`doc_number` pasó a ser obligatorio.
+
+- **No impide facturar a un consumidor final.** Eso es `CondicionIva.FINAL`, otro enum en
+  otra columna, y queda intacto: la muestra B `30714597066_006_00010_00000055.pdf` tiene un
+  receptor con CUIT y `condicion_iva = FINAL`. Lo único que se pierde es guardar un cliente
+  que no entregó **ningún** documento.
+- **Elimina una clase de bug entera, no solo código.** `doc_number` podía ser NULL
+  únicamente por culpa de FINAL, y un cliente con documento NULL era invisible para
+  `get_by_doc` para siempre: cada importación del mismo PDF le creaba un duplicado. Es el
+  bug que motivó `ck_customers_doc_number_required` (migración `070c8508060a`). Con la
+  columna NOT NULL, `get_by_doc` es total y la causa desaparece en vez de parchearse.
+- **Alinea el enum con el parser.** `DocType` queda en `{CUIT, CUIL, DNI}`, que es
+  exactamente lo que `_CUSTOMER` sabe leer del PDF: la alternación del regex es
+  `CUIT|CUIL|DNI`. Antes el router tenía una rama `is not DocType.FINAL` inalcanzable,
+  porque aplicaba vocabulario del emisor a un valor que sólo el parser podía traer.
+- **Lo que se fue con ella:** el índice parcial (pasa a `UniqueConstraint`, ya no hay filas
+  exentas), el check constraint, el validador de `CustomerCreate`, el caso especial de
+  `update_or_create` y la rama del router.
+- **Revertirla es posible pero no gratis:** la migración `cf79c4f7610c` tiene `downgrade`,
+  pero restituye la forma, no los datos. Los clientes que eran FINAL recibieron un documento
+  real para poder migrar, y nada los distingue después de los que siempre lo tuvieron. La
+  migración **se niega a correr** si encuentra alguna fila FINAL o con `doc_number` NULL, en
+  vez de destruirla.
+
 ## Modelo de datos — principio rector
 Un `InvoiceTemplate` es una `Invoice` **menos todo lo que cambia en cada emisión**. Los
 campos de `Invoice` de Balance360 se parten en tres grupos:
@@ -311,10 +339,6 @@ El `max_part_size` de Starlette no alcanza: solo mide las partes que no son arch
   real y no vería nada de lo que el test armó. El override no commitea a propósito —
   revertir es trabajo del fixture `db`. La limpieza final no es opcional: `app` es un
   singleton de módulo y un override olvidado se filtra a todos los tests siguientes.
-- **Ninguna de las 10 muestras es a consumidor final**, así que la rama `DocType.FINAL` del
-  endpoint de importación no se puede ejercitar end-to-end. Si hace falta cubrirla, sacar la
-  resolución de ids del router a una función propia y testearla con un `ParsedInvoice`
-  armado a mano.
 - **`Decimal` viaja como string en JSON** (`"1.00"`, no `1.0`): Pydantic lo serializa así
   para no perder la escala. Los asserts sobre importes comparan strings.
 - **El cliente de test es `httpx2`.** Starlette 1.5 importa `httpx2` primero y solo cae a

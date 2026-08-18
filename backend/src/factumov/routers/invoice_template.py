@@ -8,7 +8,6 @@ from factumov.crud import customer as customer_crud
 from factumov.crud import fiscal_identity as fiscal_identity_crud
 from factumov.crud import invoice_template as invoice_template_crud
 from factumov.database import get_db
-from factumov.enums import DocType
 from factumov.exceptions import (
     DuplicateError,
     DuplicateInvoiceTemplateNameError,
@@ -82,10 +81,9 @@ def import_invoice_template(
         parsed_invoice.customer_doc_type is not None
         and parsed_invoice.customer_doc_number is not None
     ):
-        if parsed_invoice.customer_doc_type is not DocType.FINAL:
-            customer = customer_crud.get_by_doc(
-                db, parsed_invoice.customer_doc_type, parsed_invoice.customer_doc_number
-            )
+        customer = customer_crud.get_by_doc(
+            db, parsed_invoice.customer_doc_type, parsed_invoice.customer_doc_number
+        )
     fiscal_identity = (
         fiscal_identity_crud.get_by_tax_id(db, parsed_invoice.issuer_cuit)
         if parsed_invoice.issuer_cuit

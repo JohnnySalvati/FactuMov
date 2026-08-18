@@ -43,7 +43,6 @@ class DocType(Enum):
     CUIT = 80
     CUIL = 86
     DNI = 96
-    FINAL = 99
 
 
 class CondicionIva(Enum):

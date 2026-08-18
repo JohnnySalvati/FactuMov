@@ -41,6 +41,3 @@ class UnknownCustomerError(UnknownReferenceError):
 class UnknownFiscalIdentityError(UnknownReferenceError):
     pass
 
-
-class DocNumberCheckError(Exception):
-    pass

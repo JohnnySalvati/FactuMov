@@ -3,7 +3,7 @@ from pydantic import ValidationError
 
 from factumov.crud import customer as customer_crud
 from factumov.enums import Concepto, CondicionIva, DocType, VoucherType
-from factumov.exceptions import CustomerInUseError, DocNumberCheckError, DuplicateCustomerError
+from factumov.exceptions import CustomerInUseError, DuplicateCustomerError
 from factumov.models.fiscal_identity import FiscalIdentity
 from factumov.models.invoice_template import InvoiceTemplate
 from factumov.schemas.customer import CustomerCreate, CustomerUpdate
@@ -15,7 +15,7 @@ def customer_create(
     name: str = "test",
     condicion_iva: CondicionIva = CondicionIva.INSCRIPTO,
     doc_type: DocType = DocType.CUIT,
-    doc_number: str | None = None,
+    doc_number: str = "22222222222",
     email: str | None = None,
 ):
     return customer_crud.create(
@@ -37,29 +37,6 @@ def test_create(db):
     )
     with pytest.raises(DuplicateCustomerError):
         customer_create(db, doc_number="20182810674")
-
-
-def test_update_or_create_final(db):
-    customer1 = customer_crud.update_or_create(
-        db,
-        CustomerCreate(
-            name="test1",
-            condicion_iva=CondicionIva.FINAL,
-            doc_type=DocType.FINAL,
-            doc_number="18281067",
-        ),
-    )
-
-    customer2 = customer_crud.update_or_create(
-        db,
-        CustomerCreate(
-            name="test1",
-            condicion_iva=CondicionIva.FINAL,
-            doc_type=DocType.FINAL,
-            doc_number="18281067",
-        ),
-    )
-    assert customer1.id != customer2.id
 
 
 def test_update_or_create_new(db):
@@ -169,13 +146,6 @@ def test_delete_in_use(db):
         customer_crud.delete(db, customer)
 
 
-def test_update_no_number(db):
-    customer = factories.make_customer(db, doc_type=DocType.FINAL, doc_number=None)
-    data = CustomerUpdate(doc_type=DocType.CUIT)
-    with pytest.raises(DocNumberCheckError):
-        customer_crud.update(db, customer, data)
-
-
 def test_doc_number_none():
     with pytest.raises(ValidationError):
         CustomerUpdate(doc_type=DocType.CUIT, doc_number=None)
@@ -186,10 +156,3 @@ def test_doc_number_alone(db):
     customer_crud.update(db, customer, CustomerUpdate(doc_type=DocType.CUIT))
     assert customer.doc_type == DocType.CUIT
     assert customer.doc_number is not None
-
-
-def test_final_doc_number_none(db):
-    customer = factories.make_customer(db)
-    customer_crud.update(db, customer, CustomerUpdate(doc_type=DocType.FINAL, doc_number=None))
-    assert customer.doc_type == DocType.FINAL
-    assert customer.doc_number is None

@@ -38,7 +38,7 @@ def make_fiscal_identity(db, name=None, tax_id=None, condicion_iva=CondicionIva.
 def make_customer(
     db,
     name=None,
-    doc_number: str | None = "",
+    doc_number: str = "",
     doc_type=DocType.CUIT,
     condicion_iva=CondicionIva.INSCRIPTO,
 ):
