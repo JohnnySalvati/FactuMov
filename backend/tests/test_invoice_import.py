@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 
 from factumov.enums import DocType, IvaAliquot
 from factumov.models.customer import Customer
+from factumov.routers import invoice_template
 from tests import factories
 
 SAMPLES = Path(__file__).parent / "samples"
@@ -21,17 +22,31 @@ SAMPLE = "20206205297_011_00001_00000205.pdf"
 ISSUER_TAX_ID = "20206205297"
 CUSTOMER_DOC_NUMBER = "30714597066"
 
+# Factura B, punto de venta 10, two lines at 21%. B prints no aliquot column, so the rate
+# is deduced from the letter.
+SAMPLE_B = "30714597066_006_00010_00000055.pdf"
 
-def post_import(client, filename=SAMPLE):
-    """Upload one of the sample PDFs as multipart/form-data.
+# Factura A, the only letter that discriminates IVA per line: its rate is read off the
+# printed column rather than deduced.
+SAMPLE_A = "20182810674_001_00002_00000134.pdf"
+
+NOT_A_PDF = b"\xff\xd8\xff\xe0 this is the start of a jpeg"
+UNREADABLE_PDF = b"%PDF-1.4 truncated before anything readable"
+
+
+def post_import(client, filename=SAMPLE, content=None, content_type="application/pdf"):
+    """Upload a sample PDF — or arbitrary bytes — as multipart/form-data.
 
     The key in `files` has to match the endpoint's parameter name, so renaming the
     parameter breaks this call rather than silently sending an unread part.
+
+    `content` replaces the body without touching the declared type, which is what lets a
+    guard test send something that is not a PDF while still claiming to be one.
     """
-    file_bytes = (SAMPLES / filename).read_bytes()
+    file_bytes = (SAMPLES / filename).read_bytes() if content is None else content
     return client.post(
         "/invoice-templates/import",
-        files={"file": (filename, file_bytes, "application/pdf")},
+        files={"file": (filename, file_bytes, content_type)},
     )
 
 
@@ -78,3 +93,160 @@ def test_import_resolves_the_ids_of_an_issuer_and_customer_already_stored(client
     # The endpoint reads; it must not write. If it ever reached for `update_or_create`,
     # importing the same PDF twice would quietly fork the customer's history.
     assert count_customers(db) == 1
+
+
+def test_import_leaves_both_ids_empty_when_neither_party_is_stored(client, db):
+    """A first import: nothing to resolve, but everything parsed still travels.
+
+    This is the ordinary case for a new user, and the draft has to carry enough for the
+    editor to offer creating both rows — so the ids being None does not make the rest of
+    the payload empty.
+    """
+    response = post_import(client)
+
+    assert response.status_code == 200
+    draft = response.json()
+
+    assert draft["fiscal_identity_id"] is None
+    assert draft["customer_id"] is None
+
+    assert draft["issuer_tax_id"] == ISSUER_TAX_ID
+    assert draft["customer"]["doc_number"] == CUSTOMER_DOC_NUMBER
+    assert draft["customer"]["name"] == "M & G TECHNOLOGY S.R.L."
+    assert draft["lines"]
+
+    assert count_customers(db) == 0
+
+
+def test_import_reads_a_type_b_invoice_with_two_lines(client):
+    """B deduces 21% from the letter, and both lines carry it.
+
+    The descriptions also show the parser reassembled rows that ARCA wrapped over several
+    printed lines, which is where a two-line invoice differs from a one-line one.
+    """
+    response = post_import(client, filename=SAMPLE_B)
+
+    assert response.status_code == 200
+    draft = response.json()
+
+    assert draft["voucher_type"] == "B"
+    assert draft["pos"] == 10
+    assert draft["customer"]["doc_number"] == "30535621159"
+
+    assert draft["lines"] == [
+        {
+            "description": "Almuerzos consumidos desde el 29/06/26 al 03/07/26 "
+            "OC 4701183101 Usuario Responsable: Lorena Del Valle Ferreyra",
+            "quantity": "169.00",
+            "unit_price": "28000.00",
+            "iva_aliquot": IvaAliquot.standard.value,
+        },
+        {
+            "description": "Almuerzos consumidos desde el 06/07/26 al 10/07/26 "
+            "OC 4701183101 Usuario Responsable: Lorena Del Valle Ferreyra",
+            "quantity": "109.00",
+            "unit_price": "28000.00",
+            "iva_aliquot": IvaAliquot.standard.value,
+        },
+    ]
+
+
+def test_import_reads_a_type_a_invoice(client):
+    """A is the letter whose rate is read off the line instead of deduced.
+
+    It also uses a different item layout and a different label for the receptor's address,
+    so this is the end-to-end guard that both survive `build_draft` and come out as JSON.
+    """
+    response = post_import(client, filename=SAMPLE_A)
+
+    assert response.status_code == 200
+    draft = response.json()
+
+    assert draft["voucher_type"] == "A"
+    assert draft["pos"] == 2
+    assert draft["issuer_tax_id"] == "20182810674"
+
+    assert draft["customer"]["doc_number"] == "23105048009"
+    assert draft["customer"]["address"] == "Hubac 4686 - Capital Federal, Ciudad de Buenos Aires"
+
+    assert [line["iva_aliquot"] for line in draft["lines"]] == [
+        IvaAliquot.standard.value,
+        IvaAliquot.standard.value,
+    ]
+    assert [line["unit_price"] for line in draft["lines"]] == ["35000.00", "15000.00"]
+
+
+def test_import_ignores_a_customer_whose_doc_type_differs(client, db):
+    """The lookup keys on the pair, not on the number alone.
+
+    `uq_customers_doc_type_doc_number` covers both columns, so the same digits can legally
+    exist under two doc types. Matching on the number alone would attach the draft to the
+    wrong row while looking entirely correct.
+    """
+    factories.make_customer(db, doc_type=DocType.DNI, doc_number=CUSTOMER_DOC_NUMBER)
+
+    response = post_import(client)
+
+    assert response.status_code == 200
+    draft = response.json()
+
+    assert draft["customer_id"] is None
+
+    # The parsed receptor still travels, so the editor can offer to store it properly.
+    assert draft["customer"]["doc_number"] == CUSTOMER_DOC_NUMBER
+    assert draft["customer"]["doc_type"] == DocType.CUIT.value
+
+
+def test_import_rejects_an_upload_that_is_not_a_pdf(client):
+    """415 is decided on the magic bytes, not on the declared content type.
+
+    The upload claims `application/pdf` on purpose: the header is what the file says about
+    itself, while the content type is only what the client claims about it.
+    """
+    response = post_import(client, content=NOT_A_PDF)
+
+    assert response.status_code == 415
+
+
+def test_import_accepts_a_pdf_it_cannot_read_and_answers_an_empty_draft(client):
+    """An unreadable PDF is not the same situation as a file of the wrong type.
+
+    A scanned or corrupt invoice really is a PDF, so it earns a 200 with an empty draft
+    and the UI offers manual entry. Folding this into the 415 above would refuse a
+    document the user can still work with by hand.
+    """
+    response = post_import(client, content=UNREADABLE_PDF)
+
+    assert response.status_code == 200
+    draft = response.json()
+
+    assert draft["lines"] == []
+    assert draft["voucher_type"] is None
+    assert draft["fiscal_identity_id"] is None
+
+
+def test_import_rejects_an_upload_over_the_size_limit(client, monkeypatch):
+    """413 fires before the file is parsed.
+
+    The limit is patched rather than exercised at its real 10 MB, so the branch is covered
+    without the suite carrying a 10 MB payload — the value itself is policy, not behaviour.
+    Patching works only because the endpoint resolves the constant as a module global at
+    call time; as a parameter default it would read a copy this never touches.
+    """
+    monkeypatch.setattr(invoice_template, "MAX_UPLOAD_BYTES", 100)
+
+    response = post_import(client)
+
+    assert response.status_code == 413
+
+
+def test_import_requires_the_file_field(client):
+    """No file at all is a validation error, answered before the endpoint body runs.
+
+    A wrong field name produces this same response, so it doubles as a guard against the
+    helper above drifting away from the endpoint's parameter name.
+    """
+    response = client.post("/invoice-templates/import")
+
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["loc"] == ["body", "file"]
