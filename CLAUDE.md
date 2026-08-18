@@ -116,7 +116,7 @@ FactuMov/
 │   │       ├── invoice_parser.py   # PDF → ParsedInvoice
 │   │       └── invoice_draft.py    # ParsedInvoice → InvoiceTemplateDraft
 │   └── tests/
-│       └── samples/                # 9 facturas PDF reales
+│       └── samples/                # 10 facturas PDF reales (1 A, 4 B, 5 C)
 └── frontend/
 ```
 
@@ -134,8 +134,8 @@ Ruta real: `E:\Capacitacion\InSoft\Balance360\Balance360\src\balance360\services
 **`pdf_invoice.py` e `invoice_pdf.py` NO son duplicados.** El primero *lee* facturas ajenas
 (parsing), el segundo *genera* el QR de una factura propia. Los nombres chocan por accidente.
 
-## Parser (`services/invoice_parser.py`) — estado al 2026-08-09
-Reescrito a partir del de Balance360 y verificado contra las 9 muestras de
+## Parser (`services/invoice_parser.py`) — estado al 2026-08-18
+Reescrito a partir del de Balance360 y verificado contra las 10 muestras de
 `backend/tests/samples/`. Extrae todo: emisor, receptor, período, CAE e items.
 
 - **Un solo layout: ARCA "Comprobantes en línea".** Todas las facturas de Miguel salen de
@@ -143,10 +143,33 @@ Reescrito a partir del de Balance360 y verificado contra las 9 muestras de
   contra un PDF real es un pasivo, no una función.
 - **El PDF trae la factura tres veces** (ORIGINAL / DUPLICADO / TRIPLICADO). Se corta en el
   primer `DUPLICADO`; si no, toda extracción encuentra tres de cada cosa.
-- **ARCA no imprime alícuota por línea**: se deduce de la letra (C → 0, A y B → 21).
+- **La alícuota se lee en A y se deduce en B y C.** Solo la A discrimina IVA por línea, y
+  ahí hay que leer la columna: una misma factura A puede mezclar 21% y 10,5%, así que
+  deducirla de la letra da un número plausible y equivocado. En B y C esa columna no existe
+  y la letra es toda la información que hay (C → 0, B → 21).
+- **Las columnas de items no son las mismas en todas las letras**, ni en cantidad ni en
+  orden:
+
+  | Letra | Después de Precio Unit. |
+  |---|---|
+  | B y C | `% Bonif` `Imp. Bonif.` `Subtotal` — 3 |
+  | A | `% Bonif` `Subtotal` `Alícuota IVA` `Subtotal c/IVA` — 4 |
+
+  La A no imprime `Imp. Bonif.` y sí agrega la alícuota. El extractor decide por la
+  cantidad de columnas y no por el encabezado, que en la A viene partido en dos renglones
+  (`Alicuota` arriba, `IVA` abajo). Se aceptan solo esos dos anchos a propósito: ante un
+  layout desconocido conviene no matchear —falta la línea y `needs_manual_items` lo
+  delata— antes que matchear corrido y meter en la alícuota el número de otra columna.
+- **La unidad de medida no es siempre `unidades`.** ARCA ofrece horas, kilogramos, metros,
+  docenas. Estaba hardcodeada, y una línea facturada en otra unidad no matcheaba: la línea
+  desaparecía del draft sin ninguna señal.
+- **El rótulo del domicilio del receptor cambia con la letra**: B y C imprimen `Domicilio:`
+  y A imprime `Domicilio Comercial:`. Exigir la forma corta dejaba a todo receptor de una A
+  sin condición frente al IVA ni domicilio.
 - **En B el precio impreso ya incluye IVA** (lo confirma "IVA Contenido" del Régimen de
-  Transparencia Fiscal). Se guarda el precio tal como viene y la letra decide cómo
-  interpretarlo — misma convención que `Invoice.iva_breakdown` de Balance360.
+  Transparencia Fiscal); en A viene neto (35000 × 1,21 = 42350 en la muestra A lo
+  confirma). Se guarda el precio tal como viene y la letra decide cómo interpretarlo —
+  misma convención que `Invoice.iva_breakdown` de Balance360.
 - **El documento del receptor puede ser CUIT, CUIL o DNI**, por eso `customer_doc_number` y
   no `customer_cuit`. Las facturas a consumidor final traen DNI.
 - **Los domicilios se parten en dos renglones** y hay que reensamblarlos.
@@ -288,7 +311,7 @@ El `max_part_size` de Starlette no alcanza: solo mide las partes que no son arch
   real y no vería nada de lo que el test armó. El override no commitea a propósito —
   revertir es trabajo del fixture `db`. La limpieza final no es opcional: `app` es un
   singleton de módulo y un override olvidado se filtra a todos los tests siguientes.
-- **Ninguna de las 9 muestras es a consumidor final**, así que la rama `DocType.FINAL` del
+- **Ninguna de las 10 muestras es a consumidor final**, así que la rama `DocType.FINAL` del
   endpoint de importación no se puede ejercitar end-to-end. Si hace falta cubrirla, sacar la
   resolución de ids del router a una función propia y testearla con un `ParsedInvoice`
   armado a mano.

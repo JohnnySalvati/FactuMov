@@ -71,9 +71,14 @@ _ARCA_VOUCHER_TYPE: dict[int, str] = {
     13: "NCC",
 }
 
-# ARCA no imprime la alícuota por línea, así que se deduce de la letra.
-# En B el precio impreso ya incluye el IVA; quien arme la factura decide cómo
-# interpretarlo, igual que hace Balance360 en Invoice.iva_breakdown.
+# Alícuota deducida de la letra, que es lo único disponible en B y C: esos
+# comprobantes no discriminan IVA por línea. En B el precio impreso ya lo trae
+# adentro; quien arme la factura decide cómo interpretarlo, igual que hace
+# Balance360 en Invoice.iva_breakdown.
+#
+# En A no se usa salvo como red: ahí la alícuota va impresa por línea y se lee de
+# la columna correspondiente (ver _line_iva_rate), porque una misma factura A
+# puede mezclar líneas al 21% y al 10,5%.
 _IVA_BY_LETTER: dict[str, Decimal] = {
     "A": Decimal("21"),
     "B": Decimal("21"),
@@ -113,9 +118,13 @@ _CUSTOMER = re.compile(
     r"Apellido y Nombre\s*/\s*Raz[oó]n Social:\s*(?P<name>.*?)\s*$",
     re.M,
 )
-# Se distingue de la línea del emisor porque lleva "Domicilio:" en vez de
-# "Fecha de Inicio de Actividades:".
-_CUSTOMER_CONDICION = re.compile(r"Condici[oó]n frente al IVA:\s*(.+?)\s+Domicilio:\s*(.+?)\s*$")
+# Se distingue de la línea del emisor porque lleva "Domicilio" en vez de "Fecha de
+# Inicio de Actividades:". El rótulo no es el mismo en todas las letras: B y C
+# imprimen "Domicilio:" y A imprime "Domicilio Comercial:", así que exigir la forma
+# corta dejaba sin condición frente al IVA ni domicilio a todo receptor de una A.
+_CUSTOMER_CONDICION = re.compile(
+    r"Condici[oó]n frente al IVA:\s*(.+?)\s+Domicilio(?:\s+Comercial)?:\s*(.+?)\s*$"
+)
 
 # Una línea que empieza con alguna de estas etiquetas abre otro campo, así que
 # nunca es la continuación de un domicilio partido en dos renglones.
@@ -133,11 +142,37 @@ _PERIOD = re.compile(
 # Subtotal. No hay columna de IVA, y esa es justamente la razón por la que el
 # layout "arca" de Balance360 no reconocía ninguna línea de estas facturas.
 _NUM = r"[\d.,]+"
+# La columna "Alícuota IVA" de las A puede venir como "21%", así que las columnas
+# de la cola admiten un % final que _to_decimal después descarta.
+_COL = r"[\d.,]+%?"
+# La unidad de medida no es siempre "unidades": ARCA ofrece horas, kilogramos,
+# metros, docenas. Se acepta cualquier token que no empiece con dígito, que es lo
+# que la distingue de las columnas numéricas que la rodean. Hardcodear "unidades"
+# hacía desaparecer en silencio cualquier línea facturada en otra unidad.
+_UNIT = r"[^\d\s]\S*"
 _ITEMS_HEADER = re.compile(r"C[oó]digo\s+Producto\s*/\s*Servicio\s+Cantidad\s+U\.\s*Medida", re.I)
+# Después del precio unitario las columnas dependen de la letra, y no son las
+# mismas ni en cantidad ni en orden:
+#
+#   B y C:  % Bonif | Imp. Bonif. | Subtotal                     -> 3
+#   A:      % Bonif | Subtotal | Alícuota IVA | Subtotal c/IVA    -> 4
+#
+# La A no imprime Imp. Bonif. y sí agrega la alícuota por línea. Se captura la cola
+# entera y _line_iva_rate decide según cuántas columnas son. Pedir exactamente 3
+# era lo que hacía que ninguna línea de una factura A matcheara.
+#
+# Se aceptan solo esos dos anchos a propósito: ante un layout desconocido es
+# preferible no matchear —la línea falta, needs_manual_items lo delata— antes que
+# matchear corrido y asignarle a la alícuota el número de otra columna.
 _ITEM_ROW = re.compile(
-    rf"^(?P<desc>.+?)\s+(?P<qty>{_NUM})\s+unidades\s+(?P<price>{_NUM})"
-    rf"\s+{_NUM}\s+{_NUM}\s+{_NUM}\s*$"
+    rf"^(?P<desc>.+?)\s+(?P<qty>{_NUM})\s+(?P<unit>{_UNIT})\s+(?P<price>{_NUM})"
+    rf"\s+(?P<tail>{_COL}(?:\s+{_COL}){{2,3}})\s*$"
 )
+# Ancho de la cola en A y posición de la alícuota dentro de ella. Verificado contra
+# 20182810674_001_00002_00000134.pdf: "... 0,00 35000,00 21% 42350,00", donde
+# 35000 × 1,21 = 42350 confirma que el precio unitario de A viene neto.
+_A_TAIL_COLUMNS = 4
+_A_ALIQUOT_INDEX = 2
 _ITEMS_END = re.compile(r"^\s*(Subtotal:|Importe|R[eé]gimen|P[aá]g\.|CAE\b)", re.I)
 
 
@@ -208,7 +243,23 @@ def _wrapped_tail(lines: list[str], index: int) -> str:
     return " ".join(parts)
 
 
-def _extract_items(lines: list[str], iva_rate: Decimal) -> list[ParsedInvoiceLine]:
+def _line_iva_rate(tail: str, default_rate: Decimal) -> Decimal:
+    """Alícuota de una línea, leída de la factura cuando está impresa.
+
+    Solo las A discriminan IVA por línea, y ahí hay que leerlo: una misma factura
+    puede mezclar 21% y 10,5%, así que deducirlo de la letra da un número
+    plausible y equivocado. Se reconoce el layout por la cantidad de columnas y no
+    por el encabezado, que en la A viene partido en dos renglones ("Subtotal c/IVA"
+    arriba y "IVA" abajo) y obligaría a acertarle además al texto del título.
+    """
+    columns = tail.split()
+    if len(columns) != _A_TAIL_COLUMNS:
+        return default_rate
+    rate = _to_decimal(columns[_A_ALIQUOT_INDEX])
+    return default_rate if rate is None else rate
+
+
+def _extract_items(lines: list[str], default_rate: Decimal) -> list[ParsedInvoiceLine]:
     result: list[ParsedInvoiceLine] = []
     in_items = False
 
@@ -232,6 +283,7 @@ def _extract_items(lines: list[str], iva_rate: Decimal) -> list[ParsedInvoiceLin
             if quantity is None or unit_price is None:
                 continue
             description = re.sub(r"\s+", " ", match.group("desc").strip())
+            iva_rate = _line_iva_rate(match.group("tail"), default_rate)
             result.append(ParsedInvoiceLine(description, quantity, unit_price, iva_rate))
         elif result:
             # La descripción puede continuar en las líneas de abajo:
