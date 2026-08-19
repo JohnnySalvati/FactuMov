@@ -10,6 +10,7 @@ factory twice inside one test does not collide.
 """
 
 import itertools
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from factumov.enums import Concepto, CondicionIva, DocType, IvaAliquot, VoucherType
@@ -17,10 +18,15 @@ from factumov.models.customer import Customer
 from factumov.models.fiscal_identity import FiscalIdentity
 from factumov.models.invoice_template import InvoiceTemplate
 from factumov.models.invoice_template_line import InvoiceTemplateLine
+from factumov.models.user import User
+from factumov.models.user_session import UserSession
 from factumov.schemas.invoice_template import InvoiceTemplateCreate
 from factumov.schemas.invoice_template_line import InvoiceTemplateLineCreate
+from factumov.services.security import hash_password, hash_session_token
 
 _sequence = itertools.count(1)
+_PASSWORD = "onePassword"
+_PASSWORD_HASHED = hash_password(_PASSWORD)
 
 
 def make_fiscal_identity(db, name=None, tax_id=None, condicion_iva=CondicionIva.INSCRIPTO):
@@ -131,3 +137,41 @@ def make_invoice_template(
     db.add(invoice_template)
     db.flush()
     return invoice_template
+
+
+def make_user(
+    db,
+    email=None,
+    email_confirmed_at=None,
+    hashed_password=_PASSWORD_HASHED,
+    is_active=True,
+):
+    n = next(_sequence)
+    user = User(
+        email=f"email{n}@cucu.com" if email is None else email,
+        email_confirmed_at=email_confirmed_at,
+        hashed_password=hashed_password,
+        is_active=is_active,
+    )
+    db.add(user)
+    db.flush()
+    return user
+
+
+def make_user_session(
+    db,
+    user_id=None,
+    raw_token=None,
+    expires_at=None,
+    revoked_at=None,
+):
+    n = next(_sequence)
+    user_session = UserSession(
+        user_id=user_id or make_user(db).id,
+        token_hash=hash_session_token(f"token{n}" if raw_token is None else raw_token),
+        expires_at=expires_at or datetime.now(UTC) + timedelta(hours=1),
+        revoked_at=revoked_at,
+    )
+    db.add(user_session)
+    db.flush()
+    return user_session

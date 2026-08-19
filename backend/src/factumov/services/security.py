@@ -15,7 +15,9 @@ def hash_password(password: str) -> str:
 def verify_password(password: str, hashed_password: str | None) -> bool:
     if hashed_password is None:
         valid = False
-        _password_hasher.verify(password, _DUMMY_HASH) # This line simulates verify to waste time 
+        # "verify against a dummy hash so an unknown email costs the same as a wrong password
+        #
+        _password_hasher.verify(password, _DUMMY_HASH)
     else:
         valid = _password_hasher.verify(password, hashed_password)
     return valid

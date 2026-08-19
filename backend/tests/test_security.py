@@ -1,4 +1,9 @@
-from factumov.services.security import hash_password, hash_session_token, verify_password, _DUMMY_PASSWORD
+from factumov.services.security import (
+    _DUMMY_PASSWORD,
+    hash_password,
+    hash_session_token,
+    verify_password,
+)
 
 
 def test_password():
