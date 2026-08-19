@@ -70,6 +70,8 @@ explique el *por qué*, no el *qué* (el diff ya dice qué cambió).
 
 ## Stack
 - **Backend:** FastAPI + SQLAlchemy 2.0 (sync) + Alembic + PostgreSQL. Gestor: `uv`.
+- **Auth:** `pwdlib[argon2]` para el hash de contraseñas. Sin JWT ni OAuth2: sesión
+  opaca en cookie contra la tabla `user_sessions` (ver *Autenticación*).
 - **Frontend:** React SPA/PWA. Lo escribe Claude íntegramente.
 - **Python:** ≥3.11, layout `src/factumov/`.
 - Si más adelante se necesita presencia en las stores: envolver la misma SPA con
@@ -236,7 +238,10 @@ Emitir = tomar un `InvoiceTemplate`, permitir retoques, y crear una `Invoice` nu
    productos por peso necesitan fracciones.
 2. **`TimestampMixin` sin `created_by` / `modified_by`.** Los de Balance360 son FK a
    `users.id`; copiarlos tal cual obligaría a crear la tabla `users` antes de tiempo.
-   Se agregan cuando exista autenticación.
+   Desde 2026-08-18 la tabla existe, así que el bloqueo se levantó — pero se siguen
+   difiriendo hasta la unidad de *ownership scoping*, que es la que va a decidir de una
+   vez qué columnas de usuario lleva cada tabla. Agregar la autoría antes sería una
+   migración a cuenta de otra.
 3. **`Customer` en vez de `Contact`.** FactuMov solo emite; no necesita el `contact_type`
    (customer/supplier/both) que Balance360 usa porque también registra compras.
 4. **Líneas con `position` explícito.** Balance360 ordena por `created_at`, que se rompe si
@@ -257,6 +262,8 @@ Emitir = tomar un `InvoiceTemplate`, permitir retoques, y crear una `Invoice` nu
 | `Customer` | Receptor |
 | `InvoiceTemplate` | Emisor + cliente + tipo de comprobante + punto de venta + concepto |
 | `InvoiceTemplateLine` | Descripción, cantidad, precio unitario, alícuota, posición |
+| `User` | Cuenta: email, hash de contraseña, confirmación, alta/baja |
+| `UserSession` | Sesión abierta: hash del token, vencimiento absoluto, revocación |
 
 ### Decisiones sobre `InvoiceTemplate` (2026-08-15)
 - **Nombre único por identidad fiscal** — `UniqueConstraint(fiscal_identity_id, name)`, no un
@@ -332,6 +339,143 @@ Para cuando la función corre, Starlette ya volcó el body entero a un `SpooledT
 de nginx, o un middleware ASGI que cuente los chunks de `http.request` y corte en el medio.
 El `max_part_size` de Starlette no alcanza: solo mide las partes que no son archivo.
 
+## Autenticación (2026-08-18)
+
+### Registro y delegación en ARCA — decisión de producto
+- El usuario se registra con email + contraseña y confirma la dirección.
+- Después la app le manda por email las instrucciones para otorgar la **delegación en
+  ARCA**: el contribuyente autoriza al CUIT del certificado de FactuMov a usar WSFE en su
+  nombre.
+- **FactuMov verifica la delegación por su cuenta** en vez de pedirle al usuario que la
+  confirme: una autenticación WSAA más una llamada WSFE inocua. Si sale bien, la identidad
+  fiscal pasa a "delegación activa", y recién ahí puede emitir.
+- **El estado de la delegación vive en `FiscalIdentity`, no en `User`.** Un usuario puede
+  tener varios CUIT, y cada uno se delega por separado.
+- **La delegación prueba que el usuario controla ese CUIT**, porque no se puede otorgar sin
+  la Clave Fiscal de ese CUIT. Eso es verificación de titularidad, **no** autenticación de
+  FactuMov: ARCA nunca ve a nuestros usuarios y no ofrece identity provider para apps de
+  terceros. La autenticación propia carga con todo el peso — y la delegación le sube la
+  apuesta, porque una vez otorgada un compromiso de FactuMov puede emitir facturas
+  legalmente válidas contra un CUIT real.
+
+### Registro self-serve
+Alternativa descartada: invite-only. Self-serve implica que la unidad de registro construye
+un `POST /auth/register` público, con confirmación por email y el rate limiting que lo
+protege: los dos quedan en el camino crítico, no son opcionales.
+
+Consecuencia inmediata sobre el modelo: **`email_confirmed_at` existe desde ya**, aunque el
+envío del mail sea de una unidad posterior. Un usuario sin confirmar es una fila que no debe
+poder loguearse, y `is_active` solo no alcanza: mezcla "nunca confirmó" con "lo dio de baja
+un admin", que son estados distintos y con remedios distintos. Es timestamp y no booleano
+porque el "cuándo" es justo lo que quieren tanto el reenvío de confirmación como cualquier
+consulta de soporte. Agregarlo más tarde habría costado una segunda migración sobre una
+tabla ya poblada, más una decisión de backfill sobre si los usuarios existentes cuentan
+como confirmados.
+
+El login se cierra sobre las dos condiciones desde el principio (`is_active` **y**
+`email_confirmed_at is not None`). Agregar la columna y postergar el chequeo deja un agujero
+silencioso que la unidad siguiente se tiene que acordar de tapar.
+
+### El login no revela si un email está registrado
+Misma respuesta —mismo body, mismo status— para email desconocido, contraseña incorrecta y
+usuario sin confirmar. Los tres son 401 idénticos.
+
+- **"Confirmá tu email" es un oráculo de enumeración**: confirma que la dirección existe.
+  Por eso el usuario sin confirmar no recibe un mensaje propio.
+- **El timing también contesta la pregunta.** Si el usuario no existe no hay hash contra el
+  cual verificar, y volver antes de tiempo delata la diferencia. Se verifica contra un hash
+  dummy y se descarta el resultado. El dummy se calcula **una sola vez al importar el
+  módulo**, no por request: por request duplica el costo y crea su propia señal de timing.
+  Tiene que ser un hash real con los parámetros reales, o los tiempos no coinciden.
+- La misma regla rige para el reenvío de confirmación de la unidad siguiente: contesta
+  siempre "si esa dirección está registrada, te mandamos un mail".
+
+### Sesiones
+- **Token opaco contra la tabla `user_sessions`, no JWT.** Un JWT es válido hasta que vence
+  porque se verifica con la firma y nada más; revocarlo exige igual una tabla de revocados,
+  o sea la consulta a la base que el JWT prometía evitar. Con logout y "cerrar todas las
+  sesiones" en el alcance, la tabla no es un costo extra: es el mecanismo.
+- **El token se guarda hasheado con SHA-256, no con argon2.** Sale de
+  `secrets.token_urlsafe(32)` — 256 bits de entropía, no hay diccionario que atacar. Un KDF
+  lento no compra nada y cuesta ~100 ms **en cada request autenticado**. Argon2 es lento a
+  propósito porque las contraseñas son de baja entropía y las elige un humano: amenaza
+  distinta, herramienta distinta. El hexdigest fija la columna en `String(64)`, y su
+  `unique=True` es además el índice por el que cada request busca el token.
+- **`hashed_password` es `String(255)`.** El PHC de argon2id que escribe pwdlib mide ~97
+  caracteres y su largo se mueve con los parámetros. Los 72 que uno recuerda son el límite
+  del **password de entrada** de bcrypt, no el largo de ningún hash: con `String(72)` el
+  INSERT falla con `value too long for type character varying(72)`.
+- **Vencimiento absoluto, no deslizante.** `expires_at` se fija en el login y no se extiende
+  por usar la sesión.
+- **La comparación de vencimiento se hace en SQL** (`expires_at > func.now()`), no trayendo
+  la fila y comparando en Python. Una sola fuente de verdad para "ahora", y evita el
+  `TypeError` de comparar un datetime naive con uno aware que `DateTime(timezone=True)` deja
+  servido. De paso, testear el vencimiento pasa a ser insertar una fila con `expires_at` en
+  el pasado, que es más simple que parchear un reloj.
+- **`revoked_at` se conserva** en vez de borrar la fila en el logout. Hace el logout
+  idempotente y deja rastro de auditoría, que es barato y se justifica con lo que está en
+  juego después de la delegación. Las dos variantes necesitan igual una limpieza periódica
+  de filas vencidas.
+- **Cookie `httpOnly` + `Secure` + `SameSite=Lax`.**
+- **`SESSION_LIFETIME` y el nombre de la cookie son constantes de módulo leídas adentro de
+  la función**, no `Settings` — mismo criterio que `MAX_UPLOAD_BYTES` del endpoint de
+  importación, y por la misma razón: `Settings` es sobre la base de datos, y un global
+  resuelto en tiempo de llamada es lo que deja parchearlo desde un test.
+- **`User.sessions` va con `cascade="all, delete-orphan"` + `passive_deletes=True`**, no con
+  el `passive_deletes="all"` de `Customer.invoice_templates`. No son variantes de lo mismo:
+  `"all"` significa "no toques los hijos, ni les pongas la FK en NULL", y existe para que
+  Postgres tire la violación de FK que el CRUD convierte en `CustomerInUseError` — borrar un
+  cliente con modelos *tiene* que fallar. Las sesiones quieren lo contrario. Y sin
+  `passive_deletes=True`, el cascade del ORM carga cada sesión en memoria y las borra de a
+  una en vez de dejar que el `ON DELETE CASCADE` lo haga en una sentencia. Verificado: el
+  borrado de un usuario con tres sesiones emite un solo `DELETE FROM users`.
+
+### Dónde vive cada cosa
+| Archivo | Rol |
+|---|---|
+| `schemas/auth.py` | Contrato de entrada/salida |
+| `services/security.py` | Hash argon2 (pwdlib), tokens (`secrets`), hash SHA-256 del token |
+| `crud/user.py`, `crud/user_session.py` | Acceso a datos |
+| `dependencies.py` | `SessionDep` y `get_current_user` |
+| `routers/auth.py` | `POST /auth/login`, `POST /auth/logout`, `GET /auth/me` |
+
+- **El login recibe JSON, no `OAuth2PasswordRequestForm`.** El form de FastAPI es lo que usa
+  casi todo tutorial, pero es `x-www-form-urlencoded` y su campo se llama `username`. El
+  backend habla solo JSON, así que es un modelo Pydantic con `email` y `password`.
+- **La normalización del email va en el schema**, con el mismo `field_validator` que hace
+  `.strip().lower()` que ya tiene `CustomerCreate`. Sin eso `Miguel@x.com` y `miguel@x.com`
+  son dos cuentas y el `unique=True` no lo impide.
+- **`get_current_user` va en `dependencies.py` y no en `routers/auth.py`**, para que
+  `routers/customer.py` no termine importando de un router hermano sin ninguna razón
+  estructural. Es también el lugar donde `SessionDep` deja de estar copiado en cada router.
+
+### Tests de autenticación
+- **El fixture `client` queda autenticado por defecto; el anónimo es `anonymous_client`.**
+  Al revés habría que editar los 61 tests de router que ya existen, y cada test nuevo
+  tendría que acordarse de elegir — y olvidarse da un 401 pelado en vez de una falla clara.
+- **Autentica con una cookie real sobre una fila real de `user_sessions`**, no
+  sobreescribiendo `get_current_user`. Así los 61 tests ejercitan la dependencia de verdad
+  sin costo, y sobre todo el *ownership scoping* de la unidad siguiente va a tener un
+  `users.id` real del cual colgar `fiscal_identities.user_id`. Con la dependencia falseada,
+  esa unidad sería reescribir los 61 tests.
+- **El fixture no se loguea por HTTP.** Los parámetros recomendados de argon2 (m=64 MiB,
+  t=3, p=4) cuestan ~50–100 ms por verificación; por 61 tests, más el hash de cada usuario,
+  duplica una suite de 8 segundos. La fila de sesión se inserta directo y la cookie se pone
+  a mano; el endpoint de login lo ejercitan sus propios tests, que es donde ese costo
+  corresponde. Por lo mismo, `make_user` reparte una constante hasheada una sola vez, y solo
+  los tests que verifican contraseñas pagan un hash real.
+- **`TestClient(app, base_url="https://testserver")`.** La cookie es `Secure` y el cookie
+  jar de Python se niega a mandarla sobre http: sin esto la cookie se setea, nunca vuelve, y
+  todos los tests dan 401 por un motivo que no se parece en nada a la causa. Los navegadores
+  no tienen el problema en dev — tratan `http://localhost` como contexto seguro.
+
+### Unidades pendientes, en orden
+1. **Ownership scoping.** `user_id` en `fiscal_identities` y `customers`, queries scopeadas,
+   404 (nunca 403) sobre la fila de otro usuario, y scopear los lookups de `/import`, que
+   hoy filtran si otro usuario ya tiene guardado un cliente dado.
+2. **Registro + confirmación por email + el mail con las instrucciones de delegación.**
+3. **Verificación de la delegación contra ARCA.**
+
 ## Tests
 - **Los tests de CRUD no pasan por HTTP; los de router sí**, con el fixture `client` de
   `conftest.py`. Ese fixture depende de `db` y sobreescribe `get_db` con
@@ -341,6 +485,9 @@ El `max_part_size` de Starlette no alcanza: solo mide las partes que no son arch
   singleton de módulo y un override olvidado se filtra a todos los tests siguientes.
 - **`Decimal` viaja como string en JSON** (`"1.00"`, no `1.0`): Pydantic lo serializa así
   para no perder la escala. Los asserts sobre importes comparan strings.
+- **Desde la unidad de autenticación, `client` va autenticado y el anónimo es
+  `anonymous_client`** — el porqué, y los detalles de la cookie `Secure` y del costo de
+  argon2 en los fixtures, están en *Autenticación → Tests de autenticación*.
 - **El cliente de test es `httpx2`.** Starlette 1.5 importa `httpx2` primero y solo cae a
   `httpx` con un `StarletteDeprecationWarning`; la rama de fallback ya tiene un
   `RuntimeError` para cuando no esté ninguno. `httpx` igual sigue instalado porque

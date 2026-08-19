@@ -21,7 +21,6 @@ class User(Base, TimestampMixin):
     hashed_password: Mapped[str] = mapped_column(String(255))
     is_active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"), default=True)
 
-    sessions: Mapped[list['UserSession']] = relationship(
-        back_populates="user",
-        cascade="all, delete-orphan",
-        passive_deletes=True)
+    sessions: Mapped[list["UserSession"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan", passive_deletes=True
+    )

@@ -43,8 +43,8 @@ class CustomerUpdate(BaseModel):
 
     @field_validator("email")
     @classmethod
-    def validate_email(cls, value: EmailStr | None) -> EmailStr | None:
-        return value.strip().lower() if value else None
+    def normalize_email(cls, value: EmailStr | None) -> EmailStr | None:
+        return value.strip().lower() if value is not None else None
 
     @model_validator(mode="after")
     def check_doc_number(self) -> "CustomerUpdate":

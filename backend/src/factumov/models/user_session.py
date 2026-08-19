@@ -21,4 +21,4 @@ class UserSession(Base, TimestampMixin):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
-    user: Mapped['User'] = relationship(back_populates="sessions")
+    user: Mapped["User"] = relationship(back_populates="sessions")

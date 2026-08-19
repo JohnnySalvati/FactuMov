@@ -40,4 +40,3 @@ class UnknownCustomerError(UnknownReferenceError):
 
 class UnknownFiscalIdentityError(UnknownReferenceError):
     pass
-
