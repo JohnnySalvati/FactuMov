@@ -69,10 +69,18 @@ def email_settings(monkeypatch):
     monkeypatch.setenv("SMTP_HOST", "smtp.test")
     monkeypatch.setenv("EMAIL_FROM", "FactuMov <no-reply@test>")
     monkeypatch.setenv("APP_BASE_URL", "https://app.test")
-    monkeypatch.setenv("ARCA_DELEGATE_TAX_ID", "20-11111111-2")
     email_service.get_email_settings.cache_clear()
     yield
     email_service.get_email_settings.cache_clear()
+
+
+# El CUIT que lleva el certificado de prueba en el `serialNumber` del subject. No es el de
+# nadie, y no es el de FactuMov: el real vive en el default de `ArcaSettings`.
+CERTIFICATE_TAX_ID = "20111111112"
+
+# Lo que contesta `get_delegate_tax_id` cuando no hay certificado configurado. Distinto del
+# de arriba a propósito: así un test puede probar cuál de los dos gana.
+FALLBACK_DELEGATE_TAX_ID = "30999999997"
 
 
 @pytest.fixture(autouse=True)
@@ -91,14 +99,12 @@ def arca_settings(monkeypatch):
     for absent in ("ARCA_CERT_PATH", "ARCA_PRIVATE_KEY_PATH", "ARCA_WSDL_CACHE_PATH"):
         monkeypatch.delenv(absent, raising=False)
     monkeypatch.setenv("ARCA_ENV", "homo")
+    # El CUIT del fallback, para el caso sin certificado. No es el real: un test que dependa
+    # de ese número tiene que decirlo, no heredarlo del `.env` de la máquina.
+    monkeypatch.setenv("ARCA_DELEGATE_TAX_ID", FALLBACK_DELEGATE_TAX_ID)
     arca_service.get_arca_settings.cache_clear()
     yield
     arca_service.get_arca_settings.cache_clear()
-
-
-# El CUIT que lleva el certificado de prueba en el `serialNumber` del subject. No es el de
-# nadie: 20-11111111-2 es el mismo placeholder que usa `email_settings`.
-CERTIFICATE_TAX_ID = "20111111112"
 
 
 @pytest.fixture(scope="session")

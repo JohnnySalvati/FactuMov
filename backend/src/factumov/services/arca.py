@@ -69,6 +69,18 @@ class ArcaSettings(BaseSettings):
     # zeep cachea los WSDL en SQLite. Sin path explícito usa el temp del sistema, que en un
     # contenedor efímero se pierde en cada deploy y obliga a bajar el WSDL entero de nuevo.
     arca_wsdl_cache_path: Path | None = None
+    # El CUIT al que el contribuyente le delega WSFE: el dueño del certificado de FactuMov.
+    # Es el mismo con el que Balance360 ya emite —para sí mismo y para quienes le delegaron—,
+    # y tiene los servicios y los certificados dados de alta en ARCA.
+    #
+    # Tiene default real y no placeholder porque el CUIT es un hecho del proyecto, no de la
+    # instalación: el certificado es uno solo para toda la app. La variable existe igual para
+    # el día que FactuMov saque un certificado propio y haya que migrar sin tocar código.
+    #
+    # Vive en `ArcaSettings` y no en `EmailSettings`, que es donde estaba: es un dato de ARCA
+    # que el mail *usa*, no un dato del mail. Estaba ahí solo porque el mail fue su primer
+    # consumidor y esta clase todavía no existía.
+    arca_delegate_tax_id: str = "20182810674"
 
 
 @lru_cache
@@ -194,6 +206,24 @@ def get_certificate_tax_id() -> str:
         if len(digits) == 11:
             return digits
     raise ArcaError("El certificado de ARCA no tiene un CUIT en el subject")
+
+
+def get_delegate_tax_id() -> str:
+    """El CUIT que el usuario tiene que autorizar en ARCA.
+
+    **El certificado manda.** Es la única fuente que no puede mentir: es literalmente el CUIT
+    que ARCA va a ver del otro lado, así que mientras haya certificado configurado el mail de
+    instrucciones y la verificación de la delegación no pueden nombrar números distintos.
+
+    `ARCA_DELEGATE_TAX_ID` es la respuesta cuando no hay certificado en esta máquina — un
+    worker que solo manda mails, por ejemplo. Es un fallback y no una alternativa: si los dos
+    están y discrepan, el que vale es el certificado, porque el otro es una variable que
+    alguien escribió a mano.
+    """
+    try:
+        return get_certificate_tax_id()
+    except ArcaError:
+        return get_arca_settings().arca_delegate_tax_id
 
 
 @dataclass(frozen=True)

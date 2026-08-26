@@ -620,10 +620,10 @@ los textos, y corregir la redacción de un mail no debería obligar a leer códi
   nombre se resuelve en cada llamada y un test puede parchear el transporte en un solo
   lugar — el mismo criterio que `MAX_UPLOAD_BYTES`. Con `from ... import send_email` el
   parche no llegaría nunca.
-- **`ARCA_DELEGATE_TAX_ID` tiene como default un placeholder legible**, "(CUIT de FactuMov,
-  a completar)", y no un CUIT plausible: el certificado todavía no existe, y un número falso
-  bien formado saldría en el mail sin que nadie lo mire dos veces. **Pendiente para cuando
-  exista.**
+- **El CUIT que nombra el mail de delegación sale de `arca.get_delegate_tax_id()`**, no de
+  `EmailSettings`. Hasta el 2026-08-26 era un campo de esta clase con un placeholder por
+  default, porque se creía que el certificado no existía. Existe: es `20182810674`, el mismo
+  con el que Balance360 ya emite. Ver *ARCA → El CUIT de FactuMov*.
 
 #### `generate_opaque_token` / `hash_opaque_token`
 Antes se llamaban `*_session_token`. La mecánica es la misma para la sesión y para la
@@ -743,10 +743,30 @@ De ahí salen casi todas las decisiones de abajo.
   las funciones con `lru_cache`** — mismo patrón, y mismas dos razones, que `EmailSettings`.
 - **`ARCA_ENV` default `"homo"`.** Si la variable falta, la app pega contra el ARCA de
   pruebas. Equivocarse hacia homologación es gratis; al revés no.
-- **Pendiente:** `EmailSettings.arca_delegate_tax_id` sigue con el placeholder. Cuando el
-  certificado exista, ese valor tiene que salir de `get_certificate_tax_id()` y no de una
-  variable, para que el CUIT del mail y el que ARCA autoriza no puedan discrepar. El
-  endpoint de verificación ya lo lee del certificado; el mail todavía no.
+
+### El CUIT de FactuMov es `20182810674`
+Es el mismo con el que **Balance360 ya emite** —para sí mismo y para quienes le delegaron—,
+y ya tiene los servicios y los certificados dados de alta en ARCA. O sea que el certificado
+no es un pendiente: existe, funciona y está probado en producción contra CUIT de terceros.
+
+Esto corrige la nota que decía "el certificado todavía no existe, default placeholder". Era
+de cuando se escribió el mail de delegación, antes de mirar Balance360.
+
+- **`get_delegate_tax_id()` es la única función que contesta "a quién hay que autorizar".**
+  La usan el mail de instrucciones y el `delegate_tax_id` de la respuesta de verificación.
+  Antes eran dos lugares con dos fuentes distintas, que es exactamente cómo se llega a que el
+  mail diga un CUIT y el sistema espere otro.
+- **El certificado manda; `ARCA_DELEGATE_TAX_ID` es el fallback.** El certificado es lo que
+  ARCA ve del otro lado, así que no puede mentir; la variable es algo que alguien tecleó.
+  Cuando los dos están y discrepan, gana el certificado. La variable contesta cuando no hay
+  certificado en esa máquina — un worker que solo manda mails.
+- **`arca_delegate_tax_id` se mudó de `EmailSettings` a `ArcaSettings`.** Es un dato de ARCA
+  que el mail *usa*; estaba en el otro lado solo porque el mail fue su primer consumidor y
+  `ArcaSettings` no existía.
+- **El default es el CUIT real y no un placeholder**, al revés que antes: el certificado es
+  uno solo para toda la app, así que el CUIT es un hecho del proyecto y no de la instalación.
+  La variable queda para el día que FactuMov saque certificado propio y haya que migrar sin
+  tocar código.
 
 ### El ticket de acceso vive en una tabla
 No en el `ticket_arca.json` del cwd que usa Balance360. **WSAA se niega a emitir un TA nuevo
@@ -843,9 +863,10 @@ en el cwd de un contenedor no coordina eso, y encima no sobrevive al deploy.
   y salir a la red de más es exactamente el bug que rompe la app por doce horas.
 - **La conexión real contra homologación es una prueba manual, no un test.** Depende de un
   certificado que no está en el repo y de que ARCA esté levantado. Los certificados de
-  Balance360 (`certs/homo.crt`, `certs/balance360.key`) sirven para probar la cadena entera,
-  con la salvedad de que verifican la delegación de Miguel contra sí mismo: no ejercitan una
-  delegación de un tercero, que es el caso real de FactuMov.
+  Balance360 (`certs/homo.crt`, `certs/balance360.key`) son los de este mismo CUIT y sirven
+  para probar la cadena entera, incluida una delegación de un tercero: Balance360 ya emite
+  para CUIT que le delegaron, así que ese caso se puede verificar contra uno real y no solo
+  contra el propio.
 
 ## Ownership scoping (2026-08-26)
 `user_id` en `fiscal_identities` y `customers`, todas las queries de esas dos tablas

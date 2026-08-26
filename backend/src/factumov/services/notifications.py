@@ -14,7 +14,7 @@ from urllib.parse import quote
 # un test puede parchear `factumov.services.email.send_email` en un solo lugar y estas
 # funciones miran el parche. Con `from ... import send_email` la referencia quedaría fija al
 # importar y el parche no llegaría acá nunca.
-from factumov.services import email
+from factumov.services import arca, email
 
 _CONFIRMATION_PATH = "/confirmar-email"
 
@@ -67,7 +67,6 @@ def send_delegation_instructions_email(to: str) -> None:
     ninguna prueba de que la casilla sea de quien dice, y estas instrucciones terminan con
     alguien entrando a ARCA con su Clave Fiscal.
     """
-    settings = email.get_email_settings()
     email.send_email(
         to=to,
         subject="Cómo autorizar a FactuMov a emitir tus facturas",
@@ -80,7 +79,7 @@ def send_delegation_instructions_email(to: str) -> None:
             "2. Abrí 'Administrador de Relaciones de Clave Fiscal'.\n"
             "3. Elegí 'Nueva Relación' y buscá el servicio de Facturación Electrónica "
             "(WSFE).\n"
-            f"4. Como representante, indicá el CUIT {settings.arca_delegate_tax_id} "
+            f"4. Como representante, indicá el CUIT {arca.get_delegate_tax_id()} "
             "(FactuMov).\n"
             "5. Confirmá.\n\n"
             "Después cargá tu CUIT en FactuMov: verificamos la autorización solos, no hace "

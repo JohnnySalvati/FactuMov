@@ -24,6 +24,7 @@ from factumov.routers.auth import (
     CONFIRMATION_LIFETIME,
 )
 from factumov.services import email as email_service
+from tests.conftest import FALLBACK_DELEGATE_TAX_ID
 from tests.factories import PASSWORD, make_email_confirmation, make_user
 
 NEW_PASSWORD = "unaContraseñaLarga"
@@ -228,7 +229,7 @@ def test_confirm_mails_the_delegation_instructions(anonymous_client, sent_emails
 
     assert len(sent_emails) == 2
     assert "autorizar a FactuMov" in sent_emails[1].subject
-    assert "20-11111111-2" in sent_emails[1].body
+    assert FALLBACK_DELEGATE_TAX_ID in sent_emails[1].body
 
 
 def test_confirming_twice_does_not_repeat_the_delegation_mail(anonymous_client, sent_emails):

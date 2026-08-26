@@ -40,10 +40,6 @@ class EmailSettings(BaseSettings):
     # De dónde cuelga el link de confirmación. Es la SPA, no el backend: el usuario aterriza
     # en una pantalla que lee el token y lo postea.
     app_base_url: str = "http://localhost:5173"
-    # El CUIT al que el usuario le delega WSFE en ARCA: el del certificado de FactuMov.
-    # Todavía no existe, así que el default es un placeholder visible a propósito — un
-    # CUIT plausible pero falso saldría en el mail sin que nadie lo note.
-    arca_delegate_tax_id: str = "(CUIT de FactuMov, a completar)"
 
 
 @lru_cache

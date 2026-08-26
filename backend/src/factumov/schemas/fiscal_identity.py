@@ -85,6 +85,7 @@ class DelegationStatus(BaseModel):
     message: str | None = None
     # El mismo valor que quedó en la fila. Ahorra un GET para refrescar la pantalla.
     delegation_verified_at: datetime | None = None
-    # El CUIT al que hay que autorizar en ARCA, leído del certificado de FactuMov. Va en la
-    # respuesta negativa para que la pantalla pueda repetir la instrucción sin ir a buscarlo.
+    # El CUIT al que hay que autorizar en ARCA — el del certificado de FactuMov. Va solo en la
+    # respuesta negativa, que es la única donde hay una instrucción que dar: cuando la
+    # delegación ya está, repetir a quién había que autorizar no le sirve a la pantalla.
     delegate_tax_id: str | None = None

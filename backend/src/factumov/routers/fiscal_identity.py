@@ -152,7 +152,7 @@ def verify_delegation(
             granted=False,
             message=check.message,
             delegation_verified_at=fiscal_identity.delegation_verified_at,
-            delegate_tax_id=_delegate_tax_id(),
+            delegate_tax_id=arca.get_delegate_tax_id(),
         )
 
     fiscal_identity_crud.mark_delegation_verified(db, fiscal_identity)
@@ -164,16 +164,3 @@ def verify_delegation(
         granted=True,
         delegation_verified_at=fiscal_identity.delegation_verified_at,
     )
-
-
-def _delegate_tax_id() -> str | None:
-    """El CUIT de FactuMov, o None si el certificado todavía no está configurado.
-
-    Que falte el certificado no puede tumbar la respuesta: acá ya sabemos que la delegación
-    no está, y ese es el dato que el usuario vino a buscar. El CUIT es un extra para la
-    pantalla.
-    """
-    try:
-        return arca.get_certificate_tax_id()
-    except ArcaError:
-        return None

@@ -18,6 +18,7 @@ from zeep.exceptions import Fault
 
 from factumov.exceptions import ArcaError, WsfeError
 from factumov.services import arca, wsfe
+from tests.conftest import FALLBACK_DELEGATE_TAX_ID
 from tests.factories import make_fiscal_identity
 
 NOT_DELEGATED_MSG = "ValidacionDeToken: No apareció CUIT en lista de relaciones"
@@ -171,14 +172,19 @@ def test_verify_delegation_tells_which_tax_id_to_authorize(
     assert verify(client, fiscal_identity).json()["delegate_tax_id"] == arca_cert
 
 
-def test_verify_delegation_survives_a_missing_certificate(client, fiscal_identity, wsfe_returns):
-    """Sin certificado configurado la respuesta sale igual, sin el CUIT. Es un extra, no el dato."""
+def test_verify_delegation_falls_back_when_there_is_no_certificate(
+    client, fiscal_identity, wsfe_returns
+):
+    """Sin certificado en esta máquina contesta el `ARCA_DELEGATE_TAX_ID` configurado.
+
+    La instrucción es el punto del endpoint: quedarse sin CUIT que nombrar la deja inútil.
+    """
     wsfe_returns(NOT_DELEGATED)
 
     response = verify(client, fiscal_identity)
 
     assert response.status_code == 200
-    assert response.json()["delegate_tax_id"] is None
+    assert response.json()["delegate_tax_id"] == FALLBACK_DELEGATE_TAX_ID
 
 
 def test_verify_delegation_is_502_when_arca_cannot_be_reached(
