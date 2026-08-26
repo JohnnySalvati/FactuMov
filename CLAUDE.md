@@ -4,6 +4,13 @@
 Nueva app de facturación, independiente de Balance360 pero reutilizando su lógica de
 backend ya probada. Debe funcionar en Android, iOS y Desktop.
 
+**El celular es el caso principal** (confirmado el 2026-08-26); la computadora tiene que
+andar, pero es el secundario. No es un matiz de diseño: define que el CSS se escribe
+mobile-first —el estilo base es el de pantalla angosta y las media queries agregan con
+`min-width`— y que cada pantalla nueva se piensa primero en 360 px de ancho. Escrito al
+revés, cada pantalla nace ancha y hay que acordarse de angostarla, o sea que el caso
+principal queda dependiendo de que nadie se olvide.
+
 ## Funcionalidades core
 1. Crear un modelo a partir de la importación de una factura en PDF.
 2. Permitir la edición de ese modelo.
@@ -933,8 +940,33 @@ pantalla grande y la que cierra la funcionalidad #1 de punta a punta.
 # terminal 1
 cd backend && uv run uvicorn factumov.main:app --reload --port 8000
 # terminal 2
-cd frontend && npm run dev      # http://localhost:5173
+cd frontend && npm run dev      # https://localhost:5173
 ```
+Vite imprime también las URL de LAN. Para probar desde el celular: misma red Wi-Fi, abrir la
+de la interfaz Wi-Fi y aceptar la advertencia del certificado.
+
+### HTTPS en desarrollo, y por qué no es opcional
+El dev server usa `@vitejs/plugin-basic-ssl`, que genera un certificado autofirmado solo, y
+escucha en todas las interfaces (`host: true`).
+
+**La cookie de sesión es `Secure`, y el navegador solo la guarda en un contexto seguro.**
+`localhost` cuenta como seguro aunque sea http —por eso en la computadora anda sin
+certificado—, pero `http://192.168.0.x:5173` **no**. Probando desde el celular por http la
+cookie se setea, nunca vuelve, y todo contesta 401 por un motivo que no se parece en nada a
+la causa. Es el mismo problema que resuelve el `base_url="https://testserver"` del TestClient
+de la suite del backend, y conviene tenerlos juntos en la cabeza: son el mismo error con dos
+disfraces.
+
+La alternativa era hacer configurable el `secure=True` de la cookie y apagarlo en desarrollo.
+Se descartó: sería un flag capaz de viajar a producción y dejar la sesión viajando en claro,
+a cambio de ahorrarse una advertencia del navegador que se acepta una vez.
+
+Verificado el 2026-08-26: login por `https://192.168.1.37:5173`, cookie guardada, y el
+request siguiente autenticado.
+
+**Detalle a tener en cuenta:** `APP_BASE_URL` del backend apunta a `http://localhost:5173`,
+así que el link de confirmación que llega por mail **no** sirve para abrir desde el celular.
+Para probar el registro desde el teléfono hay que apuntar esa variable a la URL de LAN.
 
 ### El proxy de Vite en vez de CORS
 `/api` se reenvía a `127.0.0.1:8000` y se le saca el prefijo. El navegador ve **un solo
@@ -966,6 +998,31 @@ confirmación de los mails llegaría roto.
   igual; ahí decide `get_current_user`. Se aplica al grupo de rutas y no pantalla por
   pantalla, mismo criterio que el `APIRouter(dependencies=[...])` del backend: la regla
   escrita una vez no se puede olvidar en la pantalla que se agregue mañana.
+
+### Mobile-first
+El estilo base es el de pantalla angosta; `@media (min-width: 700px)` agrega lo de escritorio.
+El corte está elegido por el contenido —el ancho a partir del cual dos campos conviven en un
+renglón sin apretarse— y no por el tamaño de ningún dispositivo.
+
+- **Las tablas se vuelven tarjetas en angosto**, con la etiqueta de la columna al lado del
+  dato. Se hace con CSS y `data-label` en el `<td>`, no renderizando dos árboles distintos
+  según el ancho: con JS habría que elegir un breakpoint en el cliente y ese número se
+  desincroniza del CSS el día que alguien toque uno solo. Además el markup sigue siendo una
+  `<table>`, que es lo que un lector de pantalla necesita para anunciar fila y columna.
+- **El `<thead>` se esconde con `clip-path`, no con `display: none`.** Lo segundo se lo
+  escondería también al lector de pantalla, y ahí las celdas se quedan sin nombre.
+- **Los inputs van a 16 px como mínimo.** Safari en iOS hace zoom automático al enfocar un
+  campo con tipografía más chica y después no vuelve solo: el usuario queda con la página
+  agrandada y la despincha a mano. No es estética.
+- **Objetivo táctil de 44 px** (`--touch`) en botones, campos y pestañas. Es el piso común de
+  las guías de Apple y de Material.
+- **Los botones ocupan el ancho en angosto** y vuelven a su tamaño natural en ancho. En un
+  celular el botón es el objetivo más grande que se puede dar, y evita el "apreté al lado".
+- **La barra superior es `sticky`** y la navegación baja a su propio renglón, a lo ancho: en
+  el celular la lista es larga y volver arriba para cambiar de sección es la mitad de la
+  navegación. La dirección de mail aparece recién cuando hay lugar.
+- **`overflow-x: hidden` en el `body`.** Sin eso, cualquier cosa ancha estira la página y todo
+  se va de costado.
 
 ### Sin TanStack Query y sin Tailwind
 Las dos por el mismo motivo: resuelven problemas que esta app todavía no tiene.

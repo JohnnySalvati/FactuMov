@@ -1,10 +1,15 @@
 /*
  * Un solo archivo de CSS, con variables y clases a mano.
  *
- * Sin Tailwind ni librería de componentes: son cuatro pantallas de formularios y tablas, y
- * lo que se ahorraría en clases se pagaría en una dependencia con su propio build y su
- * propio vocabulario. Cuando el editor de facturas traiga drag-and-drop y layouts de verdad,
- * es el momento de volver a mirar esta decisión — no antes.
+ * Sin Tailwind ni librería de componentes: son formularios y listas, y lo que se ahorraría en
+ * clases se pagaría en una dependencia con su propio build. Revisar cuando el editor de
+ * facturas traiga drag-and-drop.
+ *
+ * **Mobile-first, y no por moda.** FactuMov se usa principalmente desde el celular; la
+ * computadora es el caso secundario. Eso significa que el estilo base es el de pantalla
+ * angosta y las media queries **agregan** con `min-width`, nunca al revés. Escrito como
+ * desktop-first, cada pantalla nueva nace ancha y hay que acordarse de angostarla — o sea que
+ * el caso principal queda dependiendo de que nadie se olvide.
  */
 
 :root {
@@ -21,11 +26,14 @@
   --ok-bg: #e8f6ee;
   --warn: #8a6100;
   --warn-bg: #fdf4e0;
-  --radius: 8px;
+  --radius: 10px;
+  /* El mínimo que se puede tocar con el dedo sin errarle. Sale de las guías de Apple (44px)
+     y de Material (48dp); 44 es el piso de las dos. */
+  --touch: 44px;
 
   color-scheme: light;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  font-size: 15px;
+  font-size: 16px;
   color: var(--text);
 }
 
@@ -36,15 +44,18 @@
 body {
   margin: 0;
   background: var(--bg);
+  /* Sin esto, un `<pre>` o una tabla ancha estiran el body y toda la página se va de costado
+     en el celular. */
+  overflow-x: hidden;
 }
 
 h1 {
-  font-size: 1.5rem;
+  font-size: 1.35rem;
   margin: 0 0 0.25rem;
 }
 
 h2 {
-  font-size: 1.1rem;
+  font-size: 1.05rem;
   margin: 0 0 0.75rem;
 }
 
@@ -57,28 +68,45 @@ a {
 .app-header {
   background: var(--surface);
   border-bottom: 1px solid var(--border);
-  padding: 0.75rem 1.5rem;
+  padding: 0.6rem 1rem;
   display: flex;
   align-items: center;
-  gap: 1.5rem;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  /* Queda a la vista al hacer scroll: en el celular la lista es larga y volver arriba para
+     cambiar de sección es la mitad de la navegación. */
+  position: sticky;
+  top: 0;
+  z-index: 10;
 }
 
 .app-brand {
   font-weight: 700;
   font-size: 1.05rem;
+  flex: 1;
 }
 
 .app-nav {
   display: flex;
-  gap: 1rem;
-  flex: 1;
+  gap: 0.5rem;
+  /* En angosto la navegación baja a su propio renglón, a lo ancho: dos pestañas grandes
+     valen más que dos textitos apretados contra el nombre de la app. */
+  order: 3;
+  width: 100%;
 }
 
 .app-nav a {
+  flex: 1;
+  text-align: center;
   text-decoration: none;
   color: var(--muted);
-  padding: 0.25rem 0;
+  padding: 0.5rem 0.25rem;
   border-bottom: 2px solid transparent;
+  min-height: var(--touch);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.92rem;
 }
 
 .app-nav a.active {
@@ -88,27 +116,40 @@ a {
 
 .app-user {
   color: var(--muted);
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.5rem;
+}
+
+/* La dirección de mail no entra en un celular y no es información que haga falta ver todo el
+   tiempo: aparece recién cuando hay lugar. */
+.app-user-email {
+  display: none;
+}
+
+/* El "Salir" no se estira: está al lado del nombre de la app, no en un formulario. */
+.app-user button {
+  width: auto;
+  padding: 0.5rem 0.8rem;
 }
 
 .page {
   max-width: 900px;
   margin: 0 auto;
-  padding: 1.5rem;
+  padding: 1rem;
 }
 
 .page-intro {
   color: var(--muted);
-  margin: 0 0 1.25rem;
+  margin: 0 0 1rem;
+  font-size: 0.92rem;
 }
 
 .centered {
   max-width: 380px;
-  margin: 4rem auto;
-  padding: 0 1.5rem;
+  margin: 2rem auto;
+  padding: 0 1rem;
 }
 
 /* --- Superficies -------------------------------------------------------------------- */
@@ -117,8 +158,8 @@ a {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 1.25rem;
-  margin-bottom: 1.25rem;
+  padding: 1rem;
+  margin-bottom: 1rem;
 }
 
 .stack {
@@ -127,20 +168,18 @@ a {
   gap: 0.85rem;
 }
 
+/* En angosto los campos van uno abajo del otro: dos inputs al lado en 360 px no entra ni
+   con calzador. En ancho pasa a fila — ver la media query del final. */
 .row {
   display: flex;
+  flex-direction: column;
   gap: 0.75rem;
-  align-items: flex-end;
-  flex-wrap: wrap;
 }
 
-.row > * {
-  flex: 1;
-  min-width: 150px;
-}
-
-.row > button {
-  flex: 0 0 auto;
+/* Campo angosto —un selector de dos letras— solo cuando hay lugar. En el celular ocupa el
+   ancho como cualquier otro. */
+.narrow {
+  max-width: none;
 }
 
 /* --- Formularios -------------------------------------------------------------------- */
@@ -149,18 +188,24 @@ label {
   display: block;
   font-size: 0.85rem;
   color: var(--muted);
-  margin-bottom: 0.25rem;
+  margin-bottom: 0.3rem;
 }
 
 input,
 select {
   width: 100%;
-  padding: 0.5rem 0.6rem;
+  padding: 0.6rem 0.7rem;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--surface);
   color: inherit;
-  font: inherit;
+  font-family: inherit;
+  /* **16px o más, obligatorio.** Safari en iOS hace zoom automático al enfocar un input con
+     tipografía más chica, y después no vuelve solo: el usuario queda con la página agrandada
+     y tiene que despincharla a mano. No es estética, es la diferencia entre un formulario
+     usable y uno que pelea. */
+  font-size: 16px;
+  min-height: var(--touch);
 }
 
 input:focus,
@@ -170,13 +215,18 @@ select:focus {
 }
 
 button {
-  padding: 0.5rem 0.9rem;
+  padding: 0.6rem 1rem;
   border: 1px solid var(--accent);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--accent);
   color: var(--accent-text);
-  font: inherit;
+  font-family: inherit;
+  font-size: 0.95rem;
+  min-height: var(--touch);
   cursor: pointer;
+  /* Los botones ocupan el ancho en angosto: son el objetivo táctil más grande posible y
+     evitan el "apreté al lado". */
+  width: 100%;
 }
 
 button:disabled {
@@ -194,15 +244,17 @@ button.link {
   background: none;
   border: none;
   color: var(--accent);
-  padding: 0;
+  padding: 0.5rem 0;
   text-decoration: underline;
+  width: auto;
+  min-height: var(--touch);
 }
 
 /* --- Mensajes ----------------------------------------------------------------------- */
 
 .notice {
   padding: 0.7rem 0.85rem;
-  border-radius: 6px;
+  border-radius: 8px;
   font-size: 0.9rem;
   border: 1px solid transparent;
 }
@@ -231,33 +283,85 @@ button.link {
 }
 
 .notice li {
-  margin-bottom: 0.2rem;
+  margin-bottom: 0.35rem;
 }
 
-/* --- Tablas ------------------------------------------------------------------------- */
+/* --- Listas ------------------------------------------------------------------------- */
+/*
+ * En angosto cada fila es una tarjeta con la etiqueta de la columna al lado del dato; en
+ * ancho vuelve a ser una tabla de verdad.
+ *
+ * Se hace con CSS y `data-label` en vez de renderizar dos árboles distintos según el ancho.
+ * Con JS habría que elegir un breakpoint en el cliente, y ese número se desincroniza del CSS
+ * el día que alguien toque uno de los dos. Además el markup sigue siendo una `<table>`, que
+ * es lo que un lector de pantalla necesita para anunciar "columna X, fila Y".
+ */
 
 table {
   width: 100%;
   border-collapse: collapse;
 }
 
-th,
-td {
-  text-align: left;
-  padding: 0.55rem 0.5rem;
-  border-bottom: 1px solid var(--border);
-  vertical-align: middle;
+thead {
+  /* Oculta el encabezado sin sacarlo del árbol de accesibilidad: `display: none` se lo
+     escondería también al lector de pantalla, y ahí las celdas pierden su nombre. */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
-th {
-  font-size: 0.78rem;
+tbody tr {
+  display: block;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.6rem 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+tbody tr:last-child {
+  margin-bottom: 0;
+}
+
+td {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  padding: 0.35rem 0;
+  border: none;
+}
+
+/* La etiqueta de la columna, que en la tabla vive en el `<th>`. */
+td::before {
+  content: attr(data-label);
+  color: var(--muted);
+  font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  color: var(--muted);
+  flex: 0 0 auto;
 }
 
-tbody tr:last-child td {
-  border-bottom: none;
+/* Las celdas con un bloque adentro —el estado de la delegación— no entran en dos columnas:
+   la etiqueta va arriba y el contenido abajo, a lo ancho. */
+td.block {
+  display: block;
+}
+
+td.block::before {
+  display: block;
+  margin-bottom: 0.35rem;
+}
+
+td.actions {
+  justify-content: flex-end;
+  padding-top: 0.5rem;
+}
+
+td.actions::before {
+  content: '';
 }
 
 .empty {
@@ -270,7 +374,7 @@ tbody tr:last-child td {
 
 .badge {
   display: inline-block;
-  padding: 0.1rem 0.5rem;
+  padding: 0.15rem 0.6rem;
   border-radius: 999px;
   font-size: 0.78rem;
   white-space: nowrap;
@@ -299,11 +403,14 @@ tbody tr:last-child td {
 button.icon {
   background: none;
   border: none;
-  padding: 0.15rem 0.35rem;
-  font-size: 1rem;
+  padding: 0;
+  font-size: 1.15rem;
   line-height: 1;
   color: var(--muted);
-  border-radius: 4px;
+  border-radius: 8px;
+  width: var(--touch);
+  min-width: var(--touch);
+  height: var(--touch);
 }
 
 button.icon:hover {
@@ -317,26 +424,182 @@ button.danger {
 }
 
 .confirm-group {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 0.4rem;
-  white-space: nowrap;
+  gap: 0.5rem;
 }
 
 .confirm-group button {
-  padding: 0.25rem 0.6rem;
-  font-size: 0.85rem;
+  width: auto;
+  padding: 0.4rem 0.9rem;
 }
 
 .delete-error {
-  display: inline-block;
   color: var(--danger);
   font-size: 0.85rem;
+  text-align: right;
 }
 
-/* La columna de acciones no compite por ancho con los datos. */
-.actions {
-  width: 1%;
-  white-space: nowrap;
-  text-align: right;
+/* --- Pantalla ancha ----------------------------------------------------------------- */
+/*
+ * 700px: el ancho a partir del cual dos campos conviven en un renglón sin quedar apretados.
+ * Está elegido por el contenido y no por el tamaño de ningún dispositivo — una tablet en
+ * vertical y un celular apaisado caen a cada lado del corte según cuál sea, y las dos
+ * respuestas son correctas.
+ */
+@media (min-width: 700px) {
+  :root {
+    font-size: 15px;
+  }
+
+  h1 {
+    font-size: 1.5rem;
+  }
+
+  .app-header {
+    padding: 0.75rem 1.5rem;
+    gap: 1.5rem;
+  }
+
+  .app-brand {
+    flex: 0 0 auto;
+  }
+
+  .app-nav {
+    order: 0;
+    width: auto;
+    flex: 1;
+    gap: 1rem;
+  }
+
+  .app-nav a {
+    flex: 0 0 auto;
+    text-align: left;
+    padding: 0.25rem 0;
+    min-height: 0;
+  }
+
+  .app-user-email {
+    display: inline;
+  }
+
+  .page {
+    padding: 1.5rem;
+  }
+
+  .card {
+    padding: 1.25rem;
+    margin-bottom: 1.25rem;
+  }
+
+  .centered {
+    margin: 4rem auto;
+  }
+
+  .row {
+    flex-direction: row;
+    gap: 0.75rem;
+    align-items: flex-end;
+    flex-wrap: wrap;
+  }
+
+  .row > * {
+    flex: 1;
+    min-width: 150px;
+  }
+
+  .row > button {
+    flex: 0 0 auto;
+  }
+
+  .narrow {
+    max-width: 120px;
+  }
+
+  button {
+    width: auto;
+    min-height: 0;
+    padding: 0.5rem 0.9rem;
+  }
+
+  input,
+  select {
+    min-height: 0;
+    padding: 0.5rem 0.6rem;
+    font-size: inherit;
+  }
+
+  /* La tabla vuelve a ser una tabla. */
+  thead {
+    position: static;
+    width: auto;
+    height: auto;
+    clip-path: none;
+  }
+
+  th {
+    text-align: left;
+    padding: 0.55rem 0.5rem;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--muted);
+  }
+
+  tbody tr {
+    display: table-row;
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    margin: 0;
+  }
+
+  td {
+    display: table-cell;
+    padding: 0.55rem 0.5rem;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+  }
+
+  td::before {
+    content: none;
+  }
+
+  td.block {
+    display: table-cell;
+  }
+
+  tbody tr:last-child td {
+    border-bottom: none;
+  }
+
+  td.actions {
+    width: 1%;
+    white-space: nowrap;
+    text-align: right;
+  }
+
+  button.icon {
+    width: auto;
+    min-width: 0;
+    height: auto;
+    padding: 0.15rem 0.35rem;
+    font-size: 1rem;
+  }
+
+  .confirm-group {
+    display: inline-flex;
+    gap: 0.4rem;
+    white-space: nowrap;
+  }
+
+  .confirm-group button {
+    padding: 0.25rem 0.6rem;
+    font-size: 0.85rem;
+  }
+
+  .delete-error {
+    display: inline-block;
+  }
 }

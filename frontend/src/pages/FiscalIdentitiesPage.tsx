@@ -62,10 +62,16 @@ export function FiscalIdentitiesPage() {
             <tbody>
               {data.map((identity) => (
                 <tr key={identity.id}>
-                  <td>{identity.name}</td>
-                  <td className="mono">{identity.tax_id}</td>
-                  <td>{CONDICION_IVA_LABELS[identity.condicion_iva]}</td>
-                  <td>
+                  {/* `data-label` es lo que la tarjeta de celular muestra como nombre del
+                      dato: en angosto no hay encabezado de columna a la vista. */}
+                  <td data-label="Nombre">{identity.name}</td>
+                  <td data-label="CUIT" className="mono">
+                    {identity.tax_id}
+                  </td>
+                  <td data-label="Condición IVA">
+                    {CONDICION_IVA_LABELS[identity.condicion_iva]}
+                  </td>
+                  <td data-label="Delegación" className="block">
                     <DelegationCell identity={identity} onVerified={reload} />
                   </td>
                   <td className="actions">

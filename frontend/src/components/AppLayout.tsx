@@ -27,7 +27,7 @@ export function AppLayout() {
           </NavLink>
         </nav>
         <div className="app-user">
-          <span>{user?.email}</span>
+          <span className="app-user-email">{user?.email}</span>
           <button className="secondary" onClick={onLogout}>
             Salir
           </button>

@@ -46,12 +46,16 @@ export function CustomersPage() {
             <tbody>
               {data.map((customer) => (
                 <tr key={customer.id}>
-                  <td>{customer.name}</td>
-                  <td className="mono">
+                  <td data-label="Nombre">{customer.name}</td>
+                  <td data-label="Documento" className="mono">
                     {DOC_TYPE_LABELS[customer.doc_type]} {customer.doc_number}
                   </td>
-                  <td>{CONDICION_IVA_LABELS[customer.condicion_iva]}</td>
-                  <td className="muted">{customer.address ?? '—'}</td>
+                  <td data-label="Condición IVA">
+                    {CONDICION_IVA_LABELS[customer.condicion_iva]}
+                  </td>
+                  <td data-label="Domicilio" className="muted">
+                    {customer.address ?? '—'}
+                  </td>
                   <td className="actions">
                     <DeleteButton
                       title={`Eliminar ${customer.name}`}
@@ -151,7 +155,7 @@ function NewCustomerForm({ onCreated }: { onCreated: () => void }) {
       <h2>Agregar un cliente</h2>
 
       <div className="row">
-        <div style={{ maxWidth: 120 }}>
+        <div className="narrow">
           <label htmlFor="c-doc-type">Documento</label>
           <select
             id="c-doc-type"
