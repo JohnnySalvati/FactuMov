@@ -81,6 +81,10 @@ explique el *por qué*, no el *qué* (el diff ya dice qué cambió).
   Balance360.
 
 ## Estructura del repo
+**No existe `frontend/` todavía** — al 2026-08-26 el repo es solo el backend. La SPA está
+decidida (React, ver *Stack*) pero no empezada; para probar a mano está el Swagger de FastAPI
+en `/docs`.
+
 ```
 FactuMov/
 ├── CLAUDE.md
@@ -863,10 +867,28 @@ en el cwd de un contenedor no coordina eso, y encima no sobrevive al deploy.
   y salir a la red de más es exactamente el bug que rompe la app por doce horas.
 - **La conexión real contra homologación es una prueba manual, no un test.** Depende de un
   certificado que no está en el repo y de que ARCA esté levantado. Los certificados de
-  Balance360 (`certs/homo.crt`, `certs/balance360.key`) son los de este mismo CUIT y sirven
-  para probar la cadena entera, incluida una delegación de un tercero: Balance360 ya emite
-  para CUIT que le delegaron, así que ese caso se puede verificar contra uno real y no solo
-  contra el propio.
+  Balance360 (`certs/homo.crt`, `certs/balance360.key`) son los de este mismo CUIT.
+
+#### Verificado contra ARCA homologación — 2026-08-26
+La cadena entera anduvo de punta a punta, no solo con SOAP mockeado:
+
+| Llamada | CUIT | Resultado |
+|---|---|---|
+| `check_delegation` | `20182810674` (el propio) | `granted=True` |
+| `check_delegation` | `27177624441` (**un tercero**) | `granted=True` |
+| `get_taxpayer` | `30500010912` | INSCRIPTO |
+| `get_taxpayer` | `20000000001` | MONOTRIBUTO |
+| `get_taxpayer` | `33693450239` | FINAL |
+| `get_taxpayer` | `27177624441` | `PadronError` — no está en el padrón de homo |
+
+`27177624441` es el caso que importa: es un CUIT que le delegó a Balance360 de verdad, así
+que prueba la delegación de un tercero y no la propia. Es el que hay que usar cuando se
+toque `wsfe.py`, porque es el único que puede fallar de una manera que el propio no.
+
+Que ese mismo CUIT dé `PadronError` **no es un bug**: el padrón de homologación tiene
+contribuyentes de prueba, no los reales. Los tres de arriba sí están, y devuelven una
+condición IVA cada uno, que es lo que hace que la deducción por `idImpuesto` esté probada
+contra datos de ARCA y no solo contra un `SimpleNamespace`.
 
 ## Ownership scoping (2026-08-26)
 `user_id` en `fiscal_identities` y `customers`, todas las queries de esas dos tablas
