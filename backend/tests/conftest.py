@@ -109,10 +109,21 @@ def client(_db_override, db, user):
 
 
 @pytest.fixture
-def fiscal_identity(db):
-    return factories.make_fiscal_identity(db)
+def other_user(db):
+    """Un segundo usuario, para los tests que prueban que no ve lo del primero.
+
+    Activo y confirmado a propósito: si estuviera dado de baja, un test que espera 404
+    podría estar pasando por el 401 de `get_current_user` y no por el scoping.
+    """
+    return factories.make_user(db, email_confirmed_at=datetime.now(UTC))
 
 
 @pytest.fixture
-def customer(db):
-    return factories.make_customer(db)
+def fiscal_identity(db, user):
+    """Identidad fiscal del usuario de `client` — el caso normal de los tests."""
+    return factories.make_fiscal_identity(db, user.id)
+
+
+@pytest.fixture
+def customer(db, user):
+    return factories.make_customer(db, user.id)

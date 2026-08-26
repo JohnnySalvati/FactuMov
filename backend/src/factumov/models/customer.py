@@ -1,7 +1,7 @@
 import uuid
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Enum, String, UniqueConstraint, Uuid
+from sqlalchemy import Enum, ForeignKey, String, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from factumov.enums import CondicionIva, DocType
@@ -14,14 +14,18 @@ if TYPE_CHECKING:
 class Customer(Base, TimestampMixin):
     __tablename__ = "customers"
     __table_args__ = (
+        # El documento identifica al cliente dentro de la cartera de un usuario, no en
+        # todo el sistema: dos usuarios le facturan al mismo cliente todo el tiempo.
         UniqueConstraint(
+            "user_id",
             "doc_type",
             "doc_number",
-            name="uq_customers_doc_type_doc_number",
+            name="uq_customers_user_id_doc_type_doc_number",
         ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
     name: Mapped[str] = mapped_column(String(150))
     condicion_iva: Mapped[CondicionIva] = mapped_column(Enum(CondicionIva))
     doc_type: Mapped[DocType] = mapped_column(Enum(DocType))

@@ -4,7 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 
 from factumov.crud import fiscal_identity as fiscal_identity_crud
-from factumov.dependencies import SessionDep, get_current_user
+from factumov.dependencies import CurrentUserDep, SessionDep, get_current_user
 from factumov.exceptions import (
     DuplicateError,
     DuplicateFiscalIdentityNameError,
@@ -26,8 +26,11 @@ router = APIRouter(
 )
 
 
-def get_fiscal_identity_or_404(fiscal_identity_id: uuid.UUID, db: SessionDep) -> FiscalIdentity:
-    fiscal_identity = fiscal_identity_crud.get_by_id(db, fiscal_identity_id)
+def get_fiscal_identity_or_404(
+    fiscal_identity_id: uuid.UUID, db: SessionDep, user: CurrentUserDep
+) -> FiscalIdentity:
+    """404 sobre la identidad fiscal de otro usuario — ver `routers/customer.py`."""
+    fiscal_identity = fiscal_identity_crud.get_by_id(db, fiscal_identity_id, user.id)
     if fiscal_identity is None:
         raise HTTPException(status_code=404, detail="Identidad fiscal no encontrada")
     return fiscal_identity
@@ -37,8 +40,8 @@ FiscalIdentityDep = Annotated[FiscalIdentity, Depends(get_fiscal_identity_or_404
 
 
 @router.get("", response_model=list[FiscalIdentityRead])
-def list_fiscal_identities(db: SessionDep) -> list[FiscalIdentity]:
-    return fiscal_identity_crud.get_all(db)
+def list_fiscal_identities(db: SessionDep, user: CurrentUserDep) -> list[FiscalIdentity]:
+    return fiscal_identity_crud.get_all(db, user.id)
 
 
 @router.get("/{fiscal_identity_id}", response_model=FiscalIdentityRead)
@@ -47,9 +50,11 @@ def get_fiscal_identity(fiscal_identity: FiscalIdentityDep) -> FiscalIdentity:
 
 
 @router.post("", response_model=FiscalIdentityRead, status_code=201)
-def create_fiscal_identity(data: FiscalIdentityCreate, db: SessionDep) -> FiscalIdentity:
+def create_fiscal_identity(
+    data: FiscalIdentityCreate, db: SessionDep, user: CurrentUserDep
+) -> FiscalIdentity:
     try:
-        fiscal_identity = fiscal_identity_crud.create(db, data)
+        fiscal_identity = fiscal_identity_crud.create(db, data, user.id)
     except DuplicateFiscalIdentityNameError:
         raise HTTPException(status_code=409, detail="Nombre duplicado")
     except DuplicateFiscalIdentityTaxIdError:

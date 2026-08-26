@@ -13,6 +13,7 @@ from decimal import Decimal
 from sqlalchemy import func, select
 
 from factumov.enums import IvaAliquot
+from factumov.models.invoice_template import InvoiceTemplate
 from factumov.models.invoice_template_line import InvoiceTemplateLine
 from tests import factories
 
@@ -94,13 +95,15 @@ def test_create_rejects_a_duplicate_name_under_one_identity(client, db, fiscal_i
     assert response.json()["detail"] == "Nombre duplicado"
 
 
-def test_create_allows_the_same_name_under_another_identity(client, db, fiscal_identity, customer):
+def test_create_allows_the_same_name_under_another_identity(
+    user, client, db, fiscal_identity, customer
+):
     """The unique constraint spans both columns, so the name alone is not the conflict.
 
     Two of the user's own companies can each have their own "Alquiler"; only repeating it
     inside one of them is a 409.
     """
-    other_identity = factories.make_fiscal_identity(db)
+    other_identity = factories.make_fiscal_identity(db, user.id)
     factories.make_invoice_template(db, fiscal_identity, customer, name="Alquiler")
 
     response = client.post(URL, json=payload(other_identity.id, customer.id, name="Alquiler"))
@@ -287,3 +290,103 @@ def test_delete_an_unknown_id_is_a_404(client):
     response = client.delete(f"{URL}/{uuid.uuid4()}")
 
     assert response.status_code == 404
+
+
+# --- Ownership scoping -------------------------------------------------------------
+#
+# La tabla no tiene `user_id`: el scoping sale del join contra `fiscal_identities`. Estos
+# tests son los que prueban que ese join alcanza — que un modelo ajeno no aparece en la
+# lista y no se puede leer, editar ni borrar por id.
+#
+# La escritura es el otro lado: un id de padre ajeno tiene que dar el mismo 422 que un id
+# inexistente. La base no lo impide sola —la FK apunta a una fila que sí existe—, así que
+# lo garantiza la validación del CRUD.
+
+
+def other_pair(db, other_user):
+    """Una identidad fiscal y un cliente del otro usuario."""
+    return (
+        factories.make_fiscal_identity(db, other_user.id),
+        factories.make_customer(db, other_user.id),
+    )
+
+
+def test_list_excludes_another_users_templates(db, other_user, client, fiscal_identity, customer):
+    factories.make_invoice_template(db, fiscal_identity, customer, name="Mine")
+    their_identity, their_customer = other_pair(db, other_user)
+    factories.make_invoice_template(db, their_identity, their_customer, name="Theirs")
+
+    response = client.get(URL)
+
+    assert response.status_code == 200
+    assert {template["name"] for template in response.json()} == {"Mine"}
+
+
+def test_get_another_users_template_is_404(db, other_user, client):
+    their_identity, their_customer = other_pair(db, other_user)
+    theirs = factories.make_invoice_template(db, their_identity, their_customer)
+
+    response = client.get(f"{URL}/{theirs.id}")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Modelo no encontrado"
+
+
+def test_patch_another_users_template_is_404(db, other_user, client):
+    their_identity, their_customer = other_pair(db, other_user)
+    theirs = factories.make_invoice_template(db, their_identity, their_customer, name="Theirs")
+
+    response = client.patch(f"{URL}/{theirs.id}", json={"name": "Hijacked"})
+
+    assert response.status_code == 404
+    db.refresh(theirs)
+    assert theirs.name == "Theirs"
+
+
+def test_delete_another_users_template_is_404(db, other_user, client):
+    their_identity, their_customer = other_pair(db, other_user)
+    theirs = factories.make_invoice_template(db, their_identity, their_customer)
+
+    response = client.delete(f"{URL}/{theirs.id}")
+
+    assert response.status_code == 404
+    assert db.get(InvoiceTemplate, theirs.id) is not None
+
+
+def test_create_with_another_users_customer_is_422(db, other_user, client, fiscal_identity):
+    """Mismo 422 y mismo mensaje que un `customer_id` que no existe.
+
+    Es el caso que la base no puede atajar: la FK apunta a una fila real, así que sin la
+    validación del CRUD el modelo se crearía apuntando al cliente de otro. Y el mensaje es
+    el de siempre a propósito: uno propio confirmaría que ese id existe.
+    """
+    their_customer = factories.make_customer(db, other_user.id)
+
+    response = client.post(URL, json=payload(fiscal_identity.id, their_customer.id))
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Cliente desconocido"
+
+
+def test_create_with_another_users_fiscal_identity_is_422(db, other_user, client, customer):
+    their_identity = factories.make_fiscal_identity(db, other_user.id)
+
+    response = client.post(URL, json=payload(their_identity.id, customer.id))
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Identidad fiscal desconocida"
+
+
+def test_patch_into_another_users_customer_is_422(
+    db, other_user, client, fiscal_identity, customer
+):
+    """El PATCH también valida: sin esto, el modelo se reapunta después de creado."""
+    template = factories.make_invoice_template(db, fiscal_identity, customer)
+    their_customer = factories.make_customer(db, other_user.id)
+
+    response = client.patch(f"{URL}/{template.id}", json={"customer_id": str(their_customer.id)})
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Cliente desconocido"
+    db.refresh(template)
+    assert template.customer_id == customer.id

@@ -6,7 +6,15 @@ functions only set up the *arrangement*.
 
 Unique columns (`fiscal_identities.name`, `fiscal_identities.tax_id`,
 `customers.doc_number`) get their defaults from a module-level counter, so calling the same
-factory twice inside one test does not collide.
+factory twice inside one test does not collide. Those constraints are per-owner since the
+ownership-scoping unit, so the counter is now belt and braces rather than the only thing
+keeping two rows apart.
+
+`make_fiscal_identity` and `make_customer` take `user_id` as a required argument rather
+than defaulting to a freshly created user. Defaulting would be shorter to call and would
+quietly hand a test's identity and its customer two different owners, and the failure that
+follows — `UnknownCustomerError` out of a template create — points nowhere near the cause.
+`make_invoice_template` needs no owner of its own: it reads one off the fiscal identity.
 """
 
 import itertools
@@ -32,9 +40,10 @@ PASSWORD = "onePassword"
 PASSWORD_HASHED = hash_password(PASSWORD)
 
 
-def make_fiscal_identity(db, name=None, tax_id=None, condicion_iva=CondicionIva.INSCRIPTO):
+def make_fiscal_identity(db, user_id, name=None, tax_id=None, condicion_iva=CondicionIva.INSCRIPTO):
     n = next(_sequence)
     fiscal_identity = FiscalIdentity(
+        user_id=user_id,
         name=f"Fiscal Identity {n}" if name is None else name,
         tax_id=f"20{n:09d}" if tax_id is None else tax_id,
         condicion_iva=condicion_iva,
@@ -46,6 +55,7 @@ def make_fiscal_identity(db, name=None, tax_id=None, condicion_iva=CondicionIva.
 
 def make_customer(
     db,
+    user_id,
     name=None,
     doc_number: str = "",
     doc_type=DocType.CUIT,
@@ -53,6 +63,7 @@ def make_customer(
 ):
     n = next(_sequence)
     customer = Customer(
+        user_id=user_id,
         name=f"Customer {n}" if name is None else name,
         doc_number=f"27{n:09d}" if doc_number == "" else doc_number,
         doc_type=doc_type,

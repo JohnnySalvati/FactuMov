@@ -8,6 +8,7 @@ says nothing about whether the router turns it into a 409 or lets it escape as a
 import uuid
 
 from factumov.enums import CondicionIva, DocType
+from factumov.models.customer import Customer
 from tests import factories
 
 URL = "/customers"
@@ -43,8 +44,8 @@ def test_create_answers_201_with_the_stored_customer(client):
     assert uuid.UUID(body["id"])
 
 
-def test_create_rejects_a_duplicate_doc_type_and_number(client, db):
-    factories.make_customer(db, doc_type=DocType.CUIT, doc_number="30714597066")
+def test_create_rejects_a_duplicate_doc_type_and_number(user, client, db):
+    factories.make_customer(db, user.id, doc_type=DocType.CUIT, doc_number="30714597066")
 
     response = client.post(URL, json=payload())
 
@@ -52,13 +53,13 @@ def test_create_rejects_a_duplicate_doc_type_and_number(client, db):
     assert response.json()["detail"] == "Numero de documento/CUIT duplicado"
 
 
-def test_create_allows_the_same_number_under_another_doc_type(client, db):
+def test_create_allows_the_same_number_under_another_doc_type(user, client, db):
     """`uq_customers_doc_type_doc_number` spans both columns, so the number alone is free.
 
     A CUIT and a DNI can legally share digits. Keying the constraint — or the import
     endpoint's lookup — on the number alone would collapse two different people into one.
     """
-    factories.make_customer(db, doc_type=DocType.DNI, doc_number="30714597066")
+    factories.make_customer(db, user.id, doc_type=DocType.DNI, doc_number="30714597066")
 
     response = client.post(URL, json=payload(doc_type=DocType.CUIT.value))
 
@@ -105,9 +106,9 @@ def test_create_normalises_the_email(client):
     assert response.json()["email"] == "miguel@example.com"
 
 
-def test_list_answers_the_stored_customers(client, db):
-    factories.make_customer(db, name="First")
-    factories.make_customer(db, name="Second")
+def test_list_answers_the_stored_customers(user, client, db):
+    factories.make_customer(db, user.id, name="First")
+    factories.make_customer(db, user.id, name="Second")
 
     response = client.get(URL)
 
@@ -147,9 +148,9 @@ def test_patch_touches_only_the_fields_it_was_given(client, customer):
     assert body["condicion_iva"] == CondicionIva.INSCRIPTO.value
 
 
-def test_patch_into_a_duplicate_doc_is_a_409(client, db):
-    taken = factories.make_customer(db, doc_type=DocType.CUIT, doc_number="30714597066")
-    customer = factories.make_customer(db, doc_type=DocType.CUIT, doc_number="20182810674")
+def test_patch_into_a_duplicate_doc_is_a_409(user, client, db):
+    taken = factories.make_customer(db, user.id, doc_type=DocType.CUIT, doc_number="30714597066")
+    customer = factories.make_customer(db, user.id, doc_type=DocType.CUIT, doc_number="20182810674")
 
     response = client.patch(f"{URL}/{customer.id}", json={"doc_number": taken.doc_number})
 
@@ -199,3 +200,63 @@ def test_delete_an_unknown_id_is_a_404(client):
     response = client.delete(f"{URL}/{uuid.uuid4()}")
 
     assert response.status_code == 404
+
+
+# --- Ownership scoping -------------------------------------------------------------
+#
+# El cliente de otro usuario da 404 y nunca 403: un 403 diría "existe pero no es tuyo",
+# que es exactamente el dato que no se quiere confirmar. Los cuatro tests de abajo miran
+# el status y no solo "no es 200", porque el 403 es el error concreto que hay que evitar.
+
+
+def test_list_excludes_another_users_customers(user, other_user, client, db):
+    factories.make_customer(db, user.id, name="Mine")
+    factories.make_customer(db, other_user.id, name="Theirs")
+
+    response = client.get(URL)
+
+    assert response.status_code == 200
+    assert {customer["name"] for customer in response.json()} == {"Mine"}
+
+
+def test_get_another_users_customer_is_404(other_user, client, db):
+    theirs = factories.make_customer(db, other_user.id)
+
+    response = client.get(f"{URL}/{theirs.id}")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Cliente no encontrado"
+
+
+def test_patch_another_users_customer_is_404(other_user, client, db):
+    theirs = factories.make_customer(db, other_user.id, name="Theirs")
+
+    response = client.patch(f"{URL}/{theirs.id}", json={"name": "Hijacked"})
+
+    assert response.status_code == 404
+    db.refresh(theirs)
+    assert theirs.name == "Theirs"
+
+
+def test_delete_another_users_customer_is_404(other_user, client, db):
+    theirs = factories.make_customer(db, other_user.id)
+
+    response = client.delete(f"{URL}/{theirs.id}")
+
+    assert response.status_code == 404
+    assert db.get(Customer, theirs.id) is not None
+
+
+def test_create_allows_a_doc_already_used_by_another_user(other_user, client, db):
+    """El unique de documento es por usuario, no global.
+
+    Con el unique global esto daba 409, lo que además de romper un caso normal —dos
+    usuarios le facturan al mismo cliente— convertía la respuesta en un oráculo: el 409
+    confirmaba que esa fila ya estaba cargada por alguien.
+    """
+    factories.make_customer(db, other_user.id, doc_type=DocType.CUIT, doc_number="30714597066")
+
+    response = client.post(URL, json=payload())
+
+    assert response.status_code == 201
+    assert response.json()["doc_number"] == "30714597066"

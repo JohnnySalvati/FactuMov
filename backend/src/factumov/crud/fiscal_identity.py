@@ -1,3 +1,10 @@
+"""Acceso a datos de `fiscal_identities`, siempre scopeado al usuario.
+
+Mismo criterio que `crud/customer.py`: el filtro va en la query, no en una comparación
+posterior, para que la identidad fiscal de otro usuario no exista desde el punto de vista
+del que consulta.
+"""
+
 import uuid
 
 from sqlalchemy import select
@@ -13,29 +20,47 @@ from factumov.models.fiscal_identity import FiscalIdentity
 from factumov.schemas.fiscal_identity import FiscalIdentityCreate, FiscalIdentityUpdate
 
 exception_map = {
-    "fiscal_identities_name_key": DuplicateFiscalIdentityNameError,
-    "fiscal_identities_tax_id_key": DuplicateFiscalIdentityTaxIdError,
+    "uq_fiscal_identities_user_id_name": DuplicateFiscalIdentityNameError,
+    "uq_fiscal_identities_user_id_tax_id": DuplicateFiscalIdentityTaxIdError,
     "invoice_templates_fiscal_identity_id_fkey": FiscalIdentityInUseError,
 }
 
 
-def get_all(db: Session) -> list[FiscalIdentity]:
-    fiscal_identities = db.execute(select(FiscalIdentity)).scalars().all()
+def get_all(db: Session, user_id: uuid.UUID) -> list[FiscalIdentity]:
+    fiscal_identities = (
+        db.execute(select(FiscalIdentity).where(FiscalIdentity.user_id == user_id)).scalars().all()
+    )
     return list(fiscal_identities)
 
 
-def get_by_id(db: Session, fiscal_identity_id: uuid.UUID) -> FiscalIdentity | None:
-    return db.get(FiscalIdentity, fiscal_identity_id)
-
-
-def get_by_tax_id(db: Session, tax_id: str) -> FiscalIdentity | None:
+def get_by_id(
+    db: Session, fiscal_identity_id: uuid.UUID, user_id: uuid.UUID
+) -> FiscalIdentity | None:
     return (
-        db.execute(select(FiscalIdentity).where(FiscalIdentity.tax_id == tax_id)).scalars().first()
+        db.execute(
+            select(FiscalIdentity).where(
+                FiscalIdentity.id == fiscal_identity_id, FiscalIdentity.user_id == user_id
+            )
+        )
+        .scalars()
+        .first()
     )
 
 
-def create(db: Session, data: FiscalIdentityCreate) -> FiscalIdentity:
-    fiscal_identity = FiscalIdentity(**data.model_dump())
+def get_by_tax_id(db: Session, tax_id: str, user_id: uuid.UUID) -> FiscalIdentity | None:
+    return (
+        db.execute(
+            select(FiscalIdentity).where(
+                FiscalIdentity.user_id == user_id, FiscalIdentity.tax_id == tax_id
+            )
+        )
+        .scalars()
+        .first()
+    )
+
+
+def create(db: Session, data: FiscalIdentityCreate, user_id: uuid.UUID) -> FiscalIdentity:
+    fiscal_identity = FiscalIdentity(**data.model_dump(), user_id=user_id)
     db.add(fiscal_identity)
     db_flush(db, exception_map)
     return fiscal_identity

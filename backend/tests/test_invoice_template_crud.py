@@ -24,12 +24,13 @@ def count_lines(db):
     return db.execute(select(func.count()).select_from(InvoiceTemplateLine)).scalar()
 
 
-def test_create_assigns_position_in_array_order(db, fiscal_identity, customer):
+def test_create_assigns_position_in_array_order(db, user, fiscal_identity, customer):
     template = invoice_template_crud.create(
         db,
         factories.make_template_create(
             fiscal_identity.id, customer.id, descriptions=("First", "Second", "Third")
         ),
+        user.id,
     )
 
     assert [(line.position, line.description) for line in template.lines] == [
@@ -39,7 +40,7 @@ def test_create_assigns_position_in_array_order(db, fiscal_identity, customer):
     ]
 
 
-def test_get_by_id_returns_lines_ordered_by_position(db, fiscal_identity, customer):
+def test_get_by_id_returns_lines_ordered_by_position(db, user, fiscal_identity, customer):
     template = factories.make_invoice_template(
         db, fiscal_identity, customer, lines=((2, "Third"), (0, "First"), (1, "Second"))
     )
@@ -47,42 +48,43 @@ def test_get_by_id_returns_lines_ordered_by_position(db, fiscal_identity, custom
     # collection is still in insertion order, and the assertion would prove nothing.
     db.expire(template)
 
-    loaded = invoice_template_crud.get_by_id(db, template.id)
+    loaded = invoice_template_crud.get_by_id(db, template.id, user.id)
 
     assert loaded is not None
     assert [line.description for line in loaded.lines] == ["First", "Second", "Third"]
 
 
-def test_get_all_returns_templates_with_their_lines(db, fiscal_identity, customer):
+def test_get_all_returns_templates_with_their_lines(db, user, fiscal_identity, customer):
     factories.make_invoice_template(db, fiscal_identity, customer, name="One")
     factories.make_invoice_template(db, fiscal_identity, customer, name="Two")
     db.expire_all()
 
-    templates = invoice_template_crud.get_all(db)
+    templates = invoice_template_crud.get_all(db, user.id)
 
     assert len(templates) == 2
     assert all(len(template.lines) == 2 for template in templates)
 
 
-def test_update_without_lines_leaves_lines_untouched(db, fiscal_identity, customer):
+def test_update_without_lines_leaves_lines_untouched(db, user, fiscal_identity, customer):
     template = invoice_template_crud.create(
-        db, factories.make_template_create(fiscal_identity.id, customer.id)
+        db, factories.make_template_create(fiscal_identity.id, customer.id), user.id
     )
     line_ids = {line.id for line in template.lines}
 
-    invoice_template_crud.update(db, template, InvoiceTemplateUpdate(name="Renamed"))
+    invoice_template_crud.update(db, template, InvoiceTemplateUpdate(name="Renamed"), user.id)
 
     assert template.name == "Renamed"
     assert {line.id for line in template.lines} == line_ids
     assert count_lines(db) == 2
 
 
-def test_update_with_shorter_list_deletes_the_orphans(db, fiscal_identity, customer):
+def test_update_with_shorter_list_deletes_the_orphans(db, user, fiscal_identity, customer):
     template = invoice_template_crud.create(
         db,
         factories.make_template_create(
             fiscal_identity.id, customer.id, descriptions=("First", "Second", "Third")
         ),
+        user.id,
     )
     assert count_lines(db) == 3
 
@@ -90,6 +92,7 @@ def test_update_with_shorter_list_deletes_the_orphans(db, fiscal_identity, custo
         db,
         template,
         InvoiceTemplateUpdate(lines=[factories.make_line_create(description="Only")]),
+        user.id,
     )
 
     assert count_lines(db) == 1
@@ -101,48 +104,58 @@ def test_update_with_empty_lines_is_rejected_by_the_schema():
         InvoiceTemplateUpdate(lines=[])
 
 
-def test_delete_cascades_to_lines(db, fiscal_identity, customer):
+def test_delete_cascades_to_lines(db, user, fiscal_identity, customer):
     template = invoice_template_crud.create(
-        db, factories.make_template_create(fiscal_identity.id, customer.id)
+        db, factories.make_template_create(fiscal_identity.id, customer.id), user.id
     )
     assert count_lines(db) == 2
 
     invoice_template_crud.delete(db, template)
 
-    assert invoice_template_crud.get_all(db) == []
+    assert invoice_template_crud.get_all(db, user.id) == []
     assert count_lines(db) == 0
 
 
-def test_create_with_unknown_customer(db, fiscal_identity):
+def test_create_with_unknown_customer(db, user, fiscal_identity):
     with pytest.raises(UnknownCustomerError):
         invoice_template_crud.create(
-            db, factories.make_template_create(fiscal_identity.id, uuid.uuid4())
+            db, factories.make_template_create(fiscal_identity.id, uuid.uuid4()), user.id
         )
 
 
-def test_create_with_unknown_fiscal_identity(db, customer):
+def test_create_with_unknown_fiscal_identity(db, user, customer):
     with pytest.raises(UnknownFiscalIdentityError):
-        invoice_template_crud.create(db, factories.make_template_create(uuid.uuid4(), customer.id))
+        invoice_template_crud.create(
+            db, factories.make_template_create(uuid.uuid4(), customer.id), user.id
+        )
 
 
-def test_name_is_unique_per_fiscal_identity(db, fiscal_identity, customer):
+def test_name_is_unique_per_fiscal_identity(db, user, fiscal_identity, customer):
     invoice_template_crud.create(
-        db, factories.make_template_create(fiscal_identity.id, customer.id, name="Alquiler")
+        db,
+        factories.make_template_create(fiscal_identity.id, customer.id, name="Alquiler"),
+        user.id,
     )
 
     with pytest.raises(DuplicateInvoiceTemplateNameError):
         invoice_template_crud.create(
-            db, factories.make_template_create(fiscal_identity.id, customer.id, name="Alquiler")
+            db,
+            factories.make_template_create(fiscal_identity.id, customer.id, name="Alquiler"),
+            user.id,
         )
 
 
-def test_same_name_under_another_fiscal_identity_is_allowed(db, fiscal_identity, customer):
-    other_identity = factories.make_fiscal_identity(db)
+def test_same_name_under_another_fiscal_identity_is_allowed(db, user, fiscal_identity, customer):
+    other_identity = factories.make_fiscal_identity(db, user.id)
     invoice_template_crud.create(
-        db, factories.make_template_create(fiscal_identity.id, customer.id, name="Alquiler")
+        db,
+        factories.make_template_create(fiscal_identity.id, customer.id, name="Alquiler"),
+        user.id,
     )
     invoice_template_crud.create(
-        db, factories.make_template_create(other_identity.id, customer.id, name="Alquiler")
+        db,
+        factories.make_template_create(other_identity.id, customer.id, name="Alquiler"),
+        user.id,
     )
 
-    assert len(invoice_template_crud.get_all(db)) == 2
+    assert len(invoice_template_crud.get_all(db, user.id)) == 2

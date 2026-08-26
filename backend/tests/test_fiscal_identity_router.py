@@ -1,13 +1,14 @@
 """Tests for the /fiscal-identities routes.
 
 The issuer is the user's own company, so these rows are the ones a second user must never
-see once authentication exists. Today every route here is open; the tests below fix the
-behaviour that scoping will have to preserve.
+see. The scoping section at the bottom pins that; the rest of the file pins the behaviour
+scoping had to preserve.
 """
 
 import uuid
 
 from factumov.enums import CondicionIva
+from factumov.models.fiscal_identity import FiscalIdentity
 from tests import factories
 
 URL = "/fiscal-identities"
@@ -37,8 +38,8 @@ def test_create_answers_201_with_the_stored_identity(client):
     assert body["start_date"] is None
 
 
-def test_create_rejects_a_duplicate_name(client, db):
-    factories.make_fiscal_identity(db, name="Acme SRL")
+def test_create_rejects_a_duplicate_name(user, client, db):
+    factories.make_fiscal_identity(db, user.id, name="Acme SRL")
 
     response = client.post(URL, json=payload())
 
@@ -46,7 +47,7 @@ def test_create_rejects_a_duplicate_name(client, db):
     assert response.json()["detail"] == "Nombre duplicado"
 
 
-def test_create_rejects_a_duplicate_tax_id(client, db):
+def test_create_rejects_a_duplicate_tax_id(user, client, db):
     """The pair of duplicate tests is the reason this file exists.
 
     `fiscal_identities_name_key` and `fiscal_identities_tax_id_key` are two constraints
@@ -55,7 +56,7 @@ def test_create_rejects_a_duplicate_tax_id(client, db):
     an assertion on the message catches it, and the user is the one who would otherwise be
     told the wrong field is at fault.
     """
-    factories.make_fiscal_identity(db, tax_id="30714597066")
+    factories.make_fiscal_identity(db, user.id, tax_id="30714597066")
 
     response = client.post(URL, json=payload(name="Another Name"))
 
@@ -87,9 +88,9 @@ def test_create_rejects_condicion_iva_final(client):
     assert response.status_code == 422
 
 
-def test_list_answers_the_stored_identities(client, db):
-    factories.make_fiscal_identity(db, name="First")
-    factories.make_fiscal_identity(db, name="Second")
+def test_list_answers_the_stored_identities(user, client, db):
+    factories.make_fiscal_identity(db, user.id, name="First")
+    factories.make_fiscal_identity(db, user.id, name="Second")
 
     response = client.get(URL)
 
@@ -124,8 +125,8 @@ def test_patch_touches_only_the_fields_it_was_given(client, fiscal_identity):
     assert body["condicion_iva"] == CondicionIva.INSCRIPTO.value
 
 
-def test_patch_into_a_duplicate_name_is_a_409(client, db, fiscal_identity):
-    factories.make_fiscal_identity(db, name="Taken")
+def test_patch_into_a_duplicate_name_is_a_409(user, client, db, fiscal_identity):
+    factories.make_fiscal_identity(db, user.id, name="Taken")
 
     response = client.patch(f"{URL}/{fiscal_identity.id}", json={"name": "Taken"})
 
@@ -133,8 +134,8 @@ def test_patch_into_a_duplicate_name_is_a_409(client, db, fiscal_identity):
     assert response.json()["detail"] == "Nombre duplicado"
 
 
-def test_patch_into_a_duplicate_tax_id_is_a_409(client, db, fiscal_identity):
-    factories.make_fiscal_identity(db, tax_id="30714597066")
+def test_patch_into_a_duplicate_tax_id_is_a_409(user, client, db, fiscal_identity):
+    factories.make_fiscal_identity(db, user.id, tax_id="30714597066")
 
     response = client.patch(f"{URL}/{fiscal_identity.id}", json={"tax_id": "30714597066"})
 
@@ -171,3 +172,60 @@ def test_delete_an_unknown_id_is_a_404(client):
     response = client.delete(f"{URL}/{uuid.uuid4()}")
 
     assert response.status_code == 404
+
+
+# --- Ownership scoping -------------------------------------------------------------
+
+
+def test_list_excludes_another_users_identities(user, other_user, client, db):
+    factories.make_fiscal_identity(db, user.id, name="Mine")
+    factories.make_fiscal_identity(db, other_user.id, name="Theirs")
+
+    response = client.get(URL)
+
+    assert response.status_code == 200
+    assert {identity["name"] for identity in response.json()} == {"Mine"}
+
+
+def test_get_another_users_identity_is_404(other_user, client, db):
+    theirs = factories.make_fiscal_identity(db, other_user.id)
+
+    response = client.get(f"{URL}/{theirs.id}")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Identidad fiscal no encontrada"
+
+
+def test_patch_another_users_identity_is_404(other_user, client, db):
+    theirs = factories.make_fiscal_identity(db, other_user.id, name="Theirs")
+
+    response = client.patch(f"{URL}/{theirs.id}", json={"name": "Hijacked"})
+
+    assert response.status_code == 404
+    db.refresh(theirs)
+    assert theirs.name == "Theirs"
+
+
+def test_delete_another_users_identity_is_404(other_user, client, db):
+    theirs = factories.make_fiscal_identity(db, other_user.id)
+
+    response = client.delete(f"{URL}/{theirs.id}")
+
+    assert response.status_code == 404
+    assert db.get(FiscalIdentity, theirs.id) is not None
+
+
+def test_create_allows_a_name_and_tax_id_already_used_by_another_user(other_user, client, db):
+    """Los dos uniques de la tabla son por usuario.
+
+    El del CUIT es el que más importa: global impediría que el contador cargue el CUIT de
+    su cliente mientras el titular tiene su propia cuenta, y el 409 delataría que ese CUIT
+    ya está en el sistema. Que la delegación en ARCA se verifique por identidad fiscal es
+    lo que hace que aflojar el unique no afloje el control de titularidad.
+    """
+    factories.make_fiscal_identity(db, other_user.id, name="Acme SRL", tax_id="30714597066")
+
+    response = client.post(URL, json=payload())
+
+    assert response.status_code == 201
+    assert response.json()["tax_id"] == "30714597066"

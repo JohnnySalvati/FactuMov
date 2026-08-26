@@ -54,9 +54,11 @@ def count_customers(db):
     return db.execute(select(func.count()).select_from(Customer)).scalar()
 
 
-def test_import_resolves_the_ids_of_an_issuer_and_customer_already_stored(client, db):
-    fiscal_identity = factories.make_fiscal_identity(db, tax_id=ISSUER_TAX_ID)
-    customer = factories.make_customer(db, doc_type=DocType.CUIT, doc_number=CUSTOMER_DOC_NUMBER)
+def test_import_resolves_the_ids_of_an_issuer_and_customer_already_stored(user, client, db):
+    fiscal_identity = factories.make_fiscal_identity(db, user.id, tax_id=ISSUER_TAX_ID)
+    customer = factories.make_customer(
+        db, user.id, doc_type=DocType.CUIT, doc_number=CUSTOMER_DOC_NUMBER
+    )
 
     response = post_import(client)
 
@@ -176,14 +178,14 @@ def test_import_reads_a_type_a_invoice(client):
     assert [line["unit_price"] for line in draft["lines"]] == ["35000.00", "15000.00"]
 
 
-def test_import_ignores_a_customer_whose_doc_type_differs(client, db):
+def test_import_ignores_a_customer_whose_doc_type_differs(user, client, db):
     """The lookup keys on the pair, not on the number alone.
 
-    `uq_customers_doc_type_doc_number` covers both columns, so the same digits can legally
+    `uq_customers_user_id_doc_type_doc_number` covers both columns, so the same digits can legally
     exist under two doc types. Matching on the number alone would attach the draft to the
     wrong row while looking entirely correct.
     """
-    factories.make_customer(db, doc_type=DocType.DNI, doc_number=CUSTOMER_DOC_NUMBER)
+    factories.make_customer(db, user.id, doc_type=DocType.DNI, doc_number=CUSTOMER_DOC_NUMBER)
 
     response = post_import(client)
 
@@ -250,3 +252,40 @@ def test_import_requires_the_file_field(client):
 
     assert response.status_code == 422
     assert response.json()["detail"][0]["loc"] == ["body", "file"]
+
+
+# --- Ownership scoping -------------------------------------------------------------
+#
+# Los dos lookups del endpoint son de solo lectura, y por eso el bug era silencioso: nadie
+# escribía nada mal, pero el draft volvía con el id de una fila ajena. El usuario lo
+# confirmaba en el editor y el modelo que se guardaba apuntaba al cliente de otro. Un
+# lookup sin scopear delata además que ese documento ya está cargado por alguien.
+
+
+def test_import_ignores_another_users_customer(other_user, client, db):
+    factories.make_customer(
+        db, other_user.id, doc_type=DocType.CUIT, doc_number=CUSTOMER_DOC_NUMBER
+    )
+
+    response = post_import(client)
+
+    assert response.status_code == 200
+    draft = response.json()
+
+    # Ni el id ajeno ni ninguna otra señal de que esa fila existe: para este usuario, el
+    # cliente todavía no está cargado, que es exactamente lo mismo que vería si no
+    # existiera en absoluto.
+    assert draft["customer_id"] is None
+    assert draft["customer"]["doc_number"] == CUSTOMER_DOC_NUMBER
+
+
+def test_import_ignores_another_users_fiscal_identity(other_user, client, db):
+    factories.make_fiscal_identity(db, other_user.id, tax_id=ISSUER_TAX_ID)
+
+    response = post_import(client)
+
+    assert response.status_code == 200
+    draft = response.json()
+
+    assert draft["fiscal_identity_id"] is None
+    assert draft["issuer_tax_id"] == ISSUER_TAX_ID
