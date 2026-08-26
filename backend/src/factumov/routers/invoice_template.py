@@ -2,12 +2,11 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
-from sqlalchemy.orm import Session
 
 from factumov.crud import customer as customer_crud
 from factumov.crud import fiscal_identity as fiscal_identity_crud
 from factumov.crud import invoice_template as invoice_template_crud
-from factumov.database import get_db
+from factumov.dependencies import SessionDep, get_current_user
 from factumov.exceptions import (
     DuplicateError,
     DuplicateInvoiceTemplateNameError,
@@ -27,9 +26,11 @@ from factumov.services.invoice_parser import parse_invoice_pdf
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
-router = APIRouter(prefix="/invoice-templates", tags=["invoice_templates"])
-
-SessionDep = Annotated[Session, Depends(get_db)]
+router = APIRouter(
+    prefix="/invoice-templates",
+    tags=["invoice_templates"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 def get_invoice_template_or_404(invoice_template_id: uuid.UUID, db: SessionDep) -> InvoiceTemplate:

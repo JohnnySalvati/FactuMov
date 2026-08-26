@@ -12,41 +12,20 @@ backend ya probada. Debe funcionar en Android, iOS y Desktop.
 5. (Eventual) Enviar la factura por email y/o WhatsApp.
 
 ## Cómo trabajamos en este proyecto
-Miguel está usando este proyecto para aprender desarrollo (venía de saber algo de Python,
-pero sin haber hecho un proyecto completo). La dinámica es la misma que rige en Balance360:
+El proyecto arrancó como ejercicio de aprendizaje (Miguel venía de saber algo de Python sin
+haber hecho un proyecto completo) con la dinámica de Balance360. Desde el 2026-08-26 ya no:
 
-**Regla fundamental — Claude nunca escribe código Python. Sin excepciones.**
+**Regla fundamental (desde 2026-08-26) — Claude escribe todo el código.** Python incluido:
+routers, schemas, CRUD, modelos, servicios, tests, migraciones y frontend.
 
-El rol de Claude en Python es:
-- Explicar el concepto o patrón a aplicar, con alternativas y trade-offs.
-- Indicar qué archivo y qué función crear o modificar.
-- Describir qué debe hacer el código, no cómo escribirlo.
-- Señalar errores y explicar por qué son errores.
-- Sugerir librerías o patrones que mejoren la calidad.
-- Correr tests y linters para mostrar el error concreto en vez de opinar.
+Reemplaza al régimen anterior, en el que Miguel escribía el Python y Claude solo explicaba.
+Ese modo se cerró el 2026-08-26 por decisión de Miguel: el proyecto pasa de ejercicio de
+aprendizaje a producto, y el cuello de botella dejó de ser aprender FastAPI.
 
-**Claude sí escribe HTML / CSS / JS.** Es su única responsabilidad de escritura de código.
-En este proyecto eso incluye todo el frontend React.
-
-**Excepción — primer ejemplo de un patrón nuevo.** Cuando Miguel nunca escribió algo de
-cierto tipo (el primer test de pytest, el primer router, el primer schema de Pydantic, la
-primera migración a mano…), Claude puede escribir **un** ejemplo completo que sirva de
-modelo, explicando cada decisión. Del segundo en adelante vuelve a escribirlo Miguel.
-Condiciones: Miguel lo pide explícitamente — Claude nunca lo asume — y el ejemplo se explica
-línea por línea, porque el objetivo es el patrón, no el archivo.
-
-**Migraciones (Alembic): las escribe Claude.** Decisión del 2026-08-08 — Miguel prefiere
-concentrarse en FastAPI y SQLAlchemy; Alembic es una herramienta aparte y se delega. Claude
-genera, revisa y aplica las migraciones, y explica qué cambió y por qué.
-Los **modelos** los sigue escribiendo Miguel. El flujo es: Miguel edita el modelo → Claude
-genera la migración, la revisa y la aplica.
-
-**Regex / parsing de PDF: lo escribe Claude.** Decisión del 2026-08-09 — misma lógica que
-Alembic: las expresiones regulares son una habilidad aparte que Miguel quiere aprender más
-adelante, no ahora. Claude escribe y mantiene `services/invoice_parser.py` (layouts,
-extractores, regex) y explica qué hace cada patrón.
-Lo que **no** delega: routers, schemas, CRUD, servicios de negocio y modelos siguen siendo
-de Miguel. El parser es una excepción acotada, no una puerta abierta al backend.
+Lo que **no** cambia es la explicación. Claude tiene que ir contando qué hace y por qué a
+medida que escribe: la decisión de diseño, la alternativa que descartó y el motivo. La
+diferencia con el régimen anterior es quién teclea, no cuánto se entiende de lo que queda
+escrito. Las decisiones no obvias siguen bajando a este archivo.
 
 Cuando algo no está claro, preguntar antes de asumir.
 
@@ -62,11 +41,14 @@ Mensajes en inglés, imperativo, una línea de resumen y —si hace falta— un 
 explique el *por qué*, no el *qué* (el diff ya dice qué cambió).
 
 ## Working language
-- Toda la conversación de mentoring ocurre en **inglés** (misma política que Balance360).
-- Después de cada mensaje del usuario, si hay errores de gramática, vocabulario o fraseo,
-  agregar una nota breve **"Prompt feedback"** con la versión corregida y una explicación
-  corta. Mantenerlo conciso; no desviar el trabajo técnico.
+- La conversación ocurre en **español**. Hasta el 2026-08-26 era en inglés, con una nota
+  "Prompt feedback" corrigiendo cada mensaje; las dos cosas se dieron de baja junto con el
+  modo de aprendizaje. **No corregir el inglés de Miguel.**
+- Los **identificadores de código siguen en inglés** — eso no cambió (ver *Convenciones*).
 - Los strings de UI de la app siguen en español.
+- Los comentarios y docstrings nuevos van en español, que es el idioma en el que se discute
+  el proyecto. Los que ya están en inglés se dejan donde están: reescribirlos en masa sería
+  un diff enorme sin ningún valor.
 
 ## Stack
 - **Backend:** FastAPI + SQLAlchemy 2.0 (sync) + Alembic + PostgreSQL. Gestor: `uv`.
@@ -436,7 +418,7 @@ usuario sin confirmar. Los tres son 401 idénticos.
 | `schemas/auth.py` | Contrato de entrada/salida |
 | `services/security.py` | Hash argon2 (pwdlib), tokens (`secrets`), hash SHA-256 del token |
 | `crud/user.py`, `crud/user_session.py` | Acceso a datos |
-| `dependencies.py` | `SessionDep` y `get_current_user` |
+| `dependencies.py` | `SessionDep`, `get_current_session`, `get_current_user` |
 | `routers/auth.py` | `POST /auth/login`, `POST /auth/logout`, `GET /auth/me` |
 
 - **El login recibe JSON, no `OAuth2PasswordRequestForm`.** El form de FastAPI es lo que usa
@@ -448,6 +430,35 @@ usuario sin confirmar. Los tres son 401 idénticos.
 - **`get_current_user` va en `dependencies.py` y no en `routers/auth.py`**, para que
   `routers/customer.py` no termine importando de un router hermano sin ninguna razón
   estructural. Es también el lugar donde `SessionDep` deja de estar copiado en cada router.
+
+### Capa HTTP (2026-08-26)
+- **Son dos dependencias, no una.** `get_current_session` resuelve la cookie a la fila viva
+  de `user_sessions`; `get_current_user` depende de ella y devuelve `user_session.user`. El
+  logout necesita la *fila* para revocarla, y sin el escalón intermedio tendría que releer
+  la cookie y rehashearla a mano.
+- **El logout depende de la sesión y no del usuario.** Un usuario dado de baja mientras
+  tenía la sesión abierta igual tiene que poder cerrarla; exigir `get_current_user` ahí lo
+  dejaría con una sesión viva que no puede revocar. Responde **204** y borra la cookie con
+  `delete_cookie`, que es un `Set-Cookie` vacío con `Max-Age=0`.
+- **`is_active` y `email_confirmed_at` se revalidan en cada request**, no solo en el login.
+  La sesión dura una semana: una baja tiene que pegar en el request siguiente, no cuando
+  venza el token. El `joinedload(UserSession.user)` del CRUD ya trajo la fila, así que no
+  cuesta una query extra.
+- **Las cinco causas de 401 comparten un solo `detail`** (sin cookie, token desconocido,
+  vencido, revocado, usuario inhabilitado). Distinguirlas le diría a un atacante qué parte
+  de su intento estuvo cerca de funcionar.
+- **La autenticación se aplica a nivel de router**, con
+  `APIRouter(..., dependencies=[Depends(get_current_user)])` en `customer`,
+  `fiscal_identity` e `invoice_template`. Decorar endpoint por endpoint es la misma regla
+  escrita quince veces y falla por omisión: el que se olvide queda público sin que nada lo
+  marque. `health` queda afuera a propósito — lo consulta el orquestador, que no tiene
+  sesión.
+- **Excepción al "constante leída adentro de la función":** `SESSION_LIFETIME` sí se lee en
+  tiempo de llamada, pero `SESSION_COOKIE_NAME` viaja como `Cookie(alias=...)` en la firma
+  de la dependencia, así que se resuelve al importar. Es el precio de que el parámetro
+  aparezca en el OpenAPI en vez de leer `request.cookies` a mano; a cambio, un test que
+  quiera cambiar el nombre de la cookie tiene que importarlo, no parchearlo.
+- **`SESSION_LIFETIME` = 7 días.** Vencimiento absoluto, no deslizante.
 
 ### Tests de autenticación
 - **El fixture `client` queda autenticado por defecto; el anónimo es `anonymous_client`.**
@@ -468,8 +479,20 @@ usuario sin confirmar. Los tres son 401 idénticos.
   jar de Python se niega a mandarla sobre http: sin esto la cookie se setea, nunca vuelve, y
   todos los tests dan 401 por un motivo que no se parece en nada a la causa. Los navegadores
   no tienen el problema en dev — tratan `http://localhost` como contexto seguro.
+- **La cookie se inyecta por el constructor** (`TestClient(..., cookies={...})`) y no con
+  `jar.set()`. Consecuencia a tener presente: esa cookie queda sin dominio y el `Set-Cookie`
+  del logout llega con el dominio del request, así que en el jar conviven dos entradas y
+  `cookies.get()` sigue devolviendo la vieja. Por eso el test del logout mira el header
+  `Set-Cookie`, que es lo que el navegador lee de verdad, y la prueba de que la sesión
+  murió es el `GET /auth/me` que sigue.
+- **El fixture `user` es el dueño de la sesión de `client`** — activo y confirmado. Está
+  expuesto aparte para que un test pueda afirmar sobre la fila (por ejemplo, que el logout
+  le puso `revoked_at`).
 
 ### Unidades pendientes, en orden
+La capa HTTP de autenticación quedó cerrada el 2026-08-26 (login, logout, `/me`,
+`dependencies.py` y los tres routers protegidos).
+
 1. **Ownership scoping.** `user_id` en `fiscal_identities` y `customers`, queries scopeadas,
    404 (nunca 403) sobre la fila de otro usuario, y scopear los lookups de `/import`, que
    hoy filtran si otro usuario ya tiene guardado un cliente dado.

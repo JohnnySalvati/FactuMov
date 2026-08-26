@@ -2,10 +2,9 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
 
 from factumov.crud import customer as customer_crud
-from factumov.database import get_db
+from factumov.dependencies import SessionDep, get_current_user
 from factumov.exceptions import (
     CustomerInUseError,
     DuplicateCustomerError,
@@ -15,10 +14,11 @@ from factumov.exceptions import (
 from factumov.models import Customer
 from factumov.schemas.customer import CustomerCreate, CustomerRead, CustomerUpdate
 
-router = APIRouter(prefix="/customers", tags=["customers"])
-
-
-SessionDep = Annotated[Session, Depends(get_db)]
+router = APIRouter(
+    prefix="/customers",
+    tags=["customers"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 def get_customer_or_404(customer_id: uuid.UUID, db: SessionDep) -> Customer:

@@ -25,8 +25,11 @@ from factumov.schemas.invoice_template_line import InvoiceTemplateLineCreate
 from factumov.services.security import hash_password, hash_session_token
 
 _sequence = itertools.count(1)
-_PASSWORD = "onePassword"
-_PASSWORD_HASHED = hash_password(_PASSWORD)
+# Pública: los tests de login la mandan en el body. El hash se calcula una sola vez al
+# importar el módulo — con los parámetros recomendados de argon2, hashear por usuario
+# duplicaría el tiempo de la suite.
+PASSWORD = "onePassword"
+PASSWORD_HASHED = hash_password(PASSWORD)
 
 
 def make_fiscal_identity(db, name=None, tax_id=None, condicion_iva=CondicionIva.INSCRIPTO):
@@ -143,7 +146,7 @@ def make_user(
     db,
     email=None,
     email_confirmed_at=None,
-    hashed_password=_PASSWORD_HASHED,
+    hashed_password=PASSWORD_HASHED,
     is_active=True,
 ):
     n = next(_sequence)

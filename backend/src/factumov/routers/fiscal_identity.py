@@ -2,10 +2,9 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
 
 from factumov.crud import fiscal_identity as fiscal_identity_crud
-from factumov.database import get_db
+from factumov.dependencies import SessionDep, get_current_user
 from factumov.exceptions import (
     DuplicateError,
     DuplicateFiscalIdentityNameError,
@@ -20,9 +19,11 @@ from factumov.schemas.fiscal_identity import (
     FiscalIdentityUpdate,
 )
 
-router = APIRouter(prefix="/fiscal-identities", tags=["fiscal_identities"])
-
-SessionDep = Annotated[Session, Depends(get_db)]
+router = APIRouter(
+    prefix="/fiscal-identities",
+    tags=["fiscal_identities"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 def get_fiscal_identity_or_404(fiscal_identity_id: uuid.UUID, db: SessionDep) -> FiscalIdentity:
