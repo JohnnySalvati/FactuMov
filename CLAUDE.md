@@ -452,6 +452,7 @@ usuario sin confirmar. Los tres son 401 idénticos.
 | `dependencies.py` | `SessionDep`, `get_current_session`, `get_current_user` |
 | `crud/email_confirmation.py` | Tokens de confirmación |
 | `services/email.py`, `services/notifications.py` | Transporte SMTP y textos de los mails |
+| `services/rate_limit.py` | Contador de ventana fija en memoria |
 | `routers/auth.py` | `login`, `logout`, `/me`, `register`, `confirm`, `resend-confirmation` |
 
 - **El login recibe JSON, no `OAuth2PasswordRequestForm`.** El form de FastAPI es lo que usa
@@ -629,11 +630,55 @@ sesión adentro. Un segundo par idéntico con otro nombre habría sido peor que 
   el CRUD guardó algo; sacarlo del cuerpo del mail y postearlo prueba que el link que llega a
   la casilla abre la cuenta, que es lo que puede romperse en el medio.
 
+### Rate limiting (2026-08-26)
+Cierra el registro: CLAUDE.md ya decía que el rate limiting está en el camino crítico del
+self-serve, no que es opcional. `services/rate_limit.py`, aplicado a `login`, `register` y
+`resend-confirmation`.
+
+- **Es un piso, no el techo.** El estado vive en memoria del proceso: con N workers el
+  límite efectivo es N veces el configurado. El techo real va en el borde (`limit_req` de
+  nginx), igual que con `MAX_UPLOAD_BYTES`. Lo que esta capa agrega es lo que el borde **no
+  puede** hacer: limitar por dirección de email, que está en el body y nginx no lee.
+- **Sin dependencia nueva.** `slowapi` da backends de Redis y headers estándar, pero acá
+  alcanzan un contador y un candado. El día que haya que compartir el estado entre workers
+  lo que se necesita es Redis, no un wrapper.
+- **Ventana fija, no deslizante.** La fija admite una ráfaga de hasta 2× justo en el borde
+  entre ventanas; la deslizante lo evita guardando el timestamp de cada intento en vez de un
+  contador. Para lo que se defiende —mail bombing y credential stuffing— esa ráfaga da lo
+  mismo, y un contador por clave es lo que mantiene la memoria acotada.
+- **Cuatro limitadores, dos ejes.** Por IP: login 10 cada 15 min, registro y reenvío 5 por
+  hora. Por dirección: 3 por hora, **compartidos entre registro y reenvío**, porque los dos
+  le mandan mail a la misma casilla y presupuestos separados dejarían duplicar el bombardeo
+  alternando endpoints. El login es el más holgado a propósito: el que se equivoca de
+  contraseña de verdad reintenta varias veces seguidas.
+- **El contador avanza antes de mirar la base.** Si solo avanzara para direcciones que
+  existen, el 429 llegaría antes para las registradas y sería el oráculo de enumeración que
+  el 202 se cuida de no ser.
+- **La clave sale de `request.client`, no del header `X-Forwarded-For`.** Detrás de un proxy
+  es uvicorn (`--proxy-headers`, `--forwarded-allow-ips`) el que reescribe `request.client`
+  a partir de ese header, y solo si el que se conectó es un proxy de confianza. Leerlo acá
+  saltearía esa decisión, y un header que cualquiera inventa vuelve al limitador un adorno:
+  uno distinto por request y no hay límite; el de otro y lo dejás afuera a él.
+- **`clock` es un parámetro del `RateLimiter`.** Parchear `time.monotonic` en el test lo
+  cambiaría para todo el proceso, pytest incluido. Es `monotonic` y no `time` para que
+  corregirle la hora al server no abra la ventana antes de tiempo.
+- **Hay candado.** Los endpoints son `def`, así que FastAPI los corre en el threadpool: sin
+  el `Lock`, dos requests leen el mismo contador y uno pisa el `+= 1` del otro, o sea que el
+  límite se afloja justo bajo la carga que tendría que frenar. Hay un test con ocho hilos.
+- **`reset_rate_limiters` es autouse en `conftest.py`.** Los limitadores son globales de
+  módulo y el TestClient se presenta siempre con la misma IP: sin el reset, el sexto test
+  que registra algo empieza a comer 429, y el que falla no es el que rompió nada sino el que
+  quedó sexto, que cambia con el orden de colección.
+- **Los tests leen los límites de los propios limitadores** en vez de repetir los números.
+  Si el registro pasa de 5 a 10 por hora, tienen que seguir probando el límite y no fallar
+  por saberse uno viejo de memoria. Aparte hay un test que fija el piso —ningún límite baja
+  de 3 por hora— para que apretarlos hasta que estorben lo diga la suite antes que un
+  usuario.
+
 ### Unidades pendientes, en orden
 Cerradas el 2026-08-26: la capa HTTP de autenticación (login, logout, `/me`,
 `dependencies.py` y los tres routers protegidos), el *ownership scoping* y el registro con
-confirmación por email. Del registro falta solo el rate limiting, que es la unidad
-siguiente.
+confirmación por email, con su rate limiting.
 
 1. **Verificación de la delegación contra ARCA.**
 2. **Reset de contraseña.** Lo pide el registro: quien se equivocó de contraseña en una

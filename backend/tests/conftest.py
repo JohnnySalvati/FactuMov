@@ -12,6 +12,7 @@ from factumov.database import get_db
 from factumov.dependencies import SESSION_COOKIE_NAME
 from factumov.main import app
 from factumov.models.base import Base
+from factumov.routers.auth import ALL_LIMITERS
 from factumov.services import email as email_service
 from tests import factories
 
@@ -21,6 +22,22 @@ class SentEmail:
     to: str
     subject: str
     body: str
+
+
+@pytest.fixture(autouse=True)
+def reset_rate_limiters():
+    """Vacía los limitadores entre tests.
+
+    Autouse y obligatorio: los limitadores son globales de módulo y el TestClient se
+    presenta siempre con la misma IP, así que sin esto el sexto test que registra algo
+    empieza a comer 429 — y no falla el test que rompió nada, sino el que quedó sexto, que
+    va cambiando con el orden de colección.
+    """
+    for limiter in ALL_LIMITERS:
+        limiter.reset()
+    yield
+    for limiter in ALL_LIMITERS:
+        limiter.reset()
 
 
 @pytest.fixture(autouse=True)

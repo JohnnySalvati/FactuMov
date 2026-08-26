@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Response
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 
 from factumov.crud import email_confirmation as email_confirmation_crud
@@ -28,6 +28,7 @@ from factumov.schemas.auth import (
 # `from ... import send_confirmation_email` la referencia se resuelve al importar y el test
 # terminaría parcheando una copia que nadie lee — mismo criterio que `MAX_UPLOAD_BYTES`.
 from factumov.services import notifications
+from factumov.services.rate_limit import RateLimiter
 from factumov.services.security import (
     generate_opaque_token,
     hash_opaque_token,
@@ -62,6 +63,55 @@ _RESEND_ACCEPTED_DETAIL = (
 # Token desconocido, vencido y ya usado comparten respuesta. Distinguirlos no aportaría
 # nada: el remedio de los tres es pedir un mail nuevo, y el texto lo dice.
 _INVALID_CONFIRMATION_DETAIL = "El link no es válido o ya venció. Pedí uno nuevo."
+
+# --- Rate limiting --------------------------------------------------------------------
+#
+# Los cuatro límites son por proceso; el techo real va en el borde (ver
+# `services/rate_limit.py`). Los números están elegidos para no estorbarle nunca a un
+# usuario real: nadie se registra cinco veces por hora ni pide tres reenvíos seguidos.
+#
+# El login es el más generoso de los cuatro porque el que se equivoca de contraseña de
+# verdad reintenta varias veces seguidas, y un límite corto ahí se siente como una cuenta
+# rota. Contra el credential stuffing, lo que importa no es que sean diez o veinte sino que
+# no sean diez mil.
+_LOGIN_LIMITER = RateLimiter(limit=10, window_seconds=15 * 60)
+_REGISTER_IP_LIMITER = RateLimiter(limit=5, window_seconds=60 * 60)
+_RESEND_IP_LIMITER = RateLimiter(limit=5, window_seconds=60 * 60)
+
+# Por dirección, además de por IP. La de por IP no alcanza para el caso que más molesta: un
+# atacante con muchas IPs usando el registro o el reenvío como mail bomb contra una sola
+# casilla. Es también el límite que el borde no puede aplicar, porque nginx no lee el body.
+_EMAIL_LIMITER = RateLimiter(limit=3, window_seconds=60 * 60)
+
+_RATE_LIMITED_DETAIL = "Demasiados intentos. Esperá un rato y probá de nuevo."
+
+ALL_LIMITERS = (_LOGIN_LIMITER, _REGISTER_IP_LIMITER, _RESEND_IP_LIMITER, _EMAIL_LIMITER)
+
+
+def _client_key(request: Request) -> str:
+    """La IP del cliente, tal como la ve la app.
+
+    Se lee de `request.client` y no del header `X-Forwarded-For`. Detrás de un proxy es
+    uvicorn —con `--proxy-headers` y `--forwarded-allow-ips`— el que reescribe
+    `request.client` a partir de ese header, y solo si el que se conectó es un proxy de
+    confianza. Leer el header acá saltearía esa decisión, y un header que cualquiera puede
+    inventar convierte el limitador en un adorno: se manda uno distinto en cada request y no
+    hay límite, o se manda el de otro y se lo deja afuera a él.
+    """
+    return request.client.host if request.client else "sin-ip"
+
+
+def _enforce(limiter: RateLimiter, key: str) -> None:
+    retry_after = limiter.check(key)
+    if retry_after is not None:
+        raise HTTPException(
+            status_code=429,
+            detail=_RATE_LIMITED_DETAIL,
+            # Segundos enteros y redondeando para arriba: un `Retry-After: 0` invitaría a
+            # reintentar de inmediato, que es justo lo que se está tratando de frenar.
+            headers={"Retry-After": str(int(retry_after) + 1)},
+        )
+
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -121,7 +171,9 @@ def _issue_confirmation(background: BackgroundTasks, db: Session, user: User) ->
 
 
 @router.post("/register", status_code=202, response_model=MessageResponse)
-def register(data: RegisterRequest, background: BackgroundTasks, db: SessionDep) -> MessageResponse:
+def register(
+    data: RegisterRequest, request: Request, background: BackgroundTasks, db: SessionDep
+) -> MessageResponse:
     """Alta self-serve. La respuesta no depende de si la dirección ya existía.
 
     La contraseña se hashea **antes** de buscar al usuario, aunque en dos de las tres ramas
@@ -136,6 +188,12 @@ def register(data: RegisterRequest, background: BackgroundTasks, db: SessionDep)
     clic en el link de confirmación que le llegue. Quien se equivocó de contraseña al
     registrarse tiene que usar el reset, no un segundo registro.
     """
+    # Los dos límites se cuentan antes de mirar la base, y eso es parte de la propiedad
+    # anti-enumeración: si el contador solo avanzara cuando la dirección existe, el 429
+    # llegaría antes para las registradas y contestaría la pregunta que el 202 calla.
+    _enforce(_REGISTER_IP_LIMITER, _client_key(request))
+    _enforce(_EMAIL_LIMITER, data.email)
+
     hashed_password = hash_password(data.password.get_secret_value())
     user = user_crud.get_by_email(db, data.email)
 
@@ -164,9 +222,14 @@ def register(data: RegisterRequest, background: BackgroundTasks, db: SessionDep)
 
 @router.post("/resend-confirmation", status_code=202, response_model=MessageResponse)
 def resend_confirmation(
-    data: ResendConfirmationRequest, background: BackgroundTasks, db: SessionDep
+    data: ResendConfirmationRequest,
+    request: Request,
+    background: BackgroundTasks,
+    db: SessionDep,
 ) -> MessageResponse:
     """Reenvía la confirmación. Contesta lo mismo exista o no la dirección."""
+    _enforce(_RESEND_IP_LIMITER, _client_key(request))
+    _enforce(_EMAIL_LIMITER, data.email)
     user = user_crud.get_by_email(db, data.email)
     if user is not None and user.is_active and user.email_confirmed_at is None:
         _issue_confirmation(background, db, user)
@@ -207,7 +270,8 @@ def confirm_email(data: ConfirmEmailRequest, background: BackgroundTasks, db: Se
 
 
 @router.post("/login", response_model=UserRead)
-def login(data: LoginRequest, response: Response, db: SessionDep) -> User:
+def login(data: LoginRequest, request: Request, response: Response, db: SessionDep) -> User:
+    _enforce(_LOGIN_LIMITER, _client_key(request))
     user = user_crud.get_by_email(db, data.email)
     # La verificación corre siempre, incluso sin usuario: `verify_password` acepta `None` y
     # compara contra un hash dummy para que el email desconocido cueste lo mismo que la
