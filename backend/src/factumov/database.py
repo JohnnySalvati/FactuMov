@@ -7,7 +7,13 @@ from sqlalchemy.orm import Session, sessionmaker
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env")
+    # `extra="ignore"` no es cosmético: pydantic-settings prohíbe los extras por default y
+    # el .env es uno solo para toda la app. Sin esto, la primera variable de otro dominio
+    # —SMTP_HOST, por ejemplo— hace fallar la construcción de Settings, que ocurre al
+    # importar este módulo, o sea que se cae la app entera y la suite completa por una
+    # variable que este objeto nunca iba a mirar. `EmailSettings` lo lleva por lo mismo,
+    # con DATABASE_URL en el rol inverso.
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
     database_url: str
     database_test_url: str | None = None
 

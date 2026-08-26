@@ -1,4 +1,5 @@
 import secrets
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import pytest
@@ -11,7 +12,68 @@ from factumov.database import get_db
 from factumov.dependencies import SESSION_COOKIE_NAME
 from factumov.main import app
 from factumov.models.base import Base
+from factumov.services import email as email_service
 from tests import factories
+
+
+@dataclass
+class SentEmail:
+    to: str
+    subject: str
+    body: str
+
+
+@pytest.fixture(autouse=True)
+def email_settings(monkeypatch):
+    """Config de mail determinística para toda la suite.
+
+    Autouse porque `EmailSettings` no tiene defaults para `SMTP_HOST` ni `EMAIL_FROM`: sin
+    esto, cualquier test que llegue a componer un mail explota con un ValidationError que
+    depende del `.env` de la máquina. Fijarlas acá hace que las aserciones sobre el link de
+    confirmación puedan comparar contra una URL concreta.
+
+    Desengancha además el `.env`, y eso no es exceso de celo: la config de mail es la
+    primera que cada máquina completa con datos propios, y sin esto un `SMTP_USER` real en
+    el `.env` de alguien haría fallar el test de "no hace login sin credenciales" en su
+    máquina y en ninguna otra. Las variables de entorno pisan al `.env`, así que fijar las
+    que el fixture usa alcanzaría para esas; el problema son justamente las que un test
+    necesita *ausentes*.
+
+    El `cache_clear` va de los dos lados. Adelante, porque `get_email_settings` está
+    cacheada y otro test pudo haberla construido ya; atrás, para no dejarle a los tests
+    siguientes una config armada con variables que `monkeypatch` está por deshacer.
+    """
+    monkeypatch.setitem(email_service.EmailSettings.model_config, "env_file", None)
+    for absent in ("SMTP_USER", "SMTP_PASSWORD", "SMTP_PORT", "SMTP_STARTTLS"):
+        monkeypatch.delenv(absent, raising=False)
+    monkeypatch.setenv("SMTP_HOST", "smtp.test")
+    monkeypatch.setenv("EMAIL_FROM", "FactuMov <no-reply@test>")
+    monkeypatch.setenv("APP_BASE_URL", "https://app.test")
+    monkeypatch.setenv("ARCA_DELEGATE_TAX_ID", "20-11111111-2")
+    email_service.get_email_settings.cache_clear()
+    yield
+    email_service.get_email_settings.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def sent_emails(monkeypatch):
+    """Intercepta el envío y devuelve la lista de lo que se mandó.
+
+    Autouse y no opcional: un test que se olvidara de pedirlo abriría un socket SMTP de
+    verdad contra `smtp.test`, y la falla sería un timeout de diez segundos sin ninguna
+    relación aparente con lo que el test estaba probando.
+
+    Parchea el transporte (`email.send_email`) y no las funciones de `notifications`, así
+    los asuntos, los cuerpos y la URL de confirmación se siguen armando de verdad y se
+    pueden afirmar sobre ellos.
+    """
+    sent = []
+
+    def fake_send(to, subject, body):
+        sent.append(SentEmail(to=to, subject=subject, body=body))
+
+    monkeypatch.setattr(email_service, "send_email", fake_send)
+    return sent
 
 
 class Settings(BaseSettings):

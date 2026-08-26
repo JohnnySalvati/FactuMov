@@ -24,9 +24,14 @@ def verify_password(password: str, hashed_password: str | None) -> bool:
     return valid
 
 
-def generate_session_token() -> str:
+# Un solo par de funciones para los dos tokens opacos del sistema: el de sesión y el de
+# confirmación de email. La mecánica es idéntica —256 bits de `secrets`, guardados como
+# SHA-256— y el nombre no dice "session" porque no tiene nada de la sesión adentro. SHA-256
+# y no argon2: con esa entropía no hay diccionario que atacar, y un KDF lento costaría ~100
+# ms en cada request autenticado sin comprar nada.
+def generate_opaque_token() -> str:
     return secrets.token_urlsafe(32)
 
 
-def hash_session_token(token: str) -> str:
+def hash_opaque_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()

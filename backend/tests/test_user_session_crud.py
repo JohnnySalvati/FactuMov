@@ -1,13 +1,13 @@
 from datetime import UTC, datetime, timedelta
 
 from factumov.crud.user_session import create, get_active_by_token_hash, revoke
-from factumov.services.security import hash_session_token
+from factumov.services.security import hash_opaque_token
 from tests.factories import make_user, make_user_session
 
 
 def test_hash_no_match(db):
     make_user_session(db)
-    hashed_token = hash_session_token("cualquier otro token")
+    hashed_token = hash_opaque_token("cualquier otro token")
     assert get_active_by_token_hash(db, hashed_token) is None
 
 
@@ -28,7 +28,7 @@ def test_find_revoked(db):
 
 def test_create(db):
     user = make_user(db)
-    token_hash = hash_session_token("safdf")
+    token_hash = hash_opaque_token("safdf")
     user_session = create(
         db,
         user_id=user.id,
@@ -40,7 +40,7 @@ def test_create(db):
 
 def test_revoke(db):
     user = make_user(db)
-    token_hash = hash_session_token("safdf")
+    token_hash = hash_opaque_token("safdf")
     user_session = create(
         db,
         user_id=user.id,

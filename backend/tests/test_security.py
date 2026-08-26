@@ -1,7 +1,7 @@
 from factumov.services.security import (
     _DUMMY_PASSWORD,
+    hash_opaque_token,
     hash_password,
-    hash_session_token,
     verify_password,
 )
 
@@ -28,4 +28,4 @@ def test_hash_password():
 
 def test_hash_session():
     token = "tokenkjlkjasdljslfj dlkj"
-    assert hash_session_token(token) == hash_session_token(token)
+    assert hash_opaque_token(token) == hash_opaque_token(token)

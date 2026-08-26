@@ -23,6 +23,7 @@ from decimal import Decimal
 
 from factumov.enums import Concepto, CondicionIva, DocType, IvaAliquot, VoucherType
 from factumov.models.customer import Customer
+from factumov.models.email_confirmation import EmailConfirmation
 from factumov.models.fiscal_identity import FiscalIdentity
 from factumov.models.invoice_template import InvoiceTemplate
 from factumov.models.invoice_template_line import InvoiceTemplateLine
@@ -30,7 +31,7 @@ from factumov.models.user import User
 from factumov.models.user_session import UserSession
 from factumov.schemas.invoice_template import InvoiceTemplateCreate
 from factumov.schemas.invoice_template_line import InvoiceTemplateLineCreate
-from factumov.services.security import hash_password, hash_session_token
+from factumov.services.security import hash_opaque_token, hash_password
 
 _sequence = itertools.count(1)
 # Pública: los tests de login la mandan en el body. El hash se calcula una sola vez al
@@ -182,10 +183,29 @@ def make_user_session(
     n = next(_sequence)
     user_session = UserSession(
         user_id=user_id or make_user(db).id,
-        token_hash=hash_session_token(f"token{n}" if raw_token is None else raw_token),
+        token_hash=hash_opaque_token(f"token{n}" if raw_token is None else raw_token),
         expires_at=expires_at or datetime.now(UTC) + timedelta(hours=1),
         revoked_at=revoked_at,
     )
     db.add(user_session)
     db.flush()
     return user_session
+
+
+def make_email_confirmation(
+    db,
+    user_id=None,
+    raw_token=None,
+    expires_at=None,
+    confirmed_at=None,
+):
+    n = next(_sequence)
+    confirmation = EmailConfirmation(
+        user_id=user_id or make_user(db).id,
+        token_hash=hash_opaque_token(f"confirmation{n}" if raw_token is None else raw_token),
+        expires_at=expires_at or datetime.now(UTC) + timedelta(hours=24),
+        confirmed_at=confirmed_at,
+    )
+    db.add(confirmation)
+    db.flush()
+    return confirmation

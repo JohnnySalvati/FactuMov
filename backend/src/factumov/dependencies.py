@@ -15,7 +15,7 @@ from factumov.crud import user_session as user_session_crud
 from factumov.database import get_db
 from factumov.models.user import User
 from factumov.models.user_session import UserSession
-from factumov.services.security import hash_session_token
+from factumov.services.security import hash_opaque_token
 
 SESSION_COOKIE_NAME = "factumov_session"
 
@@ -38,7 +38,7 @@ def get_current_session(
     """
     if session_token is None:
         raise HTTPException(status_code=401, detail=_UNAUTHENTICATED_DETAIL)
-    token_hash = hash_session_token(session_token)
+    token_hash = hash_opaque_token(session_token)
     user_session = user_session_crud.get_active_by_token_hash(db, token_hash)
     if user_session is None:
         raise HTTPException(status_code=401, detail=_UNAUTHENTICATED_DETAIL)

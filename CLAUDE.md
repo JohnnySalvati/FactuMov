@@ -276,6 +276,7 @@ Emitir = tomar un `InvoiceTemplate`, permitir retoques, y crear una `Invoice` nu
 | `InvoiceTemplateLine` | Descripción, cantidad, precio unitario, alícuota, posición |
 | `User` | Cuenta: email, hash de contraseña, confirmación, alta/baja |
 | `UserSession` | Sesión abierta: hash del token, vencimiento absoluto, revocación |
+| `EmailConfirmation` | Token de confirmación de email, de un solo uso |
 
 ### Decisiones sobre `InvoiceTemplate` (2026-08-15)
 - **Nombre único por identidad fiscal** — `UniqueConstraint(fiscal_identity_id, name)`, no un
@@ -449,7 +450,9 @@ usuario sin confirmar. Los tres son 401 idénticos.
 | `services/security.py` | Hash argon2 (pwdlib), tokens (`secrets`), hash SHA-256 del token |
 | `crud/user.py`, `crud/user_session.py` | Acceso a datos |
 | `dependencies.py` | `SessionDep`, `get_current_session`, `get_current_user` |
-| `routers/auth.py` | `POST /auth/login`, `POST /auth/logout`, `GET /auth/me` |
+| `crud/email_confirmation.py` | Tokens de confirmación |
+| `services/email.py`, `services/notifications.py` | Transporte SMTP y textos de los mails |
+| `routers/auth.py` | `login`, `logout`, `/me`, `register`, `confirm`, `resend-confirmation` |
 
 - **El login recibe JSON, no `OAuth2PasswordRequestForm`.** El form de FastAPI es lo que usa
   casi todo tutorial, pero es `x-www-form-urlencoded` y su campo se llama `username`. El
@@ -519,13 +522,123 @@ usuario sin confirmar. Los tres son 401 idénticos.
   expuesto aparte para que un test pueda afirmar sobre la fila (por ejemplo, que el logout
   le puso `revoked_at`).
 
-### Unidades pendientes, en orden
-La capa HTTP de autenticación quedó cerrada el 2026-08-26 (login, logout, `/me`,
-`dependencies.py` y los tres routers protegidos), y el *ownership scoping* el mismo día
-(ver la sección siguiente).
+### Registro y confirmación por email (2026-08-26)
+`POST /auth/register`, `POST /auth/confirm` y `POST /auth/resend-confirmation`, con la tabla
+`email_confirmations` (migración `10a07c64dfce`) y el envío por SMTP.
 
-1. **Registro + confirmación por email + el mail con las instrucciones de delegación.**
-2. **Verificación de la delegación contra ARCA.**
+- **El registro contesta siempre 202 con el mismo body**, exista o no la dirección. Un 409
+  por duplicado sería el oráculo de enumeración que el login evita con tanto cuidado. El
+  texto es afirmativo y no condicional ("Te mandamos un mail a esa dirección") porque las
+  tres ramas mandan algo: dirección nueva y dirección sin confirmar reciben el link, y
+  dirección ya confirmada recibe un aviso de que la cuenta existe. Ese aviso es lo único
+  que puede contar qué pasó, y llega a la casilla del dueño, que es quien tiene derecho a
+  saberlo.
+- **La contraseña se hashea antes del lookup**, aunque en dos de las tres ramas el hash se
+  tire. Argon2 es lo más caro del endpoint: hashear solo al crear haría que una dirección
+  ya registrada conteste notoriamente más rápido, y el cuerpo idéntico no serviría de nada.
+  Es el hash dummy del login, con el desperdicio del lado contrario.
+- **Registrarse sobre una dirección sin confirmar emite un token nuevo pero no toca la
+  contraseña.** Pisarla es una toma de cuenta completa: al atacante le alcanza con
+  registrarse encima de una cuenta pendiente y esperar a que el dueño real —que justamente
+  estaba esperando un mail— haga clic en el link que le llegue. Quien se equivocó de
+  contraseña al registrarse necesita el reset, que es otra unidad.
+- **`email_confirmations` es tabla y no dos columnas en `users`**, porque el reenvío emite
+  un token nuevo sin invalidar el anterior. Con columnas, cada reenvío pisaría el token del
+  mail que el usuario quizás ya tiene abierto y el link viejo moriría sin explicación. Y no
+  invalidar el anterior tampoco cuesta nada: cada token es de un solo uso, vence solo, y
+  los dos apuntan al mismo usuario.
+- **La confirmación no abre sesión.** Sería mejor UX, pero el token vivió 24 horas en una
+  casilla de mail: convertirlo en cookie dejaría logueado a cualquiera con acceso a ese
+  mensaje. Pedir la contraseña una vez después de confirmar cuesta una pantalla.
+- **Token desconocido, vencido, ya usado y de un usuario dado de baja dan el mismo 400.** No
+  hay nada que enumerar —son 256 bits— pero el remedio de los cuatro es idéntico y el texto
+  lo dice: "pedí uno nuevo". El CRUD ya los colapsa en un `None`, así que el endpoint no
+  tiene rama que pueda distinguirlos por descuido.
+- **El mail con las instrucciones de delegación sale al confirmar, no al registrarse**, y
+  solo la primera vez. Antes de confirmar no hay ninguna prueba de que la casilla sea de
+  quien dice, y ese mail termina con alguien entrando a ARCA con su Clave Fiscal.
+- **`CONFIRMATION_LIFETIME` = 24 h**, y el `PASSWORD_MIN_LENGTH` = 10 vive en el schema. Sin
+  reglas de composición: empujan a `Password1!` y NIST las desaconseja desde 2017. El techo
+  de 128 no es política sino defensa — sin él, una contraseña de megabytes le hace quemar
+  CPU a argon2 gratis. `LoginRequest` **no** lleva el mínimo: un 422 por "muy corta" le
+  diría al atacante que su intento no llegó ni a compararse.
+
+#### El `commit` explícito antes de mandar el mail
+Los mails van en `BackgroundTasks`, y **en FastAPI 0.141 los background tasks corren antes
+del cierre de las dependencias con `yield`** — o sea antes del `db.commit()` de `get_db`.
+Está medido, no supuesto. Sin un `commit` explícito en el endpoint pasan dos cosas:
+
+1. el mail sale con un token que todavía no está en la base, y si la transacción termina
+   abortando el usuario recibe un link que nunca va a funcionar;
+2. la transacción queda abierta durante toda la conexión SMTP, hasta
+   `SMTP_TIMEOUT_SECONDS`. Diez segundos de transacción abierta por registro es el más caro
+   de los dos problemas.
+
+Por eso el router commitea, contra la convención del proyecto de que eso es trabajo de
+`get_db`. El segundo commit de `get_db` no tiene nada que escribir, y en los tests el
+`join_transaction_mode="create_savepoint"` del fixture `db` hace que este commit cierre un
+savepoint y el rollback siga revirtiendo todo. El test que lo protege mira el **orden** y no
+el resultado, que es lo único que distingue este caso: ningún otro test nota que la línea
+falte.
+
+#### Mail: dónde vive cada cosa
+| Archivo | Rol |
+|---|---|
+| `services/email.py` | Transporte: `EmailSettings`, SMTP, STARTTLS, timeout |
+| `services/notifications.py` | Contenido: asunto y cuerpo de los tres mails |
+
+Separados porque cambian por motivos distintos: cambiar de proveedor no toca una palabra de
+los textos, y corregir la redacción de un mail no debería obligar a leer código de sockets.
+
+- **`EmailSettings` es un `BaseSettings` propio, no un campo más de `Settings`.** El de
+  `database.py` es sobre la base; meterle el servidor de mail lo vuelve un cajón de sastre.
+- **Los dos llevan `extra="ignore"`, y eso no es cosmético.** pydantic-settings prohíbe los
+  extras por default y el `.env` es uno solo para toda la app: sin esto, agregar `SMTP_HOST`
+  al `.env` hacía fallar la construcción de `Settings`, que ocurre **al importar
+  `database.py`**. O sea que la app entera y la suite completa se caían por una variable que
+  ese objeto nunca iba a mirar.
+- **`EmailSettings` se construye adentro de `send_email`**, con `lru_cache`. Instanciarla en
+  el módulo haría que un `.env` sin `SMTP_HOST` rompiera el import de todo el paquete por no
+  poder mandar un mail que nadie pidió.
+- **`notifications.py` importa el módulo `email`, no la función `send_email`.** Así el
+  nombre se resuelve en cada llamada y un test puede parchear el transporte en un solo
+  lugar — el mismo criterio que `MAX_UPLOAD_BYTES`. Con `from ... import send_email` el
+  parche no llegaría nunca.
+- **`ARCA_DELEGATE_TAX_ID` tiene como default un placeholder legible**, "(CUIT de FactuMov,
+  a completar)", y no un CUIT plausible: el certificado todavía no existe, y un número falso
+  bien formado saldría en el mail sin que nadie lo mire dos veces. **Pendiente para cuando
+  exista.**
+
+#### `generate_opaque_token` / `hash_opaque_token`
+Antes se llamaban `*_session_token`. La mecánica es la misma para la sesión y para la
+confirmación —256 bits de `secrets`, guardados como SHA-256— y el nombre no tenía nada de la
+sesión adentro. Un segundo par idéntico con otro nombre habría sido peor que el rename.
+
+#### Tests
+- **Dos fixtures autouse en `conftest.py`.** `sent_emails` parchea el transporte y devuelve
+  lo que se mandó; es autouse porque un test que se olvidara de pedirlo abriría un socket
+  SMTP de verdad y fallaría con un timeout de diez segundos sin relación aparente con lo que
+  estaba probando. Parchea `email.send_email` y no las funciones de `notifications`, así los
+  asuntos, los cuerpos y la URL se siguen armando de verdad.
+- **`email_settings` desengancha el `.env`** (`monkeypatch.setitem(..., "env_file", None)`)
+  además de fijar las variables. Las variables de entorno pisan al `.env`, así que fijarlas
+  alcanzaría para las que el fixture usa; el problema son las que un test necesita
+  *ausentes*. Sin esto, un `SMTP_USER` real en el `.env` de alguien rompe el test de "no hace
+  login sin credenciales" en su máquina y en ninguna otra.
+- **El token se saca del link del mail, no de la tabla.** Leer el `token_hash` probaría que
+  el CRUD guardó algo; sacarlo del cuerpo del mail y postearlo prueba que el link que llega a
+  la casilla abre la cuenta, que es lo que puede romperse en el medio.
+
+### Unidades pendientes, en orden
+Cerradas el 2026-08-26: la capa HTTP de autenticación (login, logout, `/me`,
+`dependencies.py` y los tres routers protegidos), el *ownership scoping* y el registro con
+confirmación por email. Del registro falta solo el rate limiting, que es la unidad
+siguiente.
+
+1. **Verificación de la delegación contra ARCA.**
+2. **Reset de contraseña.** Lo pide el registro: quien se equivocó de contraseña en una
+   cuenta sin confirmar no tiene hoy ninguna salida, porque re-registrarse a propósito no
+   la pisa.
 3. **Segundo layout del parser** — ver *Parser → Pendiente: un segundo layout*. Va último
    porque no bloquea nada: hoy el usuario puede cargar el modelo a mano, y el registro y la
    delegación sí están en el camino crítico de poder emitir.

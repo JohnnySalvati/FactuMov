@@ -7,6 +7,7 @@ from sqlalchemy import engine_from_config, pool
 # Base.metadata, que es contra lo que autogenerate compara la base real.
 from factumov.models import (  # noqa: F401
     customer,
+    email_confirmation,
     fiscal_identity,
     invoice_template,
     invoice_template_line,
