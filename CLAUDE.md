@@ -81,10 +81,6 @@ explique el *por qué*, no el *qué* (el diff ya dice qué cambió).
   Balance360.
 
 ## Estructura del repo
-**No existe `frontend/` todavía** — al 2026-08-26 el repo es solo el backend. La SPA está
-decidida (React, ver *Stack*) pero no empezada; para probar a mano está el Swagger de FastAPI
-en `/docs`.
-
 ```
 FactuMov/
 ├── CLAUDE.md
@@ -106,7 +102,14 @@ FactuMov/
 │   └── tests/
 │       └── samples/                # 10 facturas PDF reales (1 A, 4 B, 5 C)
 │           └── unsupported/       # otros layouts, fuera del glob de los tests
-└── frontend/
+└── frontend/                       # Vite + React 19 + TypeScript
+    ├── vite.config.ts              # proxy /api → :8000
+    └── src/
+        ├── api/                    # client.ts (fetch) + types.ts (espejo de los schemas)
+        ├── auth/                   # contexto de sesión
+        ├── components/             # layout, guard de rutas, avisos
+        ├── hooks/                  # useResource
+        └── pages/                  # una por pantalla
 ```
 
 ## Relevamiento de servicios de Balance360 (hecho — 2026-08-08)
@@ -706,15 +709,19 @@ self-serve, no que es opcional. `services/rate_limit.py`, aplicado a `login`, `r
 ### Unidades pendientes, en orden
 Cerradas el 2026-08-26: la capa HTTP de autenticación (login, logout, `/me`,
 `dependencies.py` y los tres routers protegidos), el *ownership scoping*, el registro con
-confirmación por email con su rate limiting, y la **integración con ARCA** (verificación de
-delegación + consulta al padrón) — ver la sección *ARCA*.
+confirmación por email con su rate limiting, la **integración con ARCA** (verificación de
+delegación + consulta al padrón) y la **primera tajada del frontend** — ver *ARCA* y
+*Frontend*.
 
 1. **Reset de contraseña.** Lo pide el registro: quien se equivocó de contraseña en una
    cuenta sin confirmar no tiene hoy ninguna salida, porque re-registrarse a propósito no
    la pisa.
-2. **Emisión con CAE** (`FECAESolicitar`). Es la mitad de `wsfe.py` que todavía no se
-   portó, y ahora es lo único que separa a la app de emitir de verdad.
-3. **Segundo layout del parser** — ver *Parser → Pendiente: un segundo layout*. Va último
+2. **Importación de PDF y editor de `InvoiceTemplate` en el front.** Es la pantalla que
+   falta para que la funcionalidad #1 se pueda usar de punta a punta: el backend ya la tiene
+   entera desde el 2026-08-17 y hoy solo se llega por Swagger.
+3. **Emisión con CAE** (`FECAESolicitar`). Es la mitad de `wsfe.py` que todavía no se
+   portó, y lo único que separa a la app de emitir de verdad.
+4. **Segundo layout del parser** — ver *Parser → Pendiente: un segundo layout*. Va último
    porque no bloquea nada: hoy el usuario puede cargar el modelo a mano.
 
 ## ARCA (2026-08-26)
@@ -889,6 +896,92 @@ Que ese mismo CUIT dé `PadronError` **no es un bug**: el padrón de homologaci�
 contribuyentes de prueba, no los reales. Los tres de arriba sí están, y devuelven una
 condición IVA cada uno, que es lo que hace que la deducción por `idImpuesto` esté probada
 contra datos de ARCA y no solo contra un `SimpleNamespace`.
+
+## Frontend (2026-08-26)
+Primera tajada de la SPA: autenticación, identidades fiscales con verificación de delegación,
+y clientes con carga desde el padrón. Vite 8 + React 19 + TypeScript 6, `react-router` como
+única dependencia agregada al scaffold.
+
+**Lo que todavía no está:** la importación de PDF y el editor de `InvoiceTemplate`, que es la
+pantalla grande y la que cierra la funcionalidad #1 de punta a punta.
+
+### Cómo se corre
+```
+# terminal 1
+cd backend && uv run uvicorn factumov.main:app --reload --port 8000
+# terminal 2
+cd frontend && npm run dev      # http://localhost:5173
+```
+
+### El proxy de Vite en vez de CORS
+`/api` se reenvía a `127.0.0.1:8000` y se le saca el prefijo. El navegador ve **un solo
+origen**, así que no hace falta CORS.
+
+La alternativa era pegarle directo al 8000 y agregarle `CORSMiddleware` al backend, con
+`allow_credentials=True` y una lista de orígenes. Es una superficie real: la cookie de sesión
+es `httpOnly` justamente para que ningún JS la toque, y abrir CORS con credenciales es la
+forma más común de aflojar esa decisión sin darse cuenta. En producción la SPA y la API van
+detrás del mismo nginx, que es exactamente lo que el proxy imita — o sea que esto no es un
+apaño de desarrollo, es la topología final.
+
+Consecuencias: el cliente pega siempre a rutas relativas y **no hay ninguna variable de
+entorno con la URL del backend**. Y el puerto es `strictPort: true`: `APP_BASE_URL` del
+backend apunta al 5173, y si Vite se corriera al 5174 por estar ocupado el puerto, el link de
+confirmación de los mails llegaría roto.
+
+### Sesión
+- **No se guarda nada del lado del cliente.** La cookie es `httpOnly`, así que el JS no la
+  puede leer; la única forma de saber si hay sesión es un `GET /auth/me` al montar el
+  `AuthProvider`. Un flag en `localStorage` sería más rápido y mentiría en los dos casos que
+  importan: la sesión revocada desde otra pestaña y la vencida.
+- **`user` tiene tres estados, no dos:** `undefined` es "todavía no sé", `null` es "no hay
+  sesión". Sin esa distinción, recargar en `/clientes` rebota al login antes de que conteste
+  `/auth/me`, y el usuario logueado se ve pateado afuera en cada refresh.
+- **`credentials: 'include'` en el cliente.** Sin eso el navegador no manda la cookie y
+  *todo* contesta 401 — una falla que no se parece en nada a su causa.
+- **`RequireAuth` no es seguridad, es navegación.** Quien quiera los datos le pega a la API
+  igual; ahí decide `get_current_user`. Se aplica al grupo de rutas y no pantalla por
+  pantalla, mismo criterio que el `APIRouter(dependencies=[...])` del backend: la regla
+  escrita una vez no se puede olvidar en la pantalla que se agregue mañana.
+
+### Sin TanStack Query y sin Tailwind
+Las dos por el mismo motivo: resuelven problemas que esta app todavía no tiene.
+
+TanStack Query da caché compartida entre pantallas, deduplicación y revalidación en foco —
+y acá son cuatro pantallas, cada una con su propia lista. `useResource` son treinta líneas.
+Revisar cuando dos pantallas necesiten los mismos datos y empiecen a discrepar.
+
+Tailwind: son formularios y tablas, y lo que se ahorraría en clases se pagaría en una
+dependencia con su propio build. Revisar cuando el editor de facturas traiga drag-and-drop.
+
+### Detalles que costaron una vuelta
+- **`types.ts` se escribe a mano y tiene que coincidir *exactamente*.** `UserRead` del backend
+  son dos campos, `id` y `email`. Declarar acá un `created_at` que el JSON no trae lo tipa
+  como presente y el error sale recién en runtime, como un `undefined` en la pantalla. Y
+  `MessageResponse` es `{detail}`, no `{message}`.
+- **`EmailStr` rechaza los TLD reservados**: `@algo.local` y `@algo.test` dan 422. Para un
+  usuario de prueba hay que usar un dominio real (`@factumov.com.ar`).
+- **El token de confirmación es de un solo uso y StrictMode monta dos veces.** Sin un `useRef`
+  de guarda, la confirmación anda y la pantalla muestra igual "el link no es válido", porque
+  el segundo POST da 400.
+- **El contexto, el provider y el hook van en tres archivos.** Fast Refresh solo recarga en
+  caliente un módulo que exporta componentes nada más; mezclarlos hace que cada cambio
+  recargue la página entera y se pierda el formulario que uno estaba probando.
+- **El linter es `oxlint`** (viene con el scaffold) y avisa de `setState` sincrónico adentro
+  de un efecto. Tenía razón las dos veces: en `useResource` el `loading` se prende ahora
+  desde `reload`, que es el evento que lo causa, y en `ConfirmEmailPage` el caso "link sin
+  token" se resuelve en el estado inicial porque ya se sabe al primer render.
+- **Los enums viajan como el código de ARCA** (`condicion_iva: 1`), igual que en el backend.
+  El texto de pantalla sale de `CONDICION_IVA_LABELS`; traducirlos en el cliente agregaría
+  una tabla que se puede desincronizar.
+- **Consumidor final no está en el desplegable de identidad fiscal**, porque no puede emitir y
+  el backend lo rechaza con 422. No se ofrece una opción que siempre falla.
+- **El lookup del padrón prellena el formulario y no da de alta.** Que quede editable es el
+  punto: el backend devuelve una propuesta. Si guardara directo, consultar dos veces el mismo
+  CUIT dejaría dos clientes.
+- **El 502 y el `granted: false` se muestran distinto.** "No se pudo preguntar" y "no estás
+  delegado" son cosas distintas; mezclarlas haría que un ARCA caído se vea como una
+  delegación faltante y el usuario iría a otorgar una que ya tiene.
 
 ## Ownership scoping (2026-08-26)
 `user_id` en `fiscal_identities` y `customers`, todas las queries de esas dos tablas

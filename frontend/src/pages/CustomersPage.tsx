@@ -1,0 +1,227 @@
+import { useCallback, useState, type FormEvent } from 'react'
+
+import { ApiError, api } from '../api/client'
+import {
+  CONDICION_IVA_LABELS,
+  CondicionIva,
+  DOC_TYPE_LABELS,
+  DocType,
+  type Customer,
+  type TaxpayerLookup,
+} from '../api/types'
+import { Notice } from '../components/Notice'
+import { useResource } from '../hooks/useResource'
+
+export function CustomersPage() {
+  const fetcher = useCallback(() => api.get<Customer[]>('/customers'), [])
+  const { data, error, loading, reload } = useResource(fetcher)
+
+  return (
+    <div className="page">
+      <h1>Clientes</h1>
+      <p className="page-intro">
+        A quiénes les facturás. Si tenés el CUIT, traelo del padrón de ARCA y se completa
+        solo.
+      </p>
+
+      <NewCustomerForm onCreated={reload} />
+
+      <div className="card">
+        <h2>Tu cartera</h2>
+        <Notice kind="error">{error}</Notice>
+        {loading && <p className="muted">Cargando…</p>}
+        {data && data.length === 0 && <p className="empty">Todavía no cargaste ninguno.</p>}
+        {data && data.length > 0 && (
+          <table>
+            <thead>
+              <tr>
+                <th>Nombre</th>
+                <th>Documento</th>
+                <th>Condición IVA</th>
+                <th>Domicilio</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.map((customer) => (
+                <tr key={customer.id}>
+                  <td>{customer.name}</td>
+                  <td className="mono">
+                    {DOC_TYPE_LABELS[customer.doc_type]} {customer.doc_number}
+                  </td>
+                  <td>{CONDICION_IVA_LABELS[customer.condicion_iva]}</td>
+                  <td className="muted">{customer.address ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function NewCustomerForm({ onCreated }: { onCreated: () => void }) {
+  const [docType, setDocType] = useState<DocType>(DocType.CUIT)
+  const [docNumber, setDocNumber] = useState('')
+  const [name, setName] = useState('')
+  const [condicionIva, setCondicionIva] = useState<CondicionIva>(CondicionIva.INSCRIPTO)
+  const [address, setAddress] = useState('')
+  const [email, setEmail] = useState('')
+
+  const [error, setError] = useState<string>()
+  const [lookupNote, setLookupNote] = useState<string>()
+  const [looking, setLooking] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  /**
+   * Trae los datos del padrón y **prellena el formulario**, sin guardar nada.
+   *
+   * Que quede editable es el punto: el backend devuelve una propuesta, no un alta, y el
+   * usuario tiene que poder corregirla antes de confirmar. Si esto guardara directo,
+   * consultar dos veces el mismo CUIT dejaría dos clientes.
+   */
+  async function lookup() {
+    const digits = docNumber.replace(/\D/g, '')
+    setLooking(true)
+    setError(undefined)
+    setLookupNote(undefined)
+    try {
+      const taxpayer = await api.get<TaxpayerLookup>(`/customers/lookup/${digits}`)
+      setDocType(taxpayer.doc_type)
+      setDocNumber(taxpayer.doc_number)
+      setName(taxpayer.name)
+      setCondicionIva(taxpayer.condicion_iva)
+      setAddress(taxpayer.address ?? '')
+      setLookupNote(
+        taxpayer.active
+          ? 'Datos traídos del padrón. Revisalos antes de guardar.'
+          : 'Ojo: en el padrón este CUIT figura con la clave inactiva.',
+      )
+    } catch (caught) {
+      // 404 es "ARCA no tiene ese CUIT" y 502 es "no se pudo preguntar". Ninguno de los dos
+      // impide cargar el cliente a mano, así que son avisos y no bloqueos.
+      setError(caught instanceof ApiError ? caught.detail : 'No se pudo consultar el padrón.')
+    } finally {
+      setLooking(false)
+    }
+  }
+
+  async function onSubmit(event: FormEvent) {
+    event.preventDefault()
+    setBusy(true)
+    setError(undefined)
+    try {
+      await api.post<Customer>('/customers', {
+        name,
+        condicion_iva: condicionIva,
+        doc_type: docType,
+        doc_number: docNumber.replace(/\D/g, ''),
+        address: address.trim() || null,
+        email: email.trim() || null,
+      })
+      setDocNumber('')
+      setName('')
+      setAddress('')
+      setEmail('')
+      setLookupNote(undefined)
+      onCreated()
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.detail : 'No se pudo guardar.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // El padrón se consulta por CUIT y solo devuelve CUIT: con un DNI no hay nada que traer.
+  const canLookup = docType === DocType.CUIT && docNumber.replace(/\D/g, '').length === 11
+
+  return (
+    <form className="card stack" onSubmit={onSubmit}>
+      <h2>Agregar un cliente</h2>
+
+      <div className="row">
+        <div style={{ maxWidth: 120 }}>
+          <label htmlFor="c-doc-type">Documento</label>
+          <select
+            id="c-doc-type"
+            value={docType}
+            onChange={(e) => setDocType(Number(e.target.value) as DocType)}
+          >
+            {Object.entries(DOC_TYPE_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label htmlFor="c-doc-number">Número</label>
+          <input
+            id="c-doc-number"
+            required
+            inputMode="numeric"
+            value={docNumber}
+            onChange={(e) => setDocNumber(e.target.value)}
+          />
+        </div>
+        <button
+          type="button"
+          className="secondary"
+          onClick={lookup}
+          disabled={!canLookup || looking}
+          title={
+            docType === DocType.CUIT
+              ? 'Trae nombre, domicilio y condición IVA del padrón'
+              : 'El padrón solo se consulta por CUIT'
+          }
+        >
+          {looking ? 'Consultando…' : 'Traer del padrón'}
+        </button>
+      </div>
+
+      {lookupNote && <Notice kind={lookupNote.startsWith('Ojo') ? 'warn' : 'ok'}>{lookupNote}</Notice>}
+
+      <div className="row">
+        <div>
+          <label htmlFor="c-name">Nombre o razón social</label>
+          <input id="c-name" required value={name} onChange={(e) => setName(e.target.value)} />
+        </div>
+        <div>
+          <label htmlFor="c-condicion">Condición frente al IVA</label>
+          <select
+            id="c-condicion"
+            value={condicionIva}
+            onChange={(e) => setCondicionIva(Number(e.target.value) as CondicionIva)}
+          >
+            {Object.entries(CONDICION_IVA_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div className="row">
+        <div>
+          <label htmlFor="c-address">Domicilio (opcional)</label>
+          <input id="c-address" value={address} onChange={(e) => setAddress(e.target.value)} />
+        </div>
+        <div>
+          <label htmlFor="c-email">Email (opcional)</label>
+          <input
+            id="c-email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+        </div>
+        <button type="submit" disabled={busy}>
+          {busy ? 'Guardando…' : 'Agregar'}
+        </button>
+      </div>
+
+      <Notice kind="error">{error}</Notice>
+    </form>
+  )
+}
