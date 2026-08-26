@@ -293,3 +293,50 @@ tbody tr:last-child td {
 .mono {
   font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
 }
+
+/* --- Eliminar ----------------------------------------------------------------------- */
+
+button.icon {
+  background: none;
+  border: none;
+  padding: 0.15rem 0.35rem;
+  font-size: 1rem;
+  line-height: 1;
+  color: var(--muted);
+  border-radius: 4px;
+}
+
+button.icon:hover {
+  background: var(--danger-bg);
+}
+
+button.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+
+.confirm-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  white-space: nowrap;
+}
+
+.confirm-group button {
+  padding: 0.25rem 0.6rem;
+  font-size: 0.85rem;
+}
+
+.delete-error {
+  display: inline-block;
+  color: var(--danger);
+  font-size: 0.85rem;
+}
+
+/* La columna de acciones no compite por ancho con los datos. */
+.actions {
+  width: 1%;
+  white-space: nowrap;
+  text-align: right;
+}

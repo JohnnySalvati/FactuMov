@@ -7,6 +7,7 @@ import {
   type DelegationStatus,
   type FiscalIdentity,
 } from '../api/types'
+import { DeleteButton } from '../components/DeleteButton'
 import { Notice } from '../components/Notice'
 import { useResource } from '../hooks/useResource'
 
@@ -55,6 +56,7 @@ export function FiscalIdentitiesPage() {
                 <th>CUIT</th>
                 <th>Condición IVA</th>
                 <th>Delegación</th>
+                <th className="actions" />
               </tr>
             </thead>
             <tbody>
@@ -65,6 +67,15 @@ export function FiscalIdentitiesPage() {
                   <td>{CONDICION_IVA_LABELS[identity.condicion_iva]}</td>
                   <td>
                     <DelegationCell identity={identity} onVerified={reload} />
+                  </td>
+                  <td className="actions">
+                    <DeleteButton
+                      title={`Eliminar ${identity.name}`}
+                      onDelete={async () => {
+                        await api.delete<void>(`/fiscal-identities/${identity.id}`)
+                        reload()
+                      }}
+                    />
                   </td>
                 </tr>
               ))}

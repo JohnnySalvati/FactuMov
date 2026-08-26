@@ -1,3 +1,4 @@
+import logging
 import uuid
 from typing import Annotated
 
@@ -27,6 +28,8 @@ from factumov.schemas.fiscal_identity import (
 )
 from factumov.services import arca, wsfe
 from factumov.services.rate_limit import RateLimiter
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/fiscal-identities",
@@ -142,9 +145,15 @@ def verify_delegation(
     try:
         check = wsfe.check_delegation(tax_id)
     except ArcaError:
+        # El `logger.exception` no es decorativo: es la **única** forma de saber por qué falló.
+        # El detalle no puede ir en la respuesta —no le dice nada al usuario y filtra cómo
+        # estamos armados—, así que sin esta línea un 502 es indistinguible de otro y el
+        # síntoma que ve el usuario ("no me verifica") no tiene ningún rastro atrás.
+        logger.exception("Falló la verificación de delegación del CUIT %s", tax_id)
         raise HTTPException(
             status_code=502,
-            detail="No se pudo consultar el estado de la delegación en ARCA, reintentá más tarde",
+            detail="No se pudo consultar ARCA. No es que falte la delegación: ARCA no "
+            "contestó. Probá de nuevo en un momento.",
         )
 
     if not check.granted:

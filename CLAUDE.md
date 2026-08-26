@@ -876,6 +876,29 @@ en el cwd de un contenedor no coordina eso, y encima no sobrevive al deploy.
   certificado que no está en el repo y de que ARCA esté levantado. Los certificados de
   Balance360 (`certs/homo.crt`, `certs/balance360.key`) son los de este mismo CUIT.
 
+#### Los 502 son transitorios, y no significan "no delegado"
+ARCA homologación corta conexiones cada tanto. Cuando eso pasa, `check_delegation` levanta
+`ArcaError` y el endpoint contesta **502** — que no es lo mismo que el **200 con
+`granted: false`** de una delegación que falta. En la pantalla los dos son un cartel, así que
+es fácil confundirlos: pasó el 2026-08-26 con el CUIT `27177624441`, que sí está delegado, y
+el reintento inmediato dio `granted: true`.
+
+Dos cosas cambiaron a partir de eso:
+
+- **Se loguea con `logger.exception`.** El docstring decía "el traceback queda en el log" y
+  era mentira: nadie lo escribía. Un 502 sin log es indistinguible de otro, y el síntoma que
+  ve el usuario —"no me verifica"— no deja ningún rastro atrás. Va en los dos endpoints que
+  salen a ARCA.
+- **El texto del 502 dice explícitamente que no es una falta de delegación**, en vez del
+  genérico "reintentá más tarde".
+
+**No hay reintento automático, y es a propósito.** Sería natural que el adapter de `requests`
+reintentara los errores de conexión, pero SOAP viaja por POST y urllib3 —con razón— no
+reintenta POST por defecto. Habilitarlo alcanzaría también a `loginCms`: reintentar un TRA
+que en realidad funcionó le pide a WSAA un segundo TA y devuelve "El CEE ya posee un TA
+valido", que es justo el error que puede dejar la app afuera de ARCA por horas. El reintento
+lo hace el usuario apretando el botón otra vez.
+
 #### Verificado contra ARCA homologación — 2026-08-26
 La cadena entera anduvo de punta a punta, no solo con SOAP mockeado:
 
@@ -981,7 +1004,15 @@ dependencia con su propio build. Revisar cuando el editor de facturas traiga dra
   CUIT dejaría dos clientes.
 - **El 502 y el `granted: false` se muestran distinto.** "No se pudo preguntar" y "no estás
   delegado" son cosas distintas; mezclarlas haría que un ARCA caído se vea como una
-  delegación faltante y el usuario iría a otorgar una que ya tiene.
+  delegación faltante y el usuario iría a otorgar una que ya tiene. **Pasó de verdad el
+  2026-08-26:** ARCA homologación no contestó, salió el 502, y el cartel rojo se leyó como un
+  rechazo. Ver *ARCA → Los 502 son transitorios*.
+- **El tacho de basura confirma en dos pasos y no con `window.confirm`.** Ese diálogo bloquea
+  el hilo, no se puede estilar, y en algunos navegadores queda suprimido si el usuario marcó
+  "no mostrar más" — o sea que la confirmación desaparece sin que nadie se entere y el
+  próximo click borra directo. El error del 409 se muestra **en la fila**, no arriba de la
+  tabla: "tiene modelos asociados" es sobre esa fila, y mostrarlo arriba obliga a adivinar
+  cuál se quejó.
 
 ## Ownership scoping (2026-08-26)
 `user_id` en `fiscal_identities` y `customers`, todas las queries de esas dos tablas

@@ -9,6 +9,7 @@ import {
   type Customer,
   type TaxpayerLookup,
 } from '../api/types'
+import { DeleteButton } from '../components/DeleteButton'
 import { Notice } from '../components/Notice'
 import { useResource } from '../hooks/useResource'
 
@@ -39,6 +40,7 @@ export function CustomersPage() {
                 <th>Documento</th>
                 <th>Condición IVA</th>
                 <th>Domicilio</th>
+                <th className="actions" />
               </tr>
             </thead>
             <tbody>
@@ -50,6 +52,15 @@ export function CustomersPage() {
                   </td>
                   <td>{CONDICION_IVA_LABELS[customer.condicion_iva]}</td>
                   <td className="muted">{customer.address ?? '—'}</td>
+                  <td className="actions">
+                    <DeleteButton
+                      title={`Eliminar ${customer.name}`}
+                      onDelete={async () => {
+                        await api.delete<void>(`/customers/${customer.id}`)
+                        reload()
+                      }}
+                    />
+                  </td>
                 </tr>
               ))}
             </tbody>

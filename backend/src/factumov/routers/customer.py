@@ -1,3 +1,4 @@
+import logging
 import uuid
 from typing import Annotated
 
@@ -27,6 +28,8 @@ from factumov.schemas.customer import (
 )
 from factumov.services import padron
 from factumov.services.rate_limit import RateLimiter
+
+logger = logging.getLogger(__name__)
 
 # La dependencia a nivel de router se queda aunque los endpoints ya pidan `CurrentUserDep`:
 # es el default-deny para el endpoint que se agregue mañana sin acordarse. FastAPI cachea la
@@ -94,9 +97,12 @@ def lookup_taxpayer(tax_id: str, user: CurrentUserDep) -> TaxpayerLookup:
     except PadronError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except ArcaError:
+        # Ver `verify_delegation`: sin este log, un 502 no deja rastro de su causa.
+        logger.exception("Falló la consulta al padrón del CUIT %s", tax_id)
         raise HTTPException(
             status_code=502,
-            detail="No se pudo consultar el padrón de ARCA, reintentá más tarde",
+            detail="No se pudo consultar el padrón de ARCA. Probá de nuevo, o cargá los "
+            "datos a mano.",
         )
 
     return TaxpayerLookup(
