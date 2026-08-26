@@ -2,8 +2,14 @@
 
 Two kinds of test live here, and the difference matters. The parametrised cases at
 the top read the real PDFs in `samples/`. The ones at the bottom feed hand-written
-rows straight into `_extract_items`, because all nine samples are type B or C and
-the type A layout cannot be reached from any document we hold.
+rows straight into `_extract_items`, to reach the rates no sample carries.
+
+`samples/` holds only documents this parser is meant to read, which today means one
+layout: ARCA "Comprobantes en línea". A PDF from a different generator belongs in
+`samples/unsupported/`, which the glob below does not descend into. That folder is
+gitignored, so nothing in the code can enforce the split — it is a sibling folder
+rather than a name skipped in a list so that filing a PDF in the wrong place is a
+visible mistake, not a red test nobody expected.
 """
 
 from decimal import Decimal
@@ -92,7 +98,7 @@ def test_invoice_parser(file, data):
 
 @pytest.mark.parametrize("sample", sorted(SAMPLES.glob("*.pdf")), ids=lambda path: path.name)
 def test_every_sample_parses_end_to_end(sample):
-    """A floor under all nine PDFs, so a regex change cannot quietly empty one out.
+    """A floor under all ten PDFs, so a regex change cannot quietly empty one out.
 
     The named cases above pin exact values for three of them; this one only asserts
     that nothing came back empty, which is what a broken row pattern looks like.

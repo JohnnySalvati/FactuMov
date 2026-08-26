@@ -101,6 +101,7 @@ FactuMov/
 │   │       └── invoice_draft.py    # ParsedInvoice → InvoiceTemplateDraft
 │   └── tests/
 │       └── samples/                # 10 facturas PDF reales (1 A, 4 B, 5 C)
+│           └── unsupported/       # otros layouts, fuera del glob de los tests
 └── frontend/
 ```
 
@@ -159,6 +160,32 @@ Reescrito a partir del de Balance360 y verificado contra las 10 muestras de
 - **Los domicilios se parten en dos renglones** y hay que reensamblarlos.
 - Los campos del emisor se llaman `issuer_*`, no `supplier_*`: en FactuMov el emisor es el
   propio usuario.
+
+### Pendiente: un segundo layout (2026-08-26)
+`tests/samples/unsupported/factura_A_00005-00000001.pdf` es una factura A real de Miguel que
+el parser hoy **no** sabe leer: saca `pos`, `number`, `date`, CAE, IIBB y fecha de inicio, y
+nada más. Sin CUIT del emisor, sin receptor y sin líneas. No hay nada roto — es otro
+generador, no ARCA "Comprobantes en línea":
+
+| | Comprobantes en línea | El PDF nuevo |
+|---|---|---|
+| Copias | ORIGINAL + DUPLICADO + TRIPLICADO | una sola, `Pág. 1/1` |
+| CUIT | `20182810674` | `20-18281067-4`, con guiones |
+| Columnas de items | `Código` `Producto/Servicio` `Cantidad` `U. Medida` `Precio Unit.` `% Bonif` … | `Producto/Servicio` `Cantidad` `Precio Unit.` … — sin código, **sin U. Medida**, sin bonif |
+| Tipo de comprobante | rótulo de ARCA | `COD. 01`, pegado a la razón social |
+| Datos del emisor | un campo por renglón | varios por renglón (`Condición frente al IVA: … CUIT: …`) |
+| Peso | ~86 KB | 19 KB |
+
+Los guiones tumban `_ISSUER_CUIT` y `_CUSTOMER`, que piden 11 dígitos seguidos; la falta de
+`U. Medida` tumba `_ITEM_ROW`, que exige el token de unidad entre cantidad y precio; y los
+campos apilados en un mismo renglón tumban los regex del emisor, que buscan el rótulo
+siguiente y `.` no cruza saltos de línea.
+
+Soportarlo es **volver a un registry de layouts**, que es justamente lo que se borró de
+Balance360 — pero con la diferencia que hacía a esa decisión: acá hay un PDF real contra el
+cual verificar. Miguel confirmó que es una factura suya y que hay que soportarla, más
+adelante. Mientras tanto vive en `samples/unsupported/`, fuera del glob de
+`test_every_sample_parses_end_to_end`.
 
 ## Decisión: NO armar todavía el paquete compartido de ARCA/WSFE
 El primer hito (importar PDF → modelo editable → guardarlo) no necesita ARCA ni WSFE.
@@ -499,6 +526,9 @@ La capa HTTP de autenticación quedó cerrada el 2026-08-26 (login, logout, `/me
 
 1. **Registro + confirmación por email + el mail con las instrucciones de delegación.**
 2. **Verificación de la delegación contra ARCA.**
+3. **Segundo layout del parser** — ver *Parser → Pendiente: un segundo layout*. Va último
+   porque no bloquea nada: hoy el usuario puede cargar el modelo a mano, y el registro y la
+   delegación sí están en el camino crítico de poder emitir.
 
 ## Ownership scoping (2026-08-26)
 `user_id` en `fiscal_identities` y `customers`, todas las queries de esas dos tablas
