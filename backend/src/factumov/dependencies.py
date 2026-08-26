@@ -8,13 +8,14 @@ estructural.
 
 from typing import Annotated
 
-from fastapi import Cookie, Depends, HTTPException
+from fastapi import Cookie, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from factumov.crud import user_session as user_session_crud
 from factumov.database import get_db
 from factumov.models.user import User
 from factumov.models.user_session import UserSession
+from factumov.services.rate_limit import RateLimiter
 from factumov.services.security import hash_opaque_token
 
 SESSION_COOKIE_NAME = "factumov_session"
@@ -63,3 +64,39 @@ def get_current_user(user_session: CurrentSessionDep) -> User:
 
 
 CurrentUserDep = Annotated[User, Depends(get_current_user)]
+
+
+# --- Rate limiting --------------------------------------------------------------------
+#
+# Estas dos vivían en `routers/auth.py` mientras el único que limitaba algo era auth. Con la
+# consulta al padrón y la verificación de delegación —que salen a ARCA y gastan la cuota del
+# certificado, que es una sola para todos los usuarios— pasan a hacer falta en otro router, y
+# la alternativa era importarlas de un router hermano. Es el mismo motivo por el que
+# `get_current_user` está en este módulo y no en `routers/auth.py`.
+
+_RATE_LIMITED_DETAIL = "Demasiados intentos. Esperá un rato y probá de nuevo."
+
+
+def client_key(request: Request) -> str:
+    """La IP del cliente, tal como la ve la app.
+
+    Se lee de `request.client` y no del header `X-Forwarded-For`. Detrás de un proxy es
+    uvicorn —con `--proxy-headers` y `--forwarded-allow-ips`— el que reescribe
+    `request.client` a partir de ese header, y solo si el que se conectó es un proxy de
+    confianza. Leer el header acá saltearía esa decisión, y un header que cualquiera puede
+    inventar convierte el limitador en un adorno: se manda uno distinto en cada request y no
+    hay límite, o se manda el de otro y se lo deja afuera a él.
+    """
+    return request.client.host if request.client else "sin-ip"
+
+
+def enforce_rate_limit(limiter: RateLimiter, key: str) -> None:
+    retry_after = limiter.check(key)
+    if retry_after is not None:
+        raise HTTPException(
+            status_code=429,
+            detail=_RATE_LIMITED_DETAIL,
+            # Segundos enteros y redondeando para arriba: un `Retry-After: 0` invitaría a
+            # reintentar de inmediato, que es justo lo que se está tratando de frenar.
+            headers={"Retry-After": str(int(retry_after) + 1)},
+        )

@@ -11,6 +11,8 @@ from factumov.dependencies import (
     CurrentSessionDep,
     CurrentUserDep,
     SessionDep,
+    client_key,
+    enforce_rate_limit,
 )
 from factumov.exceptions import DuplicateUserEmailError
 from factumov.models.user import User
@@ -83,34 +85,10 @@ _RESEND_IP_LIMITER = RateLimiter(limit=5, window_seconds=60 * 60)
 # casilla. Es también el límite que el borde no puede aplicar, porque nginx no lee el body.
 _EMAIL_LIMITER = RateLimiter(limit=3, window_seconds=60 * 60)
 
-_RATE_LIMITED_DETAIL = "Demasiados intentos. Esperá un rato y probá de nuevo."
-
-ALL_LIMITERS = (_LOGIN_LIMITER, _REGISTER_IP_LIMITER, _RESEND_IP_LIMITER, _EMAIL_LIMITER)
-
-
-def _client_key(request: Request) -> str:
-    """La IP del cliente, tal como la ve la app.
-
-    Se lee de `request.client` y no del header `X-Forwarded-For`. Detrás de un proxy es
-    uvicorn —con `--proxy-headers` y `--forwarded-allow-ips`— el que reescribe
-    `request.client` a partir de ese header, y solo si el que se conectó es un proxy de
-    confianza. Leer el header acá saltearía esa decisión, y un header que cualquiera puede
-    inventar convierte el limitador en un adorno: se manda uno distinto en cada request y no
-    hay límite, o se manda el de otro y se lo deja afuera a él.
-    """
-    return request.client.host if request.client else "sin-ip"
-
-
-def _enforce(limiter: RateLimiter, key: str) -> None:
-    retry_after = limiter.check(key)
-    if retry_after is not None:
-        raise HTTPException(
-            status_code=429,
-            detail=_RATE_LIMITED_DETAIL,
-            # Segundos enteros y redondeando para arriba: un `Retry-After: 0` invitaría a
-            # reintentar de inmediato, que es justo lo que se está tratando de frenar.
-            headers={"Retry-After": str(int(retry_after) + 1)},
-        )
+# `_client_key` y `_enforce` se mudaron a `dependencies.py` cuando los endpoints de ARCA
+# empezaron a necesitarlas: importarlas de este router habría sido un router hermano
+# importando de otro. Lo mismo con la tupla `ALL_LIMITERS`, que ahora es el registro
+# automático de `rate_limit.reset_all()`.
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -191,8 +169,8 @@ def register(
     # Los dos límites se cuentan antes de mirar la base, y eso es parte de la propiedad
     # anti-enumeración: si el contador solo avanzara cuando la dirección existe, el 429
     # llegaría antes para las registradas y contestaría la pregunta que el 202 calla.
-    _enforce(_REGISTER_IP_LIMITER, _client_key(request))
-    _enforce(_EMAIL_LIMITER, data.email)
+    enforce_rate_limit(_REGISTER_IP_LIMITER, client_key(request))
+    enforce_rate_limit(_EMAIL_LIMITER, data.email)
 
     hashed_password = hash_password(data.password.get_secret_value())
     user = user_crud.get_by_email(db, data.email)
@@ -228,8 +206,8 @@ def resend_confirmation(
     db: SessionDep,
 ) -> MessageResponse:
     """Reenvía la confirmación. Contesta lo mismo exista o no la dirección."""
-    _enforce(_RESEND_IP_LIMITER, _client_key(request))
-    _enforce(_EMAIL_LIMITER, data.email)
+    enforce_rate_limit(_RESEND_IP_LIMITER, client_key(request))
+    enforce_rate_limit(_EMAIL_LIMITER, data.email)
     user = user_crud.get_by_email(db, data.email)
     if user is not None and user.is_active and user.email_confirmed_at is None:
         _issue_confirmation(background, db, user)
@@ -271,7 +249,7 @@ def confirm_email(data: ConfirmEmailRequest, background: BackgroundTasks, db: Se
 
 @router.post("/login", response_model=UserRead)
 def login(data: LoginRequest, request: Request, response: Response, db: SessionDep) -> User:
-    _enforce(_LOGIN_LIMITER, _client_key(request))
+    enforce_rate_limit(_LOGIN_LIMITER, client_key(request))
     user = user_crud.get_by_email(db, data.email)
     # La verificación corre siempre, incluso sin usuario: `verify_password` acepta `None` y
     # compara contra un hash dummy para que el email desconocido cueste lo mismo que la

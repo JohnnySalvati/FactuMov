@@ -1,8 +1,12 @@
 import secrets
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import NameOID
 from fastapi.testclient import TestClient
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import create_engine
@@ -12,8 +16,9 @@ from factumov.database import get_db
 from factumov.dependencies import SESSION_COOKIE_NAME
 from factumov.main import app
 from factumov.models.base import Base
-from factumov.routers.auth import ALL_LIMITERS
+from factumov.services import arca as arca_service
 from factumov.services import email as email_service
+from factumov.services.rate_limit import reset_all as reset_all_limiters
 from tests import factories
 
 
@@ -33,11 +38,9 @@ def reset_rate_limiters():
     empieza a comer 429 — y no falla el test que rompió nada, sino el que quedó sexto, que
     va cambiando con el orden de colección.
     """
-    for limiter in ALL_LIMITERS:
-        limiter.reset()
+    reset_all_limiters()
     yield
-    for limiter in ALL_LIMITERS:
-        limiter.reset()
+    reset_all_limiters()
 
 
 @pytest.fixture(autouse=True)
@@ -70,6 +73,93 @@ def email_settings(monkeypatch):
     email_service.get_email_settings.cache_clear()
     yield
     email_service.get_email_settings.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def arca_settings(monkeypatch):
+    """Config de ARCA determinística, y sin certificado por default.
+
+    Autouse y por el mismo motivo que `email_settings`: desengancha el `.env` para que el
+    certificado real de una máquina no cambie el resultado de un test en esa máquina y en
+    ninguna otra. Acá pesa más que con el mail — un `.env` con ARCA_CERT_PATH apuntando a un
+    certificado de producción convertiría un test en una llamada real a ARCA.
+
+    El default es **sin certificado**, así el test que se olvide de pedir el fixture del
+    certificado falla con un `ArcaError` explícito y no con un archivo que no existe.
+    """
+    monkeypatch.setitem(arca_service.ArcaSettings.model_config, "env_file", None)
+    for absent in ("ARCA_CERT_PATH", "ARCA_PRIVATE_KEY_PATH", "ARCA_WSDL_CACHE_PATH"):
+        monkeypatch.delenv(absent, raising=False)
+    monkeypatch.setenv("ARCA_ENV", "homo")
+    arca_service.get_arca_settings.cache_clear()
+    yield
+    arca_service.get_arca_settings.cache_clear()
+
+
+# El CUIT que lleva el certificado de prueba en el `serialNumber` del subject. No es el de
+# nadie: 20-11111111-2 es el mismo placeholder que usa `email_settings`.
+CERTIFICATE_TAX_ID = "20111111112"
+
+
+@pytest.fixture(scope="session")
+def certificate_files(tmp_path_factory):
+    """Un certificado autofirmado con un CUIT en el `serialNumber`, y su clave privada.
+
+    Se genera de verdad en vez de guardarse un PEM fijo en el repo: un certificado versionado
+    vence, y el día que venza el que falla es un test que no tiene nada que ver. Además nadie
+    tiene que preguntarse si ese archivo es una credencial real.
+
+    Scope de sesión porque generar una RSA de 2048 bits cuesta décimas de segundo, y la suite
+    entera pesa ocho — el mismo criterio por el que `factories.PASSWORD_HASHED` se calcula una
+    sola vez.
+    """
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    subject = x509.Name(
+        [
+            x509.NameAttribute(NameOID.COMMON_NAME, "factumov-test"),
+            # ARCA escribe el CUIT así, con prefijo. `get_certificate_tax_id` se queda con la
+            # corrida de once dígitos, y el prefijo está acá justamente para probarlo.
+            x509.NameAttribute(NameOID.SERIAL_NUMBER, f"CUIT {CERTIFICATE_TAX_ID}"),
+        ]
+    )
+    now = datetime.now(UTC)
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(subject)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(days=1))
+        .not_valid_after(now + timedelta(days=365))
+        .sign(key, hashes.SHA256())
+    )
+
+    directory = tmp_path_factory.mktemp("arca")
+    cert_path = directory / "factumov.crt"
+    key_path = directory / "factumov.key"
+    cert_path.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
+    key_path.write_bytes(
+        key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+    )
+    return cert_path, key_path
+
+
+@pytest.fixture
+def arca_cert(monkeypatch, arca_settings, certificate_files):
+    """Apunta la config de ARCA al certificado de prueba. Devuelve su CUIT.
+
+    Depende de `arca_settings` a propósito y no solo por orden de autouse: ese fixture llama a
+    `cache_clear`, y si corriera después dejaría la config sin certificado otra vez.
+    """
+    cert_path, key_path = certificate_files
+    monkeypatch.setenv("ARCA_CERT_PATH", str(cert_path))
+    monkeypatch.setenv("ARCA_PRIVATE_KEY_PATH", str(key_path))
+    arca_service.get_arca_settings.cache_clear()
+    return CERTIFICATE_TAX_ID
 
 
 @pytest.fixture(autouse=True)

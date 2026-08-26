@@ -7,7 +7,7 @@ del que consulta.
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from factumov.crud.base import db_flush
@@ -78,3 +78,14 @@ def update(
 def delete(db: Session, fiscal_identity: FiscalIdentity) -> None:
     db.delete(fiscal_identity)
     db_flush(db, exception_map)
+
+
+def mark_delegation_verified(db: Session, fiscal_identity: FiscalIdentity) -> FiscalIdentity:
+    """Deja sellado que ARCA aceptó la delegación recién ahora.
+
+    `func.now()` y no `datetime.now()`, igual que `user_session.revoke`: el reloj es el de la
+    base, que es el mismo con el que se comparan las demás fechas.
+    """
+    fiscal_identity.delegation_verified_at = func.now()
+    db_flush(db, exception_map)
+    return fiscal_identity

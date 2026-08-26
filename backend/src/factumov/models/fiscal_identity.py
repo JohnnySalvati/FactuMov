@@ -1,8 +1,8 @@
 import uuid
-from datetime import date
+from datetime import date, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Date, Enum, ForeignKey, String, UniqueConstraint, Uuid
+from sqlalchemy import Date, DateTime, Enum, ForeignKey, String, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from factumov.enums import CondicionIva
@@ -33,6 +33,15 @@ class FiscalIdentity(Base, TimestampMixin):
     address: Mapped[str | None] = mapped_column(String(200))
     iibb: Mapped[str | None] = mapped_column(String(50))
     start_date: Mapped[date | None] = mapped_column(Date)
+    # Cuándo ARCA confirmó por última vez que FactuMov puede emitir por este CUIT.
+    # Timestamp y no booleano, por lo mismo que `User.email_confirmed_at`: el "cuándo" es lo
+    # que quiere la UI ("verificada hace 3 meses") y cualquier consulta de soporte. La
+    # delegación se puede revocar del lado de ARCA sin avisarnos, así que este campo dice
+    # "esto era verdad en esta fecha" y no "esto es verdad".
+    #
+    # Vive acá y no en `User` porque un usuario puede tener varios CUIT y cada uno se delega
+    # por separado.
+    delegation_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     invoice_templates: Mapped[list["InvoiceTemplate"]] = relationship(
         back_populates="fiscal_identity", passive_deletes="all"

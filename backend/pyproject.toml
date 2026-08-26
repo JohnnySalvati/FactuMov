@@ -17,6 +17,9 @@ dependencies = [
     "python-multipart",
     "pdfplumber>=0.11.9",
     "pwdlib[argon2]>=0.3.1",
+    "zeep>=4.3.3",
+    "requests>=2.34.2",
+    "cryptography>=50.0.0",
 ]
 
 [project.optional-dependencies]
@@ -53,6 +56,11 @@ ignore_missing_imports = true
 # factumov.*, y "." para que los tests sean tests.*.
 mypy_path = "src:."
 explicit_package_bases = true
+# zeep trae `py.typed` pero deja sus constructores sin anotar, así que en modo strict cada
+# `Client(...)` o `Transport(...)` es un "call to untyped function". Silenciar la regla solo
+# para zeep es mejor que un `type: ignore` por línea en `services/arca.py`: los ignores se
+# copian y sobreviven a la versión de zeep que los haya hecho falta.
+untyped_calls_exclude = ["zeep"]
 
 # Los tests quedan fuera de `strict`: anotar cada test con `-> None` y cada fixture
 # con su Generator es ruido, no seguridad. El resto de strict sigue activo acá —

@@ -119,6 +119,12 @@ Ruta real: `E:\Capacitacion\InSoft\Balance360\Balance360\src\balance360\services
 **`pdf_invoice.py` e `invoice_pdf.py` NO son duplicados.** El primero *lee* facturas ajenas
 (parsing), el segundo *genera* el QR de una factura propia. Los nombres chocan por accidente.
 
+**Actualización 2026-08-26:** apareció un servicio que no estaba en el relevamiento original,
+`padron.py` — consulta al padrón de ARCA (`ws_sr_constancia_inscripcion`) para completar un
+contacto a partir del CUIT. Ya está portado (ver *ARCA*). Al 2026-08-26 están portados
+`arca.py`, `padron.py` y la mitad de consulta de `wsfe.py`; falta `FECAESolicitar`, que es la
+unidad de emisión.
+
 ## Parser (`services/invoice_parser.py`) — estado al 2026-08-18
 Reescrito a partir del de Balance360 y verificado contra las 10 muestras de
 `backend/tests/samples/`. Extrae todo: emisor, receptor, período, CAE e items.
@@ -187,12 +193,20 @@ cual verificar. Miguel confirmó que es una factura suya y que hay que soportarl
 adelante. Mientras tanto vive en `samples/unsupported/`, fuera del glob de
 `test_every_sample_parses_end_to_end`.
 
-## Decisión: NO armar todavía el paquete compartido de ARCA/WSFE
+## Decisión: NO armar el paquete compartido de ARCA/WSFE — confirmada el 2026-08-26
 El primer hito (importar PDF → modelo editable → guardarlo) no necesita ARCA ni WSFE.
 Solo necesita el parser, que es lógica pura y se copia sin costo. Diseñar hoy la
 abstracción para compartir `arca.py`/`wsfe.py` sería decidir a ciegas: cuando se llegue a
-emitir con CAE habrá mucha más información sobre qué forma debe tener. Revisar esta
-decisión al empezar la funcionalidad #4.
+emitir con CAE habrá mucha más información sobre qué forma debe tener.
+
+Revisada al portar ARCA, que era el momento previsto. **Se confirma: copia adaptada, no
+paquete compartido.** Ahora hay información concreta y dice que no: de los tres servicios
+portados, ninguno quedó igual. `arca.py` cambió el caché de ticket de archivo a tabla,
+`wsfe.py` no tiene el mismo `Auth.Cuit` —en Balance360 el certificado es del propio
+contribuyente, en FactuMov representa a terceros— y los tres pasaron de `settings` global a
+config inyectada. Un paquete compartido tendría que parametrizar exactamente esas tres cosas,
+que es donde está toda la diferencia entre las dos apps. Lo que sí se comparte sin costo son
+las constantes que ARCA fija: URLs de WSDL, códigos de error, `idImpuesto`.
 
 ## Decisiones de producto (2026-08-08)
 - El PDF que se importa es **una factura emitida por el propio usuario**, no de un proveedor.
@@ -270,13 +284,14 @@ Emitir = tomar un `InvoiceTemplate`, permitir retoques, y crear una `Invoice` nu
 ### Tablas del modelo
 | Tabla | Rol |
 |---|---|
-| `FiscalIdentity` | Emisor: CUIT, razón social, condición IVA, IIBB, domicilio |
+| `FiscalIdentity` | Emisor: CUIT, razón social, condición IVA, IIBB, domicilio, estado de la delegación |
 | `Customer` | Receptor |
 | `InvoiceTemplate` | Emisor + cliente + tipo de comprobante + punto de venta + concepto |
 | `InvoiceTemplateLine` | Descripción, cantidad, precio unitario, alícuota, posición |
 | `User` | Cuenta: email, hash de contraseña, confirmación, alta/baja |
 | `UserSession` | Sesión abierta: hash del token, vencimiento absoluto, revocación |
 | `EmailConfirmation` | Token de confirmación de email, de un solo uso |
+| `ArcaTicket` | Ticket de acceso de WSAA, por entorno y servicio. La única tabla sin dueño |
 
 ### Decisiones sobre `InvoiceTemplate` (2026-08-15)
 - **Nombre único por identidad fiscal** — `UniqueConstraint(fiscal_identity_id, name)`, no un
@@ -669,6 +684,15 @@ self-serve, no que es opcional. `services/rate_limit.py`, aplicado a `login`, `r
   módulo y el TestClient se presenta siempre con la misma IP: sin el reset, el sexto test
   que registra algo empieza a comer 429, y el que falla no es el que rompió nada sino el que
   quedó sexto, que cambia con el orden de colección.
+- **Los limitadores se registran solos** (`rate_limit.reset_all()`), desde la unidad de ARCA.
+  Antes era una tupla `ALL_LIMITERS` escrita a mano en `routers/auth.py`, y un limitador
+  nuevo en otro router —los dos de ARCA— tenía que acordarse de sumarse a esa lista.
+  Olvidarse reintroduce exactamente el bleed entre tests que el fixture existe para evitar,
+  y el síntoma no señala la causa.
+- **`client_key` y `enforce_rate_limit` viven en `dependencies.py`**, no en `routers/auth.py`.
+  Se mudaron cuando los endpoints de ARCA empezaron a limitar: la alternativa era que
+  `routers/customer.py` importara de un router hermano, que es el mismo motivo por el que
+  `get_current_user` nunca estuvo en `routers/auth.py`.
 - **Los tests leen los límites de los propios limitadores** en vez de repetir los números.
   Si el registro pasa de 5 a 10 por hora, tienen que seguir probando el límite y no fallar
   por saberse uno viejo de memoria. Aparte hay un test que fija el piso —ningún límite baja
@@ -677,16 +701,151 @@ self-serve, no que es opcional. `services/rate_limit.py`, aplicado a `login`, `r
 
 ### Unidades pendientes, en orden
 Cerradas el 2026-08-26: la capa HTTP de autenticación (login, logout, `/me`,
-`dependencies.py` y los tres routers protegidos), el *ownership scoping* y el registro con
-confirmación por email, con su rate limiting.
+`dependencies.py` y los tres routers protegidos), el *ownership scoping*, el registro con
+confirmación por email con su rate limiting, y la **integración con ARCA** (verificación de
+delegación + consulta al padrón) — ver la sección *ARCA*.
 
-1. **Verificación de la delegación contra ARCA.**
-2. **Reset de contraseña.** Lo pide el registro: quien se equivocó de contraseña en una
+1. **Reset de contraseña.** Lo pide el registro: quien se equivocó de contraseña en una
    cuenta sin confirmar no tiene hoy ninguna salida, porque re-registrarse a propósito no
    la pisa.
+2. **Emisión con CAE** (`FECAESolicitar`). Es la mitad de `wsfe.py` que todavía no se
+   portó, y ahora es lo único que separa a la app de emitir de verdad.
 3. **Segundo layout del parser** — ver *Parser → Pendiente: un segundo layout*. Va último
-   porque no bloquea nada: hoy el usuario puede cargar el modelo a mano, y el registro y la
-   delegación sí están en el camino crítico de poder emitir.
+   porque no bloquea nada: hoy el usuario puede cargar el modelo a mano.
+
+## ARCA (2026-08-26)
+Port adaptado de `arca.py`, `padron.py` y la mitad de consulta de `wsfe.py` de Balance360.
+Cierra la verificación de la delegación y agrega la carga de un cliente desde el padrón.
+Migración `8f1c4b2e5a09`. Dependencias nuevas: `zeep`, `requests`, `cryptography`.
+
+| Archivo | Rol |
+|---|---|
+| `services/arca.py` | WSAA: `ArcaSettings`, TRA, firma PKCS#7, CUIT del certificado, `get_access_ticket` |
+| `services/wsfe.py` | `check_delegation` sobre `FEParamGetPtosVenta` |
+| `services/padron.py` | `get_taxpayer` sobre `getPersona_v2` |
+| `crud/arca_ticket.py` | Lectura y upsert del TA, con el advisory lock |
+| `models/arca_ticket.py` | Tabla `arca_tickets` |
+
+### El certificado es uno solo, de FactuMov
+El usuario **no** sube su certificado: entra a ARCA y **delega** WSFE al CUIT de FactuMov.
+De ahí salen casi todas las decisiones de abajo.
+
+- **El `Auth.Cuit` de WSFE es el CUIT representado, no el del certificado.** En Balance360
+  coinciden —el certificado es del propio contribuyente—, así que ese código se lee igual y
+  significa otra cosa. Esa brecha *es* la delegación: con un mismo ticket, ARCA acepta unos
+  CUIT y rechaza otros.
+- **El padrón es la excepción y por eso no necesita delegación.** Ahí el `cuitRepresentada`
+  somos nosotros, así que la consulta funciona desde el día uno. Lo que hace falta es que
+  ARCA nos tenga habilitado el servicio `ws_sr_constancia_inscripcion` **al certificado**
+  (Administrador de Relaciones en prod, WSASS en homologación); sin eso el que falla es
+  WSAA, con "Computador no autorizado a acceder al servicio", y no se llega a la consulta.
+- **`ArcaSettings` es un `BaseSettings` propio con `extra="ignore"`, construido adentro de
+  las funciones con `lru_cache`** — mismo patrón, y mismas dos razones, que `EmailSettings`.
+- **`ARCA_ENV` default `"homo"`.** Si la variable falta, la app pega contra el ARCA de
+  pruebas. Equivocarse hacia homologación es gratis; al revés no.
+- **Pendiente:** `EmailSettings.arca_delegate_tax_id` sigue con el placeholder. Cuando el
+  certificado exista, ese valor tiene que salir de `get_certificate_tax_id()` y no de una
+  variable, para que el CUIT del mail y el que ARCA autoriza no puedan discrepar. El
+  endpoint de verificación ya lo lee del certificado; el mail todavía no.
+
+### El ticket de acceso vive en una tabla
+No en el `ticket_arca.json` del cwd que usa Balance360. **WSAA se niega a emitir un TA nuevo
+mientras el anterior siga vigente**, así que dos workers pidiendo a la vez no obtienen dos
+tickets: obtienen uno y un error, y la app queda afuera de ARCA hasta doce horas. Un archivo
+en el cwd de un contenedor no coordina eso, y encima no sobrevive al deploy.
+
+- **`arca_tickets` es la única tabla sin `user_id`.** El ticket es del certificado, no del
+  contribuyente; a quién representa se decide por llamada.
+- **`(env, service)` único.** Homo y prod tienen certificados distintos y tickets distintos;
+  y el TA se emite **por servicio**, así que WSFE y el padrón tienen el suyo.
+- **`token` y `sign` son `Text`.** Son blobs base64 de largo no documentado (~3 KB hoy) y
+  ARCA no promete un techo: un `varchar(n)` corto se rompe en producción y de golpe.
+- **`pg_advisory_xact_lock`, no `SELECT ... FOR UPDATE`.** La primera vez no hay fila que
+  trabar, así que el FOR UPDATE no bloquea a nadie y los N workers piden un TA cada uno. El
+  advisory lock traba la *clave*, exista o no la fila, y se suelta solo en el commit.
+- **La clave del lock sale de un `blake2b` y no de `hash()`**, que Python aleatoriza por
+  proceso: dos workers tomarían candados distintos para la misma clave.
+- **Doble lectura: una sin candado y otra adentro.** La primera es el camino de casi todos
+  los requests; la segunda es lo que evita que el candado sirva para serializar pedidos en
+  vez de para no hacerlos.
+- **Se escribe en su propia sesión, con su propio commit**, desacoplada del request. Si el
+  ticket recién emitido se perdiera en un rollback, WSAA no emitiría otro por horas. La
+  sesión se pide como `database.SessionLocal()` —el módulo, no el nombre importado— para que
+  el test la pueda parchear, mismo criterio que `MAX_UPLOAD_BYTES`.
+- **Margen de vencimiento de 5 minutos.** Un TA que vence en treinta segundos es inservible:
+  la llamada que lo use tarda más que eso.
+
+### `POST /fiscal-identities/{id}/verify-delegation`
+- **La sonda es `FEParamGetPtosVenta`, no `FECompUltimoAutorizado`.** Balance360 usa la
+  segunda, pero para otra cosa: necesita un punto de venta, que acá habría que adivinar, y
+  contesta error cuando ese punto de venta no existe — un falso negativo justo con el usuario
+  nuevo que sí nos delegó. `FEParamGetPtosVenta` no recibe parámetros, no escribe nada y
+  necesita la misma delegación.
+- **"No estás delegado" es un valor de retorno, no una excepción.** Es la mitad esperada de
+  las respuestas. `DelegationCheck(granted, message)`; el endpoint contesta **200** en los
+  dos casos. Un 4xx obligaría a la UI a distinguir "te equivocaste" de "todavía no
+  autorizaste".
+- **Código 600** ("No apareció CUIT en lista de relaciones") es el "no". **602** ("no hay
+  datos") es un **sí**: un contribuyente delegado que todavía no dio de alta ningún punto de
+  venta cae ahí, y la prueba de que la delegación está es que ARCA aceptó el `Auth` en vez de
+  rechazar el token. Cualquier otro código **levanta excepción** en vez de contestar que no:
+  contestar que no haría reintentar para siempre una delegación ya otorgada.
+- **502 cuando no se pudo preguntar**, sin propagar el detalle de ARCA: no le dice nada al
+  usuario y filtra cómo está armado nuestro lado.
+- **Es POST y no GET** aunque parezca una consulta: sale a la red, tarda segundos y escribe
+  `delegation_verified_at`. Un GET así lo repite solo un prefetch o un proxy.
+- **`db.commit()` antes de la llamada SOAP**, para no dejar la transacción abierta durante
+  decenas de segundos — misma solución que el commit explícito del registro antes del mail.
+  `rollback()` no sirve: bajo el `join_transaction_mode="create_savepoint"` de los tests
+  revertiría al savepoint y se llevaría puestas las filas que el test armó.
+- **`delegation_verified_at` es timestamp y no booleano**, por lo mismo que
+  `email_confirmed_at`: la delegación se puede revocar del lado de ARCA sin avisarnos, así
+  que la columna dice "esto era verdad en esta fecha", no "esto es verdad".
+
+### `GET /customers/lookup/{tax_id}`
+- **No escribe nada.** Igual que `POST /invoice-templates/import`, devuelve una propuesta que
+  el usuario confirma en el editor. Dar de alta acá convertiría una consulta en un efecto
+  secundario, y consultar dos veces el mismo CUIT dejaría dos clientes.
+- **El CUIT va en el path** y no en un query param sobre `/customers/lookup` a secas, que
+  colisionaría con `GET /{customer_id}` y daría un 422 por UUID inválido.
+- **404 si el padrón no tiene ese CUIT; 502 si no se pudo preguntar.** Por eso `PadronError`
+  **no** baja de `ArcaError`: no es que ARCA falló, es que la pregunta no tiene respuesta.
+  ARCA lo dice de dos formas —un Fault y una respuesta con `datosGenerales` vacío— y las dos
+  terminan igual.
+- **La condición IVA se deduce, no viene.** El monotributo llega en su propio bloque y se
+  mira **antes** que la lista de impuestos, porque un monotributista puede traer también el
+  30. Después, `idImpuesto` 30 → INSCRIPTO, 32 → EXENTO, y nada de eso → FINAL.
+- **Se usa el A5 (`ws_sr_constancia_inscripcion`) y no el A13**, que devuelve razón social y
+  domicilio pero no los impuestos: sin ellos no se puede deducir la condición frente al IVA,
+  que es justo el dato que el editor no puede adivinar.
+- **`TaxpayerLookup` no usa `from_attributes`.** El servicio llama `tax_id` a lo que el
+  schema llama `doc_number`, y cada vocabulario es el correcto de su lado —"contribuyente" en
+  ARCA, "cliente" en FactuMov—. El router traduce, que son cuatro líneas.
+- **Los dos endpoints están rate-limited por usuario y no por IP.** Están autenticados, así
+  que hay una clave mejor que la dirección; y sobre todo la cuota la fija ARCA contra **el
+  certificado**, que es uno solo para toda la app: un usuario en loop se la gasta a todos.
+
+### Tests de ARCA
+- **Nada sale a la red.** El SOAP se mockea en `arca.build_client`, que es el nivel más bajo
+  con sentido: así se ejercita de verdad la lectura de la respuesta, que es donde están las
+  decisiones. `arca.get_access_ticket` se parchea aparte en los tests de router porque abre
+  su propia sesión contra la base real.
+- **El certificado de prueba se genera, no se versiona.** Un PEM guardado en el repo vence, y
+  el día que venza el que falla es un test que no tiene nada que ver; además nadie tiene que
+  preguntarse si ese archivo es una credencial real. El fixture es de scope `session` porque
+  una RSA de 2048 cuesta décimas de segundo — mismo criterio que `PASSWORD_HASHED`.
+- **El fixture `arca_settings` es autouse y desengancha el `.env`.** Pesa más que con el
+  mail: un `.env` con `ARCA_CERT_PATH` apuntando a un certificado de producción convertiría
+  un test en una llamada real a ARCA. El default es **sin certificado**, así el test que se
+  olvide de pedir `arca_cert` falla con un `ArcaError` explícito.
+- **El test de reúso del ticket parchea `request_ticket` para que falle el test si alguien la
+  llama.** Comparar solo el token dejaría pasar una implementación que sale a la red igual —
+  y salir a la red de más es exactamente el bug que rompe la app por doce horas.
+- **La conexión real contra homologación es una prueba manual, no un test.** Depende de un
+  certificado que no está en el repo y de que ARCA esté levantado. Los certificados de
+  Balance360 (`certs/homo.crt`, `certs/balance360.key`) sirven para probar la cadena entera,
+  con la salvedad de que verifican la delegación de Miguel contra sí mismo: no ejercitan una
+  delegación de un tercero, que es el caso real de FactuMov.
 
 ## Ownership scoping (2026-08-26)
 `user_id` en `fiscal_identities` y `customers`, todas las queries de esas dos tablas

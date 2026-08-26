@@ -49,3 +49,30 @@ class UnknownCustomerError(UnknownReferenceError):
 
 class UnknownFiscalIdentityError(UnknownReferenceError):
     pass
+
+
+class ArcaError(Exception):
+    """No se pudo preguntarle a ARCA.
+
+    Cubre el servicio caído, el timeout, el certificado mal configurado y cualquier
+    respuesta que no se entienda. Es distinta de que ARCA conteste *que no*: eso es un
+    valor de retorno (`DelegationCheck.granted`) y no una excepción, porque es la mitad
+    esperada de las respuestas a "¿está la delegación?".
+    """
+
+
+class WsaaError(ArcaError):
+    """Falló la autenticación contra WSAA: el certificado de FactuMov no sirve para
+    ese servicio, o el TRA fue rechazado. Es un problema nuestro, no del usuario."""
+
+
+class WsfeError(ArcaError):
+    """WSFE contestó un error que no es "no estás delegado"."""
+
+
+class PadronError(Exception):
+    """El padrón no tiene datos para ese documento, o lo que se pidió no es un CUIT.
+
+    Deliberadamente **no** baja de `ArcaError`: no es que ARCA falló, es que la pregunta no
+    tiene respuesta. Termina en un 404 sobre el CUIT consultado, no en un 502 sobre nosotros.
+    """

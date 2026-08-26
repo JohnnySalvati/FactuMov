@@ -12,10 +12,10 @@ from datetime import UTC, datetime
 
 import pytest
 
+from factumov.dependencies import _RATE_LIMITED_DETAIL
 from factumov.routers.auth import (
     _EMAIL_LIMITER,
     _LOGIN_LIMITER,
-    _RATE_LIMITED_DETAIL,
     _REGISTER_IP_LIMITER,
     _RESEND_IP_LIMITER,
 )

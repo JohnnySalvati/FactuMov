@@ -38,6 +38,10 @@ class FiscalIdentityRead(BaseModel):
     address: str | None
     iibb: str | None
     start_date: date | None
+    # Sale en el Read porque la UI tiene que poder decidir si muestra el botón "emitir" o el
+    # cartel de "todavía falta delegar". No entra por ningún schema de escritura: lo escribe
+    # la verificación contra ARCA, no el cliente.
+    delegation_verified_at: datetime | None
     created_at: datetime
     updated_at: datetime
 
@@ -65,3 +69,22 @@ class FiscalIdentityUpdate(BaseModel):
             if value == CondicionIva.FINAL:
                 raise ValueError("Condicion IVA final no puede emitir comprobantes")
         return value
+
+
+class DelegationStatus(BaseModel):
+    """La respuesta de `POST /fiscal-identities/{id}/verify-delegation`.
+
+    Sale con 200 tanto si la delegación está como si no: preguntar y que te contesten "no
+    todavía" no es un error del cliente. El 4xx quedaría reservado para un pedido mal hecho,
+    y esto está bien hecho — la respuesta simplemente es negativa.
+    """
+
+    granted: bool
+    # `None` cuando `granted`. Cuando no, es el texto con el que ARCA lo explicó, que sirve
+    # de guía al usuario y de pista al soporte.
+    message: str | None = None
+    # El mismo valor que quedó en la fila. Ahorra un GET para refrescar la pantalla.
+    delegation_verified_at: datetime | None = None
+    # El CUIT al que hay que autorizar en ARCA, leído del certificado de FactuMov. Va en la
+    # respuesta negativa para que la pantalla pueda repetir la instrucción sin ir a buscarlo.
+    delegate_tax_id: str | None = None

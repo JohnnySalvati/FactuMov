@@ -22,6 +22,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from factumov.enums import Concepto, CondicionIva, DocType, IvaAliquot, VoucherType
+from factumov.models.arca_ticket import ArcaTicket
 from factumov.models.customer import Customer
 from factumov.models.email_confirmation import EmailConfirmation
 from factumov.models.fiscal_identity import FiscalIdentity
@@ -209,3 +210,30 @@ def make_email_confirmation(
     db.add(confirmation)
     db.flush()
     return confirmation
+
+
+def make_arca_ticket(
+    db,
+    env="homo",
+    service="wsfe",
+    token=None,
+    sign=None,
+    expires_at=None,
+):
+    """Una fila de `arca_tickets`. Es la única tabla sin dueño: el ticket es del certificado.
+
+    `expires_at` por default a doce horas, que es lo que dura un TA de verdad. Los tests del
+    vencimiento lo pasan en el pasado, que es más simple que parchear un reloj — el mismo
+    truco que `make_user_session`.
+    """
+    n = next(_sequence)
+    ticket = ArcaTicket(
+        env=env,
+        service=service,
+        token=token or f"token{n}",
+        sign=sign or f"sign{n}",
+        expires_at=expires_at or datetime.now(UTC) + timedelta(hours=12),
+    )
+    db.add(ticket)
+    db.flush()
+    return ticket

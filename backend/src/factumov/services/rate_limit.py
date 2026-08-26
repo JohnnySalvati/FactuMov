@@ -30,6 +30,21 @@ class _Window:
     count: int
 
 
+_REGISTRY: list["RateLimiter"] = []
+
+
+def reset_all() -> None:
+    """Vacía todos los limitadores creados. Existe para el fixture autouse de los tests.
+
+    Es un registro y no una tupla escrita a mano en cada router: los limitadores son globales
+    de módulo, así que uno que se olvide de agregarse a la lista le deja el contador cargado
+    al test siguiente, y el que falla no es el que lo rompió sino el que quedó sexto. Con el
+    registro automático, crear un limitador nuevo ya alcanza.
+    """
+    for limiter in _REGISTRY:
+        limiter.reset()
+
+
 @dataclass
 class RateLimiter:
     """Ventana fija: `limit` intentos cada `window_seconds` por clave."""
@@ -48,6 +63,9 @@ class RateLimiter:
     # proceso, pytest incluido. `monotonic` y no `time`: no retrocede si alguien le corrige
     # la hora al server, que con un reloj de pared abriría la ventana antes de tiempo.
     clock: Callable[[], float] = time.monotonic
+
+    def __post_init__(self) -> None:
+        _REGISTRY.append(self)
 
     def check(self, key: str) -> float | None:
         """Registra un intento. Devuelve `None` si pasa, o los segundos que faltan si no.
