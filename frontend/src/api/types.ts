@@ -115,3 +115,143 @@ export interface TaxpayerLookup {
   address: string | null
   active: boolean
 }
+
+/* --- Modelos de factura ------------------------------------------------------------- */
+
+export const VoucherType = {
+  A: 'A',
+  B: 'B',
+  C: 'C',
+  NCA: 'NCA',
+  NCB: 'NCB',
+  NCC: 'NCC',
+} as const
+export type VoucherType = (typeof VoucherType)[keyof typeof VoucherType]
+
+export const VOUCHER_TYPE_LABELS: Record<VoucherType, string> = {
+  [VoucherType.A]: 'Factura A',
+  [VoucherType.B]: 'Factura B',
+  [VoucherType.C]: 'Factura C',
+  [VoucherType.NCA]: 'Nota de crédito A',
+  [VoucherType.NCB]: 'Nota de crédito B',
+  [VoucherType.NCC]: 'Nota de crédito C',
+}
+
+export const Concepto = {
+  products: 'products',
+  services: 'services',
+  both: 'both',
+} as const
+export type Concepto = (typeof Concepto)[keyof typeof Concepto]
+
+export const CONCEPTO_LABELS: Record<Concepto, string> = {
+  [Concepto.products]: 'Productos',
+  [Concepto.services]: 'Servicios',
+  [Concepto.both]: 'Productos y servicios',
+}
+
+/**
+ * El valor es el **código de ARCA**, igual que en el backend; la alícuota de verdad está en
+ * `IVA_ALIQUOT_RATES`. Que el código no sea el porcentaje es de ARCA, no nuestro: el 5 es 21%.
+ */
+export const IvaAliquot = {
+  exempt: 3,
+  reduced: 4,
+  standard: 5,
+  higher: 6,
+} as const
+export type IvaAliquot = (typeof IvaAliquot)[keyof typeof IvaAliquot]
+
+export const IVA_ALIQUOT_LABELS: Record<IvaAliquot, string> = {
+  [IvaAliquot.exempt]: '0%',
+  [IvaAliquot.reduced]: '10,5%',
+  [IvaAliquot.standard]: '21%',
+  [IvaAliquot.higher]: '27%',
+}
+
+export const IVA_ALIQUOT_RATES: Record<IvaAliquot, number> = {
+  [IvaAliquot.exempt]: 0,
+  [IvaAliquot.reduced]: 10.5,
+  [IvaAliquot.standard]: 21,
+  [IvaAliquot.higher]: 27,
+}
+
+/**
+ * `quantity` y `unit_price` son **strings**, no números: Pydantic serializa `Decimal` como
+ * string para no perder la escala (`"1.00"`, no `1.0`). Tiparlos como `number` acá los
+ * rompería en silencio en el primer importe con centavos.
+ */
+export interface InvoiceTemplateLine {
+  id: string
+  position: number
+  description: string
+  quantity: string
+  unit_price: string
+  iva_aliquot: IvaAliquot
+  created_at: string
+  updated_at: string
+}
+
+export interface InvoiceTemplateLineCreate {
+  description: string
+  quantity: string
+  unit_price: string
+  iva_aliquot: IvaAliquot
+}
+
+export interface InvoiceTemplate {
+  id: string
+  name: string
+  fiscal_identity_id: string
+  customer_id: string
+  voucher_type: VoucherType
+  pos: number
+  concepto: Concepto
+  created_at: string
+  updated_at: string
+  lines: InvoiceTemplateLine[]
+}
+
+export interface InvoiceTemplateCreate {
+  name: string
+  fiscal_identity_id: string
+  customer_id: string
+  voucher_type: VoucherType
+  pos: number
+  concepto: Concepto
+  lines: InvoiceTemplateLineCreate[]
+}
+
+/* --- Importación de PDF ------------------------------------------------------------- */
+
+export interface CustomerDraft {
+  name: string | null
+  condicion_iva: CondicionIva | null
+  doc_type: DocType | null
+  doc_number: string | null
+  address: string | null
+}
+
+export interface InvoiceTemplateLineDraft {
+  description: string | null
+  quantity: string | null
+  unit_price: string | null
+  iva_aliquot: IvaAliquot | null
+}
+
+/**
+ * Lo que devuelve `POST /invoice-templates/import`. Es una **propuesta**: el backend leyó el
+ * PDF y no guardó nada. Casi todo es opcional porque un PDF ilegible contesta 200 con todo en
+ * `null` en vez de tirar error, y la pantalla ofrece carga manual.
+ */
+export interface InvoiceTemplateDraft {
+  name: string | null
+  fiscal_identity_id: string | null
+  issuer_tax_id: string | null
+  customer_id: string | null
+  customer: CustomerDraft
+  voucher_type: VoucherType | null
+  pos: number | null
+  concepto: Concepto
+  lines: InvoiceTemplateLineDraft[]
+}

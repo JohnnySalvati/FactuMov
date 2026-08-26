@@ -7,7 +7,10 @@ import { ConfirmEmailPage } from './pages/ConfirmEmailPage'
 import { CustomersPage } from './pages/CustomersPage'
 import { FiscalIdentitiesPage } from './pages/FiscalIdentitiesPage'
 import { LoginPage } from './pages/LoginPage'
+import { NewTemplatePage } from './pages/NewTemplatePage'
 import { RegisterPage } from './pages/RegisterPage'
+import { TemplatePage } from './pages/TemplatePage'
+import { TemplatesPage } from './pages/TemplatesPage'
 
 export function App() {
   return (
@@ -22,14 +25,21 @@ export function App() {
 
           <Route element={<RequireAuth />}>
             <Route element={<AppLayout />}>
+              {/* La raíz es la grilla de modelos: es lo que se abre cien veces por semana.
+                  Las identidades fiscales y los clientes son configuración —se tocan al
+                  empezar y después casi nunca— así que dejar una de ellas de portada le
+                  cobraría un toque a la pantalla principal en cada entrada. */}
+              <Route index element={<TemplatesPage />} />
+              {/* La literal antes que la dinámica es por costumbre y no por necesidad: el
+                  router ordena por especificidad y `nuevo` le gana a `:id` igual. */}
+              <Route path="/modelos/nuevo" element={<NewTemplatePage />} />
+              <Route path="/modelos/:id" element={<TemplatePage />} />
               <Route path="/identidades" element={<FiscalIdentitiesPage />} />
               <Route path="/clientes" element={<CustomersPage />} />
             </Route>
           </Route>
 
-          {/* Cualquier otra cosa cae en identidades, que es la primera pantalla del flujo:
-              sin un CUIT verificado no se puede hacer nada más. */}
-          <Route path="*" element={<Navigate to="/identidades" replace />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>

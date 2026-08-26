@@ -48,6 +48,11 @@ function readDetail(body: unknown, status: number): string {
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  // Con `FormData` el `Content-Type` **no** se pone a mano: el navegador tiene que escribirlo
+  // él, porque incluye el `boundary` que separa las partes del multipart. Fijarlo acá manda un
+  // header sin boundary y el backend contesta 422 sin haber leído un solo byte del archivo.
+  const isMultipart = init.body instanceof FormData
+
   let response: Response
   try {
     response = await fetch(`${BASE}${path}`, {
@@ -55,7 +60,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       // Sin esto el navegador no manda la cookie de sesión y **todo** contesta 401, que es
       // una falla que no se parece en nada a su causa.
       credentials: 'include',
-      headers: { 'Content-Type': 'application/json', ...init.headers },
+      headers: isMultipart
+        ? { ...init.headers }
+        : { 'Content-Type': 'application/json', ...init.headers },
     })
   } catch {
     // `fetch` solo rechaza cuando no hubo respuesta: backend apagado, DNS, red cortada. Un
@@ -80,4 +87,11 @@ export const api = {
   patch: <T>(path: string, body: unknown) =>
     request<T>(path, { method: 'PATCH', body: JSON.stringify(body) }),
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+  /** Sube un archivo como `multipart/form-data`. El campo se llama `file` porque así se llama
+   *  el parámetro `UploadFile` del endpoint: FastAPI lo busca por nombre. */
+  upload: <T>(path: string, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return request<T>(path, { method: 'POST', body: form })
+  },
 }

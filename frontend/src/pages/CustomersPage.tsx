@@ -1,4 +1,5 @@
-import { useCallback, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useSearchParams } from 'react-router'
 
 import { ApiError, api } from '../api/client'
 import {
@@ -17,6 +18,20 @@ export function CustomersPage() {
   const fetcher = useCallback(() => api.get<Customer[]>('/customers'), [])
   const { data, error, loading, reload } = useResource(fetcher)
 
+  // El id a editar viaja en la URL — ver el comentario largo en `FiscalIdentitiesPage`: es lo
+  // que hace que el "mantener apretado" sobre el cliente de un modelo sea un link común.
+  const [params, setParams] = useSearchParams()
+  const editingId = params.get('editar')
+  const editing = data?.find((customer) => customer.id === editingId)
+
+  useEffect(() => {
+    if (editingId !== null) window.scrollTo({ top: 0 })
+  }, [editingId])
+
+  function stopEditing() {
+    setParams({}, { replace: true })
+  }
+
   return (
     <div className="page">
       <h1>Clientes</h1>
@@ -25,7 +40,15 @@ export function CustomersPage() {
         solo.
       </p>
 
-      <NewCustomerForm onCreated={reload} />
+      <CustomerForm
+        key={editing?.id ?? 'nuevo'}
+        editing={editing}
+        onSaved={() => {
+          stopEditing()
+          reload()
+        }}
+        onCancel={stopEditing}
+      />
 
       <div className="card">
         <h2>Tu cartera</h2>
@@ -45,7 +68,7 @@ export function CustomersPage() {
             </thead>
             <tbody>
               {data.map((customer) => (
-                <tr key={customer.id}>
+                <tr key={customer.id} className={customer.id === editingId ? 'editing' : ''}>
                   <td data-label="Nombre">{customer.name}</td>
                   <td data-label="Documento" className="mono">
                     {DOC_TYPE_LABELS[customer.doc_type]} {customer.doc_number}
@@ -57,10 +80,19 @@ export function CustomersPage() {
                     {customer.address ?? '—'}
                   </td>
                   <td className="actions">
+                    <button
+                      className="icon"
+                      title={`Editar ${customer.name}`}
+                      aria-label={`Editar ${customer.name}`}
+                      onClick={() => setParams({ editar: customer.id })}
+                    >
+                      ✏️
+                    </button>
                     <DeleteButton
                       title={`Eliminar ${customer.name}`}
                       onDelete={async () => {
                         await api.delete<void>(`/customers/${customer.id}`)
+                        if (customer.id === editingId) stopEditing()
                         reload()
                       }}
                     />
@@ -75,13 +107,24 @@ export function CustomersPage() {
   )
 }
 
-function NewCustomerForm({ onCreated }: { onCreated: () => void }) {
-  const [docType, setDocType] = useState<DocType>(DocType.CUIT)
-  const [docNumber, setDocNumber] = useState('')
-  const [name, setName] = useState('')
-  const [condicionIva, setCondicionIva] = useState<CondicionIva>(CondicionIva.INSCRIPTO)
-  const [address, setAddress] = useState('')
-  const [email, setEmail] = useState('')
+/** Alta y edición en el mismo formulario — ver `FiscalIdentityForm`. */
+function CustomerForm({
+  editing,
+  onSaved,
+  onCancel,
+}: {
+  editing?: Customer
+  onSaved: () => void
+  onCancel: () => void
+}) {
+  const [docType, setDocType] = useState<DocType>(editing?.doc_type ?? DocType.CUIT)
+  const [docNumber, setDocNumber] = useState(editing?.doc_number ?? '')
+  const [name, setName] = useState(editing?.name ?? '')
+  const [condicionIva, setCondicionIva] = useState<CondicionIva>(
+    editing?.condicion_iva ?? CondicionIva.INSCRIPTO,
+  )
+  const [address, setAddress] = useState(editing?.address ?? '')
+  const [email, setEmail] = useState(editing?.email ?? '')
 
   const [error, setError] = useState<string>()
   const [lookupNote, setLookupNote] = useState<string>()
@@ -125,21 +168,26 @@ function NewCustomerForm({ onCreated }: { onCreated: () => void }) {
     event.preventDefault()
     setBusy(true)
     setError(undefined)
+    const body = {
+      name,
+      condicion_iva: condicionIva,
+      doc_type: docType,
+      doc_number: docNumber.replace(/\D/g, ''),
+      address: address.trim() || null,
+      email: email.trim() || null,
+    }
     try {
-      await api.post<Customer>('/customers', {
-        name,
-        condicion_iva: condicionIva,
-        doc_type: docType,
-        doc_number: docNumber.replace(/\D/g, ''),
-        address: address.trim() || null,
-        email: email.trim() || null,
-      })
-      setDocNumber('')
-      setName('')
-      setAddress('')
-      setEmail('')
-      setLookupNote(undefined)
-      onCreated()
+      if (editing) {
+        await api.patch<Customer>(`/customers/${editing.id}`, body)
+      } else {
+        await api.post<Customer>('/customers', body)
+        setDocNumber('')
+        setName('')
+        setAddress('')
+        setEmail('')
+        setLookupNote(undefined)
+      }
+      onSaved()
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.detail : 'No se pudo guardar.')
     } finally {
@@ -152,7 +200,7 @@ function NewCustomerForm({ onCreated }: { onCreated: () => void }) {
 
   return (
     <form className="card stack" onSubmit={onSubmit}>
-      <h2>Agregar un cliente</h2>
+      <h2>{editing ? `Editar ${editing.name}` : 'Agregar un cliente'}</h2>
 
       <div className="row">
         <div className="narrow">
@@ -194,7 +242,9 @@ function NewCustomerForm({ onCreated }: { onCreated: () => void }) {
         </button>
       </div>
 
-      {lookupNote && <Notice kind={lookupNote.startsWith('Ojo') ? 'warn' : 'ok'}>{lookupNote}</Notice>}
+      {lookupNote && (
+        <Notice kind={lookupNote.startsWith('Ojo') ? 'warn' : 'ok'}>{lookupNote}</Notice>
+      )}
 
       <div className="row">
         <div>
@@ -232,8 +282,13 @@ function NewCustomerForm({ onCreated }: { onCreated: () => void }) {
           />
         </div>
         <button type="submit" disabled={busy}>
-          {busy ? 'Guardando…' : 'Agregar'}
+          {busy ? 'Guardando…' : editing ? 'Guardar cambios' : 'Agregar'}
         </button>
+        {editing && (
+          <button type="button" className="secondary" onClick={onCancel} disabled={busy}>
+            Cancelar
+          </button>
+        )}
       </div>
 
       <Notice kind="error">{error}</Notice>

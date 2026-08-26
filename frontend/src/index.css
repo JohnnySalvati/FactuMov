@@ -603,3 +603,329 @@ button.danger {
     display: inline-block;
   }
 }
+
+/* --- Grilla de modelos --------------------------------------------------------------- */
+/*
+ * La pantalla de entrada. Tarjetas cuadradas con el nombre y nada más: es la pantalla que se
+ * abre cien veces por semana para hacer siempre lo mismo, y lo único que hace falta ahí es
+ * reconocer el modelo y llegar con un dedo.
+ */
+
+.tiles {
+  display: grid;
+  /* `auto-fill` con un mínimo, y no una cantidad fija de columnas: en 360 px entran dos y en
+     una pantalla ancha entran seis, sin ningún breakpoint que mantener. */
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.75rem;
+}
+
+.tile {
+  aspect-ratio: 1;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  text-align: center;
+  padding: 0.75rem;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  text-decoration: none;
+  /* Sin esto, sostener el dedo encima selecciona el texto y abre el menú de copiar de iOS o
+     la lupa de Android — justo arriba del gesto que la tarjeta usa para otra cosa. */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  /* Saca el retardo de ~300 ms que el navegador se toma por si el toque era un doble tap.
+     `manipulation` lo desactiva sin tocar el desplazamiento ni el pellizco para agrandar. */
+  touch-action: manipulation;
+}
+
+.tile-name {
+  font-weight: 600;
+  font-size: 0.95rem;
+  line-height: 1.25;
+  /* Un nombre largo sin espacios no puede estirar la tarjeta: la grilla se descuadra entera. */
+  overflow-wrap: anywhere;
+}
+
+.tile-new {
+  border-style: dashed;
+  color: var(--muted);
+}
+
+.tile-plus {
+  font-size: 2rem;
+  line-height: 1;
+  color: var(--accent);
+}
+
+.tile.armed {
+  border-color: var(--danger);
+  background: var(--danger-bg);
+  /* Con los dos botones adentro ya no entra en un cuadrado; como es un ítem de grilla, igual
+     se estira a la altura de la fila que fijan sus hermanas. */
+  aspect-ratio: auto;
+  justify-content: space-between;
+}
+
+.tile-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  width: 100%;
+}
+
+.tile-actions button {
+  width: 100%;
+  min-height: 38px;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.85rem;
+}
+
+.tile-error {
+  color: var(--danger);
+  font-size: 0.78rem;
+}
+
+.back {
+  display: inline-block;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+  text-decoration: none;
+}
+
+/* --- Campos que se eligen de una lista ----------------------------------------------- */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.field-label {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.field-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  text-align: left;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 0.55rem 0.7rem;
+  min-height: var(--touch);
+  /* Mismo motivo que en las tarjetas: acá también hay un "mantener apretado" encima. */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: manipulation;
+}
+
+.field-button.placeholder strong {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.field-value {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  /* Sin el `min-width: 0` un texto largo no se deja encoger y empuja el chevron afuera. */
+  min-width: 0;
+}
+
+.field-value strong {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.field-value .muted {
+  font-size: 0.8rem;
+}
+
+.field-chevron {
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+
+.field-hint {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+/* --- Hoja de selección --------------------------------------------------------------- */
+
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 22, 30, 0.45);
+  display: flex;
+  /* Pegada abajo: es donde llega el pulgar. En pantalla ancha se centra — ver la media query. */
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 50;
+}
+
+.sheet {
+  background: var(--surface);
+  width: 100%;
+  max-height: 80vh;
+  border-radius: var(--radius) var(--radius) 0 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.sheet-body {
+  overflow-y: auto;
+  padding: 0.5rem;
+}
+
+.sheet-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--text);
+  padding: 0.7rem 0.6rem;
+  border-radius: 8px;
+  min-height: var(--touch);
+}
+
+.sheet-option.selected {
+  background: var(--bg);
+}
+
+.sheet-manage {
+  display: block;
+  padding: 0.8rem 0.6rem;
+  font-size: 0.9rem;
+}
+
+/* --- Detalle del modelo -------------------------------------------------------------- */
+
+.line {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.line-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.line-number {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.line-amount {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.totals {
+  border-top: 1px solid var(--border);
+  padding-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.totals > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.totals-total {
+  font-size: 1.05rem;
+  padding-top: 0.35rem;
+  border-top: 1px dashed var(--border);
+}
+
+/* El control nativo de archivo no se puede estilar y en el celular es el objetivo más chico de
+   la pantalla. Sigue existiendo —es el que abre el selector— pero lo dispara un botón. */
+.hidden-file {
+  display: none;
+}
+
+/* La fila que se está editando arriba, para no perderla de vista en una lista larga. */
+tbody tr.editing {
+  border-color: var(--accent);
+  background: #eef4fe;
+}
+
+td.actions {
+  gap: 0.25rem;
+}
+
+/* --- Pantalla ancha, parte dos ------------------------------------------------------- */
+/*
+ * Un segundo bloque en vez de tocar el de arriba: son las reglas de lo que agregó esta unidad,
+ * y separadas se lee cuál corrige a cuál. El corte es el mismo 700px de siempre.
+ */
+@media (min-width: 700px) {
+  .tiles {
+    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+    gap: 1rem;
+  }
+
+  .field-button {
+    min-height: 0;
+    padding: 0.5rem 0.6rem;
+  }
+
+  .sheet-option {
+    min-height: 0;
+  }
+
+  /* Con lugar, la hoja deja de subir desde abajo y es un diálogo centrado. */
+  .sheet-backdrop {
+    align-items: center;
+  }
+
+  .sheet {
+    max-width: 420px;
+    max-height: 70vh;
+    border-radius: var(--radius);
+  }
+
+  .totals {
+    align-self: flex-end;
+    min-width: 280px;
+  }
+
+  tbody tr.editing td {
+    background: #eef4fe;
+  }
+}
+
+.totals-note { font-size: 0.82rem; color: var(--muted); margin: 0; }

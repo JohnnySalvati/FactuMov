@@ -1,4 +1,5 @@
-import { useCallback, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useSearchParams } from 'react-router'
 
 import { ApiError, api } from '../api/client'
 import {
@@ -31,6 +32,27 @@ export function FiscalIdentitiesPage() {
   const fetcher = useCallback(() => api.get<FiscalIdentity[]>('/fiscal-identities'), [])
   const { data, error, loading, reload } = useResource(fetcher)
 
+  /**
+   * Cuál se está editando, en la URL y no en el estado del componente.
+   *
+   * Es lo que deja que el "mantener apretado" sobre la identidad fiscal de un modelo aterrice
+   * directo en su formulario: la pantalla que abre el gesto es `/identidades?editar=<id>`, o
+   * sea un link como cualquier otro. Con el id guardado en `useState` habría que inventar un
+   * canal aparte para decirle a esta pantalla con qué fila arrancar.
+   */
+  const [params, setParams] = useSearchParams()
+  const editingId = params.get('editar')
+  const editing = data?.find((identity) => identity.id === editingId)
+
+  // Al llegar desde el gesto, el formulario está arriba y la lista puede ser larga.
+  useEffect(() => {
+    if (editingId !== null) window.scrollTo({ top: 0 })
+  }, [editingId])
+
+  function stopEditing() {
+    setParams({}, { replace: true })
+  }
+
   return (
     <div className="page">
       <h1>Identidades fiscales</h1>
@@ -39,15 +61,25 @@ export function FiscalIdentitiesPage() {
         poder facturar.
       </p>
 
-      <NewFiscalIdentityForm onCreated={reload} />
+      <FiscalIdentityForm
+        // El `key` hace que el formulario se remonte al cambiar de fila, y así toma los
+        // valores iniciales de la que se está editando. La alternativa —un efecto que copie
+        // la prop al estado— es el mismo resultado con un render de más y una forma conocida
+        // de quedarse pisando lo que el usuario ya tipeó.
+        key={editing?.id ?? 'nueva'}
+        editing={editing}
+        onSaved={() => {
+          stopEditing()
+          reload()
+        }}
+        onCancel={stopEditing}
+      />
 
       <div className="card">
         <h2>Tus identidades</h2>
         <Notice kind="error">{error}</Notice>
         {loading && <p className="muted">Cargando…</p>}
-        {data && data.length === 0 && (
-          <p className="empty">Todavía no cargaste ninguna.</p>
-        )}
+        {data && data.length === 0 && <p className="empty">Todavía no cargaste ninguna.</p>}
         {data && data.length > 0 && (
           <table>
             <thead>
@@ -61,7 +93,7 @@ export function FiscalIdentitiesPage() {
             </thead>
             <tbody>
               {data.map((identity) => (
-                <tr key={identity.id}>
+                <tr key={identity.id} className={identity.id === editingId ? 'editing' : ''}>
                   {/* `data-label` es lo que la tarjeta de celular muestra como nombre del
                       dato: en angosto no hay encabezado de columna a la vista. */}
                   <td data-label="Nombre">{identity.name}</td>
@@ -75,10 +107,19 @@ export function FiscalIdentitiesPage() {
                     <DelegationCell identity={identity} onVerified={reload} />
                   </td>
                   <td className="actions">
+                    <button
+                      className="icon"
+                      title={`Editar ${identity.name}`}
+                      aria-label={`Editar ${identity.name}`}
+                      onClick={() => setParams({ editar: identity.id })}
+                    >
+                      ✏️
+                    </button>
                     <DeleteButton
                       title={`Eliminar ${identity.name}`}
                       onDelete={async () => {
                         await api.delete<void>(`/fiscal-identities/${identity.id}`)
+                        if (identity.id === editingId) stopEditing()
                         reload()
                       }}
                     />
@@ -174,11 +215,28 @@ function DelegationCell({
   )
 }
 
-function NewFiscalIdentityForm({ onCreated }: { onCreated: () => void }) {
-  const [name, setName] = useState('')
-  const [taxId, setTaxId] = useState('')
-  const [condicionIva, setCondicionIva] = useState<CondicionIva>(CondicionIva.INSCRIPTO)
-  const [address, setAddress] = useState('')
+/**
+ * Alta y edición en el mismo formulario.
+ *
+ * Son los mismos seis campos y las mismas reglas: separarlos en dos componentes sería copiar
+ * el formulario entero para cambiar el verbo HTTP y el texto del botón, y garantizar que
+ * dentro de tres meses uno de los dos tenga un campo que el otro no.
+ */
+function FiscalIdentityForm({
+  editing,
+  onSaved,
+  onCancel,
+}: {
+  editing?: FiscalIdentity
+  onSaved: () => void
+  onCancel: () => void
+}) {
+  const [name, setName] = useState(editing?.name ?? '')
+  const [taxId, setTaxId] = useState(editing?.tax_id ?? '')
+  const [condicionIva, setCondicionIva] = useState<CondicionIva>(
+    editing?.condicion_iva ?? CondicionIva.INSCRIPTO,
+  )
+  const [address, setAddress] = useState(editing?.address ?? '')
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(false)
 
@@ -186,19 +244,24 @@ function NewFiscalIdentityForm({ onCreated }: { onCreated: () => void }) {
     event.preventDefault()
     setBusy(true)
     setError(undefined)
+    const body = {
+      name,
+      tax_id: taxId.replace(/\D/g, ''),
+      condicion_iva: condicionIva,
+      // Cadena vacía y "sin dato" no son lo mismo para una columna que admite NULL: mandar
+      // `""` guardaría un domicilio vacío en vez de ninguno.
+      address: address.trim() || null,
+    }
     try {
-      await api.post<FiscalIdentity>('/fiscal-identities', {
-        name,
-        tax_id: taxId.replace(/\D/g, ''),
-        condicion_iva: condicionIva,
-        // Cadena vacía y "sin dato" no son lo mismo para una columna que admite NULL: mandar
-        // `""` guardaría un domicilio vacío en vez de ninguno.
-        address: address.trim() || null,
-      })
-      setName('')
-      setTaxId('')
-      setAddress('')
-      onCreated()
+      if (editing) {
+        await api.patch<FiscalIdentity>(`/fiscal-identities/${editing.id}`, body)
+      } else {
+        await api.post<FiscalIdentity>('/fiscal-identities', body)
+        setName('')
+        setTaxId('')
+        setAddress('')
+      }
+      onSaved()
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.detail : 'No se pudo guardar.')
     } finally {
@@ -208,7 +271,7 @@ function NewFiscalIdentityForm({ onCreated }: { onCreated: () => void }) {
 
   return (
     <form className="card stack" onSubmit={onSubmit}>
-      <h2>Agregar una identidad fiscal</h2>
+      <h2>{editing ? `Editar ${editing.name}` : 'Agregar una identidad fiscal'}</h2>
       <div className="row">
         <div>
           <label htmlFor="fi-name">Nombre o razón social</label>
@@ -248,8 +311,13 @@ function NewFiscalIdentityForm({ onCreated }: { onCreated: () => void }) {
           <input id="fi-address" value={address} onChange={(e) => setAddress(e.target.value)} />
         </div>
         <button type="submit" disabled={busy}>
-          {busy ? 'Guardando…' : 'Agregar'}
+          {busy ? 'Guardando…' : editing ? 'Guardar cambios' : 'Agregar'}
         </button>
+        {editing && (
+          <button type="button" className="secondary" onClick={onCancel} disabled={busy}>
+            Cancelar
+          </button>
+        )}
       </div>
       <Notice kind="error">{error}</Notice>
     </form>

@@ -717,18 +717,15 @@ self-serve, no que es opcional. `services/rate_limit.py`, aplicado a `login`, `r
 Cerradas el 2026-08-26: la capa HTTP de autenticación (login, logout, `/me`,
 `dependencies.py` y los tres routers protegidos), el *ownership scoping*, el registro con
 confirmación por email con su rate limiting, la **integración con ARCA** (verificación de
-delegación + consulta al padrón) y la **primera tajada del frontend** — ver *ARCA* y
-*Frontend*.
+delegación + consulta al padrón) y el **frontend**, incluida la grilla de modelos con su
+editor e importación de PDF — ver *ARCA* y *Frontend*.
 
 1. **Reset de contraseña.** Lo pide el registro: quien se equivocó de contraseña en una
    cuenta sin confirmar no tiene hoy ninguna salida, porque re-registrarse a propósito no
    la pisa.
-2. **Importación de PDF y editor de `InvoiceTemplate` en el front.** Es la pantalla que
-   falta para que la funcionalidad #1 se pueda usar de punta a punta: el backend ya la tiene
-   entera desde el 2026-08-17 y hoy solo se llega por Swagger.
-3. **Emisión con CAE** (`FECAESolicitar`). Es la mitad de `wsfe.py` que todavía no se
+2. **Emisión con CAE** (`FECAESolicitar`). Es la mitad de `wsfe.py` que todavía no se
    portó, y lo único que separa a la app de emitir de verdad.
-4. **Segundo layout del parser** — ver *Parser → Pendiente: un segundo layout*. Va último
+3. **Segundo layout del parser** — ver *Parser → Pendiente: un segundo layout*. Va último
    porque no bloquea nada: hoy el usuario puede cargar el modelo a mano.
 
 ## ARCA (2026-08-26)
@@ -928,12 +925,10 @@ condición IVA cada uno, que es lo que hace que la deducción por `idImpuesto` e
 contra datos de ARCA y no solo contra un `SimpleNamespace`.
 
 ## Frontend (2026-08-26)
-Primera tajada de la SPA: autenticación, identidades fiscales con verificación de delegación,
-y clientes con carga desde el padrón. Vite 8 + React 19 + TypeScript 6, `react-router` como
-única dependencia agregada al scaffold.
-
-**Lo que todavía no está:** la importación de PDF y el editor de `InvoiceTemplate`, que es la
-pantalla grande y la que cierra la funcionalidad #1 de punta a punta.
+La SPA: autenticación, identidades fiscales con verificación de delegación, clientes con carga
+desde el padrón, y la **grilla de modelos con su editor e importación de PDF** — que cierra la
+funcionalidad #1 de punta a punta. Vite 8 + React 19 + TypeScript 6, `react-router` como única
+dependencia agregada al scaffold.
 
 ### Cómo se corre
 ```
@@ -1023,6 +1018,72 @@ renglón sin apretarse— y no por el tamaño de ningún dispositivo.
   navegación. La dirección de mail aparece recién cuando hay lugar.
 - **`overflow-x: hidden` en el `body`.** Sin eso, cualquier cosa ancha estira la página y todo
   se va de costado.
+
+### La grilla de modelos y su editor (2026-08-26)
+La pantalla de entrada (`/`) es una tarjeta por `InvoiceTemplate` y una vacía con un `+` al
+final. Adentro (`/modelos/:id`) está el editor; `/modelos/nuevo` importa un PDF o arranca en
+blanco. Confirmado por Miguel el 2026-08-26: es la forma que pidió, no una interpretación.
+
+- **La raíz es la grilla y no las identidades fiscales.** Identidades y clientes son
+  configuración: se tocan al empezar y después casi nunca. Dejar una de ellas de portada le
+  cobra un toque a la pantalla que se abre cien veces por semana.
+- **La tarjeta muestra solo el nombre.** Lo que hace falta ahí es reconocer el modelo de un
+  vistazo y llegar con un dedo; el CUIT, el cliente y los importes están adentro, que es donde
+  se los mira. Una lista con cuatro columnas diría más y se leería peor.
+- **Se entra tocando y se borra manteniendo apretado.** Que eliminar quede detrás de un gesto
+  y no de un tacho siempre visible es a propósito: en una grilla de objetivos de 150 px, un
+  ícono de borrar pegado al área que se toca cien veces por semana se aprieta solo. La tarjeta
+  armada muestra dos botones con su nombre escrito —"Eliminar" y "Cancelar"— y no el tacho de
+  dos pasos de las listas: sostener el dedo medio segundo ya fue el paso deliberado, y lo que
+  falta es un objetivo grande.
+- **El gesto no puede ser la única puerta.** Sostener el dedo es invisible con un mouse y no
+  existe con un teclado, así que `useLongPress` engancha además `contextmenu`, que es el mismo
+  evento para el botón derecho, la tecla Menú y Shift+F10. Una sola acción, tres entradas.
+- **`useLongPress` usa eventos de puntero**, no `touchstart`/`mousedown`: cubre dedo, mouse y
+  lápiz con un juego de handlers y evita que un toque dispare las dos ramas (los navegadores
+  emiten eventos de mouse sintéticos después de un toque). Tres detalles que costaron pensarlos
+  y sin los cuales el gesto se siente roto: una tolerancia de 10 px para que arrastrar la lista
+  no abra el menú de la tarjeta de abajo; un `onClickCapture` que se come el `click` que el
+  navegador manda igual al soltar —si no, mantener apretado abre el menú **y** entra a la
+  tarjeta—; y `user-select: none` + `-webkit-touch-callout: none` en el CSS, porque si no iOS
+  abre su menú de copiar justo encima del gesto.
+- **La identidad fiscal y el cliente son un `PickerField`, no un `<select>`.** Tocar abre la
+  lista; mantener apretado entra a editar el elegido. El `<select>` nativo abre el picker del
+  sistema —que en el celular está muy bien— pero no deja colgarle un gesto propio ni mostrar
+  dos renglones por opción, y el CUIT abajo del nombre es lo que distingue dos clientes que se
+  llaman parecido.
+- **El id a editar viaja en la URL** (`/identidades?editar=<id>`), no en un estado compartido.
+  Es lo que hace que el gesto sea un link común: sin eso haría falta un canal aparte para
+  decirle a la pantalla de identidades con qué fila arrancar. De paso, las dos pantallas de
+  listas pasaron a **editar además de dar de alta**, con el mismo formulario y un `key` que lo
+  remonta al cambiar de fila — copiar la prop al estado con un efecto es el mismo resultado con
+  un render de más y una forma conocida de pisar lo que el usuario ya tipeó.
+- **El formulario es controlado desde afuera.** Que el editor se guarde el estado adentro no
+  serviría para la pantalla de importación, que después de dar de alta un cliente tiene que
+  meterle el id al formulario que el usuario ya empezó a tocar.
+- **`forms/templateForm.ts` está separado de `TemplateEditor.tsx` por Fast Refresh**, que solo
+  recarga en caliente un módulo que exporta componentes y nada más — el mismo motivo por el que
+  el contexto de sesión vive en tres archivos.
+- **Los importes se tipean con coma o con punto.** `parseAmount` acepta `1.234,56` y `1234.56`;
+  sin eso el que escribe como se escribe acá manda `NaN`. Y viajan como **string** al backend,
+  no como `number`: `Decimal` se serializa con su escala, y pasar por el binario de coma
+  flotante en el camino de ida es pedirle centavos al azar.
+- **El total de la pantalla aplica la convención del proyecto**: en A el precio va neto y en B
+  y C ya viene con el IVA adentro. No es una regla nueva, es la misma que usa el parser al leer
+  un PDF. Está escrito abajo del total que es una cuenta nuestra y que el importe que vale es
+  el que autorice ARCA.
+- **La importación ofrece dar de alta el cliente que trajo el PDF.** El draft trae los datos
+  del receptor pero no un id cuando no está cargado, y sin ese botón importar una factura de un
+  cliente nuevo es un callejón sin salida: el editor pide un id. El alta sigue siendo explícita
+  —un botón, no un efecto de la importación—, que es la misma regla que hace que `/import` no
+  escriba nada.
+- **"Empezar en blanco" no es un extra.** Hay un segundo layout de factura que el parser
+  todavía no sabe leer, y un PDF escaneado contesta 200 con el modelo vacío a propósito. Con
+  una sola puerta, cualquiera de esos dos casos queda sin salida.
+- **La palabra de la UI es "modelo".** Miguel dice indistintamente "modelo" y "plantilla"; se
+  eligió "modelo" porque es lo que ya dicen los mensajes de error del backend ("Modelo no
+  encontrado", "No se puede eliminar un cliente con modelos asociados") y tener la pantalla
+  diciendo una cosa y el error otra es peor que cualquiera de las dos.
 
 ### Sin TanStack Query y sin Tailwind
 Las dos por el mismo motivo: resuelven problemas que esta app todavía no tiene.

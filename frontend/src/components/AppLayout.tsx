@@ -1,4 +1,4 @@
-import { NavLink, Outlet, useNavigate } from 'react-router'
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router'
 
 import { useAuth } from '../auth/useAuth'
 
@@ -6,21 +6,30 @@ import { useAuth } from '../auth/useAuth'
 export function AppLayout() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
+  const { pathname } = useLocation()
 
   async function onLogout() {
     await logout()
     navigate('/login', { replace: true })
   }
 
+  // Los modelos viven en dos rutas —la grilla en `/` y cada uno en `/modelos/…`— así que el
+  // `isActive` de `NavLink` no alcanza: con `end` se apagaría adentro de un modelo, y sin
+  // `end` la raíz haría match con todas las rutas y la pestaña quedaría prendida siempre.
+  const inTemplates = pathname === '/' || pathname.startsWith('/modelos')
+
   return (
     <>
       <header className="app-header">
         <span className="app-brand">FactuMov</span>
         <nav className="app-nav">
+          <NavLink to="/" className={inTemplates ? 'active' : ''}>
+            Modelos
+          </NavLink>
           {/* `NavLink` pone la clase `active` sola según la ruta; con `Link` habría que
               comparar `useLocation` a mano en cada ítem. */}
           <NavLink to="/identidades" className={({ isActive }) => (isActive ? 'active' : '')}>
-            Identidades fiscales
+            Identidades
           </NavLink>
           <NavLink to="/clientes" className={({ isActive }) => (isActive ? 'active' : '')}>
             Clientes
