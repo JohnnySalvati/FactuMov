@@ -930,15 +930,53 @@ desde el padrón, y la **grilla de modelos con su editor e importación de PDF**
 funcionalidad #1 de punta a punta. Vite 8 + React 19 + TypeScript 6, `react-router` como única
 dependencia agregada al scaffold.
 
-### Cómo se corre
+### Cómo se corre — y cómo llegar desde el celular
+Son tres procesos, cada uno en su terminal. Los comandos son de PowerShell, que no tiene `&&`.
+
+```powershell
+# terminal 1 — la base
+docker compose up -d
+
+# terminal 2 — el backend
+cd E:\Capacitacion\InSoft\FactuMovackend
+uv run alembic upgrade head          # solo si hay migraciones nuevas
+uv run uvicorn factumov.main:app --reload --port 8000
+
+# terminal 3 — el frontend
+cd E:\Capacitacion\InSoft\FactuMovrontend
+npm run dev
 ```
-# terminal 1
-cd backend && uv run uvicorn factumov.main:app --reload --port 8000
-# terminal 2
-cd frontend && npm run dev      # https://localhost:5173
+
+**Al backend no se le pasa `--host`, y no es un olvido.** El celular nunca le pega al 8000: le
+pega a Vite, y Vite reenvía `/api` a `127.0.0.1:8000` desde la misma máquina (ver *El proxy de
+Vite en vez de CORS*). Exponer uvicorn en la LAN abriría un puerto que nadie usa.
+
+El que sí escucha en todas las interfaces es Vite, por el `host: true` de `vite.config.ts`.
+Al arrancar imprime la URL *Network*; desde el celular, en la misma Wi-Fi, hay que abrir **esa**
+y aceptar la advertencia del certificado autofirmado:
+
 ```
-Vite imprime también las URL de LAN. Para probar desde el celular: misma red Wi-Fi, abrir la
-de la interfaz Wi-Fi y aceptar la advertencia del certificado.
+https://192.168.1.37:5173      # ejemplo — la IP la da el router y puede cambiar
+```
+
+Conviene leer siempre la línea *Network* que imprime Vite en vez de fiarse de la IP anotada
+acá: la asigna el DHCP del router y cambia sola.
+
+**Con `https://`, no con `http://`.** Por http la cookie de sesión no se guarda y todo contesta
+401 — ver el punto siguiente, que es el error más caro de esta pantalla.
+
+#### Lo que falta si el celular no engancha
+- **El firewall de Windows.** Vite escucha, pero el perfil de red (Privado, en la máquina de
+  Miguel) bloquea la conexión entrante si nadie la permitió. Normalmente Windows lo pregunta con
+  un cartel la primera vez que node abre el puerto y alcanza con darle *Permitir* en redes
+  privadas. Si el cartel no aparece, la regla se crea una vez, en PowerShell **como
+  administrador**:
+  ```powershell
+  New-NetFirewallRule -DisplayName "Vite dev 5173" -Direction Inbound -Protocol TCP `
+    -LocalPort 5173 -Profile Private -Action Allow
+  ```
+- **`APP_BASE_URL`, solo para probar el registro.** Ver el detalle al final de *HTTPS en
+  desarrollo*.
 
 ### HTTPS en desarrollo, y por qué no es opcional
 El dev server usa `@vitejs/plugin-basic-ssl`, que genera un certificado autofirmado solo, y
