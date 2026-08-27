@@ -136,6 +136,39 @@ def send_password_changed_email(to: str) -> None:
     )
 
 
+def send_invoice_email(
+    to: str,
+    label: str,
+    issuer_name: str,
+    total: str,
+    pdf: bytes,
+    filename: str,
+) -> None:
+    """La factura emitida, con el PDF adjunto.
+
+    Usa `send_email` y no la versión best effort: este mail **es** el producto del request —
+    quien apretó "Mandar por email" no pidió otra cosa— así que si no sale, el endpoint tiene
+    que decirlo. Es el mismo criterio que el mail de confirmación de cuenta.
+
+    El asunto lleva el número del comprobante y la razón social del emisor porque es lo que el
+    destinatario ve en la lista de su casilla, y "Factura" a secas no le dice de quién es.
+
+    Los importes llegan ya formateados: quien los sabe formatear es `invoice_pdf`, y hacerlo
+    otra vez acá sería una segunda forma de escribir el mismo número.
+    """
+    email.send_email(
+        to=to,
+        subject=f"Factura {label} de {issuer_name}",
+        body=(
+            "Hola,\n\n"
+            f"Te adjuntamos la factura {label} de {issuer_name} por $ {total}.\n\n"
+            "El comprobante está autorizado por ARCA; el CAE y su vencimiento figuran al pie "
+            "del PDF.\n"
+        ),
+        attachments=[email.Attachment(filename=filename, content=pdf)],
+    )
+
+
 def send_delegation_instructions_email(to: str) -> None:
     """Las instrucciones para delegar WSFE en el CUIT de FactuMov.
 

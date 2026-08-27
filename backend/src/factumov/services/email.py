@@ -19,6 +19,8 @@ el mail, y `send_email_best_effort` queda para los que solo lo acompañan.
 
 import logging
 import smtplib
+from collections.abc import Sequence
+from dataclasses import dataclass
 from email.message import EmailMessage
 from functools import lru_cache
 
@@ -121,8 +123,29 @@ def _describe(loc: tuple[int | str, ...], message: str) -> str:
     return f"{field}: {message}" if field else message
 
 
-def send_email(to: str, subject: str, body: str) -> None:
-    """Manda un mail de texto plano. Levanta `EmailDeliveryError` si no se pudo entregar.
+@dataclass(frozen=True)
+class Attachment:
+    """Un archivo adjunto, ya en memoria.
+
+    Recibe los bytes y no una ruta a propósito: el único adjunto que manda FactuMov es un PDF
+    que se genera al vuelo y nunca toca el disco, así que un archivo temporal sería basura que
+    alguien tiene que acordarse de limpiar.
+
+    `media_type` va partido en tipo y subtipo porque es lo que pide `add_attachment` de
+    `EmailMessage`. Se guarda entero y se parte al usarlo, que se lee mejor que dos campos.
+    """
+
+    filename: str
+    content: bytes
+    media_type: str = "application/pdf"
+
+
+def send_email(to: str, subject: str, body: str, attachments: Sequence[Attachment] = ()) -> None:
+    """Manda un mail de texto plano, con adjuntos si los hay.
+
+    El default vacío es una tupla y no una lista: un mutable por default se comparte entre
+    todas las llamadas, y aunque acá nadie lo modifique, es la clase de detalle que deja de
+    ser inofensivo en cuanto alguien agregue una línea.
 
     La config se resuelve acá adentro y su `ValidationError` se convierte en la misma
     excepción que un servidor caído: para el que llama, "el `.env` está mal" y "el servidor
@@ -140,6 +163,11 @@ def send_email(to: str, subject: str, body: str) -> None:
     message["To"] = to
     message["Subject"] = subject
     message.set_content(body)
+    for attachment in attachments:
+        maintype, _, subtype = attachment.media_type.partition("/")
+        message.add_attachment(
+            attachment.content, maintype=maintype, subtype=subtype, filename=attachment.filename
+        )
 
     try:
         with smtplib.SMTP(
@@ -155,7 +183,9 @@ def send_email(to: str, subject: str, body: str) -> None:
         raise EmailDeliveryError(f"No se pudo entregar el mail a {to}") from error
 
 
-def send_email_best_effort(to: str, subject: str, body: str) -> None:
+def send_email_best_effort(
+    to: str, subject: str, body: str, attachments: Sequence[Attachment] = ()
+) -> None:
     """Manda un mail cuyo fallo no debe tumbar la operación que lo generó.
 
     Es para los mails que **acompañan** a algo que ya pasó y quedó guardado: las
@@ -168,6 +198,6 @@ def send_email_best_effort(to: str, subject: str, body: str) -> None:
     el producto del request y su fallo tiene que verse; estos son una consecuencia.
     """
     try:
-        send_email(to=to, subject=subject, body=body)
+        send_email(to=to, subject=subject, body=body, attachments=attachments)
     except EmailDeliveryError:
         logger.exception("No se pudo enviar el mail a %s (asunto: %s)", to, subject)

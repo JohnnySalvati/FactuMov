@@ -924,3 +924,12 @@ button.danger {
   font-weight: 600;
   text-decoration: none;
 }
+
+/* La variante secundaria del link-botón: la acción existe pero no es la principal de la
+   pantalla. "Ver el PDF" al lado de "Mandar por email" — mirar es gratis, mandar sale para
+   afuera. */
+.button-link.secondary-link {
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--border);
+}

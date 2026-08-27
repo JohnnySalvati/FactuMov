@@ -540,3 +540,131 @@ def test_a_customer_with_invoices_cannot_be_deleted(client, template, wsfe_calls
     emit(client, template.id)
 
     assert client.delete(f"/customers/{template.customer_id}").status_code == 409
+
+
+# --- Mandar la factura por mail ------------------------------------------------------------
+#
+# Reenviar es legítimo y frecuente —"no me llegó"— así que estos tests no protegen ninguna
+# guarda contra el segundo envío: no hay. Es lo contrario de `/emit`, donde repetir crea un
+# comprobante nuevo.
+
+
+@pytest.fixture
+def emitted(client, template, db, wsfe_calls):
+    """Una factura ya emitida, con el cliente que tiene mail cargado."""
+    template.customer.email = "cliente@cucu.com"
+    db.flush()
+    return emit(client, template.id).json()
+
+
+def test_send_mails_the_invoice_with_the_pdf_attached(client, emitted, sent_emails):
+    response = client.post(f"/invoices/{emitted['id']}/send")
+
+    assert response.status_code == 200
+    assert len(sent_emails) == 1
+    assert sent_emails[0].to == "cliente@cucu.com"
+    attachment = sent_emails[0].attachments[0]
+    assert attachment.filename == "FactuMov-B-00001-00000042.pdf"
+    assert attachment.content.startswith(b"%PDF-")
+
+
+def test_the_subject_names_the_voucher_and_the_issuer(client, emitted, sent_emails):
+    """Es lo que el destinatario ve en su lista de correo; "Factura" a secas no dice de quién."""
+    client.post(f"/invoices/{emitted['id']}/send")
+
+    assert emitted["label"] in sent_emails[0].subject
+    assert emitted["issuer_name"] in sent_emails[0].subject
+
+
+def test_send_records_when_it_went_out(client, emitted):
+    assert emitted["sent_at"] is None
+
+    response = client.post(f"/invoices/{emitted['id']}/send")
+
+    assert response.json()["sent_at"] is not None
+
+
+def test_resending_is_allowed_and_overwrites_the_mark(client, emitted, sent_emails):
+    """El cliente dice que no le llegó y se lo manda de nuevo. No hay guarda que lo impida."""
+    first = client.post(f"/invoices/{emitted['id']}/send").json()["sent_at"]
+    second = client.post(f"/invoices/{emitted['id']}/send").json()["sent_at"]
+
+    assert len(sent_emails) == 2
+    assert second >= first
+
+
+def test_a_customer_without_email_answers_409(client, template, db, wsfe_calls, sent_emails):
+    template.customer.email = None
+    db.flush()
+    invoice = emit(client, template.id).json()
+
+    response = client.post(f"/invoices/{invoice['id']}/send")
+
+    assert response.status_code == 409
+    assert "email" in response.json()["detail"]
+    assert sent_emails == []
+
+
+def test_send_answers_503_when_the_mail_cannot_go_out(client, emitted, broken_mail, db):
+    """La factura sigue emitida: el error es del envío, y el texto lo aclara para que nadie
+    vuelva a emitir."""
+    response = client.post(f"/invoices/{emitted['id']}/send")
+
+    assert response.status_code == 503
+    assert "emitida" in response.json()["detail"]
+
+
+def test_a_failed_send_does_not_mark_it_as_sent(client, emitted, broken_mail):
+    client.post(f"/invoices/{emitted['id']}/send")
+
+    assert client.get(f"/invoices/{emitted['id']}").json()["sent_at"] is None
+
+
+def test_sending_someone_elses_invoice_is_a_404(client, db, other_user):
+    identity = make_fiscal_identity(db, other_user.id)
+    customer = make_customer(db, other_user.id)
+    theirs = make_invoice_template(db, identity, customer)
+    db.flush()
+    invoice = Invoice(
+        fiscal_identity_id=identity.id,
+        customer_id=customer.id,
+        template_id=theirs.id,
+        voucher_type=VoucherType.B,
+        pos=1,
+        number=7,
+        date=date.today(),
+        concepto=Concepto.products,
+        cae="1",
+        cae_expiry=date.today() + timedelta(days=10),
+        net_total=Decimal("1"),
+        iva_total=Decimal("0"),
+        total=Decimal("1"),
+        issuer_name=identity.name,
+        issuer_tax_id=identity.tax_id,
+        issuer_condicion_iva=identity.condicion_iva,
+        customer_name=customer.name,
+        customer_doc_type=customer.doc_type,
+        customer_doc_number=customer.doc_number,
+        customer_condicion_iva=customer.condicion_iva,
+        customer_email="ajeno@cucu.com",
+    )
+    db.add(invoice)
+    db.flush()
+
+    assert client.post(f"/invoices/{invoice.id}/send").status_code == 404
+
+
+def test_the_pdf_endpoint_returns_a_pdf(client, emitted):
+    response = client.get(f"/invoices/{emitted['id']}/pdf")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    assert response.content.startswith(b"%PDF-")
+
+
+def test_the_pdf_opens_in_the_browser_instead_of_downloading(client, emitted):
+    """`inline`: en el celular abre el visor, que es lo que uno quiere antes de mandarlo."""
+    response = client.get(f"/invoices/{emitted['id']}/pdf")
+
+    assert response.headers["content-disposition"].startswith("inline")
+    assert "FactuMov-B-00001-00000042.pdf" in response.headers["content-disposition"]

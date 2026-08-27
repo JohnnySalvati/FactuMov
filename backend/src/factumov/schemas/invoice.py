@@ -97,6 +97,8 @@ class InvoiceRead(BaseModel):
     customer_condicion_iva: CondicionIva
     customer_address: str | None
     customer_email: str | None
+    # Cuándo salió el mail con el PDF por última vez. `null` = todavía no se mandó.
+    sent_at: datetime.datetime | None
 
     created_at: datetime.datetime
     updated_at: datetime.datetime

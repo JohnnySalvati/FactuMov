@@ -102,9 +102,13 @@ FactuMov/
 │   │   ├── schemas/     # Pydantic — entrada/salida de la API
 │   │   ├── crud/
 │   │   ├── routers/     # solo JSON
+│   │   ├── templates/   # un solo archivo: el comprobante impreso (HTML → PDF)
 │   │   └── services/
-│   │       ├── invoice_parser.py   # PDF → ParsedInvoice
-│   │       └── invoice_draft.py    # ParsedInvoice → InvoiceTemplateDraft
+│   │       ├── invoice_parser.py   # PDF → ParsedInvoice (lee facturas ajenas)
+│   │       ├── invoice_draft.py    # ParsedInvoice → InvoiceTemplateDraft
+│   │       ├── invoice_totals.py   # neto, IVA y total según la letra
+│   │       ├── emission.py         # modelo → CAE de ARCA → Invoice guardada
+│   │       └── invoice_pdf.py      # Invoice → QR + HTML + PDF (imprime las propias)
 │   └── tests/
 │       └── samples/                # 10 facturas PDF reales (1 A, 4 B, 5 C)
 │           └── unsupported/       # otros layouts, fuera del glob de los tests
@@ -126,7 +130,7 @@ Ruta real: `E:\Capacitacion\InSoft\Balance360\Balance360\src\balance360\services
 | `pdf_invoice.py` | **Parser** de facturas PDF de terceros: pdfplumber + regex, con un registry de layouts por proveedor (Dux, Venex, ZTECNO, Air/NVX…). Lógica pura, sin DB ni red. | ✅ **Copiar tal cual** a `services/invoice_parser.py`. Es el core de la funcionalidad #1. |
 | `wsfe.py` | Cliente WSFEv1: último número de comprobante + solicitud de CAE (`FECAESolicitar`), con IVA, tributos y comprobantes asociados (NC). | ✅ **Portado entero** (2026-08-27). Sin tributos ni comprobantes asociados: FactuMov no emite NC. |
 | `arca.py` | Autenticación WSAA contra ARCA: firma un TRA con cert + clave privada, obtiene token/sign, cachea el ticket. Incluye workaround TLS (AFIP negocia DH de 1024 bits). | 🟡 Desacoplar `balance360.database.settings` (inyectar config) y la ruta hardcodeada `ticket_arca.json`. |
-| `invoice_pdf.py` | Genera el **QR fiscal** que ARCA exige en el PDF impreso, a partir de un `Invoice` del ORM. | 🟠 Refactor: que reciba un DTO plano en vez del modelo ORM. |
+| `invoice_pdf.py` | Genera el **QR fiscal** que ARCA exige en el PDF impreso, a partir de un `Invoice` del ORM. | ✅ **Portado** (2026-08-27), junto con `templates/invoices/pdf.html`. Sigue recibiendo el `Invoice`, que acá ya trae copiadas las dos partes. |
 | `invoice.py` | Orquestador: confirmar / pagar / eliminar factura, crear NC, `authorize_invoice`. | 🔴 No reutilizable directo — muy acoplado a stock, seriales y CRUD de Balance360. Sirve como referencia del flujo. |
 
 **`pdf_invoice.py` e `invoice_pdf.py` NO son duplicados.** El primero *lee* facturas ajenas
@@ -925,17 +929,24 @@ confirmación por email con su rate limiting, la **integración con ARCA** (veri
 delegación + consulta al padrón) y el **frontend**, incluida la grilla de modelos con su
 editor e importación de PDF — ver *ARCA* y *Frontend*.
 
-Cerradas el 2026-08-27: el **reset de contraseña**, la **visibilidad del fallo de SMTP** y la
-**emisión con CAE** — ver las secciones respectivas.
+Cerradas el 2026-08-27: el **reset de contraseña**, la **visibilidad del fallo de SMTP**, la
+**emisión con CAE** y el **envío de la factura por email** — ver las secciones respectivas.
+**Con eso las cinco funcionalidades core están hechas** y el circuito cierra de punta a punta:
+importar un PDF, editar el modelo, guardarlo, emitir con CAE y mandarlo.
 
-1. **Mandar la factura por email**, con el PDF adjunto y su QR fiscal. Es la funcionalidad #5
-   y lo único que le falta al circuito para cerrar de punta a punta. Necesita tres cosas que
-   todavía no existen: el HTML del comprobante, el QR (`segno`), y adjuntos en
-   `services/email.py`, que hoy solo manda texto plano. Balance360 tiene las tres —
-   `invoice_pdf.py` y `templates/invoices/pdf.html`— y weasyprint ya anda en la máquina de
-   Miguel.
-2. **Segundo layout del parser** — ver *Parser → Pendiente: un segundo layout*. Va último
-   porque no bloquea nada: hoy el usuario puede cargar el modelo a mano.
+1. **Segundo layout del parser** — ver *Parser → Pendiente: un segundo layout*. No bloquea
+   nada: hoy el usuario puede cargar el modelo a mano.
+2. **WhatsApp**, la otra mitad de la funcionalidad #5. Sin empezar y sin decisión tomada
+   sobre qué proveedor.
+
+Y dos cosas que la emisión dejó anotadas y no son unidades todavía:
+
+- **Los valores de `CondicionIva` de Balance360 están mal** — ver *Emisión con CAE → Dos
+  códigos heredados*. Acá se corrigieron; allá pueden estar declarando la condición
+  equivocada del receptor en cada factura. Sin revisar.
+- **Ninguna pantalla usa `/invoices` para reemitir el mes siguiente.** Hoy se vuelve al
+  modelo, que es correcto, pero "emitir igual que el mes pasado" es el gesto que más se va a
+  repetir.
 
 ## ARCA (2026-08-26)
 Port adaptado de `arca.py`, `padron.py` y la mitad de consulta de `wsfe.py` de Balance360.
@@ -1275,6 +1286,72 @@ verdad.
 - **El período y el vencimiento aparecen solo si el modelo es de servicios**, con el mes en
   curso puesto por default. Los tres van juntos o no va ninguno: el schema lo valida, y qué
   hacen falta lo decide el concepto, que el schema no ve y el router sí.
+
+## Mandar la factura por email (2026-08-27)
+`GET /invoices/{id}/pdf` y `POST /invoices/{id}/send`, con `services/invoice_pdf.py`, el
+template `templates/invoice.html`, adjuntos en `services/email.py` y la columna
+`invoices.sent_at` (migración `49023933c5a4`). Cierra la funcionalidad #5 y con ella el
+circuito completo: importar un PDF, guardar el modelo, emitir y mandar.
+
+Dependencias nuevas: `weasyprint` (HTML → PDF), `segno` (el QR) y `jinja2` **declarado
+explícitamente** — ya venía como transitiva de `fastapi[standard]`, y depender de la
+transitiva de otro paquete es una rotura esperando el día que ese paquete la saque.
+
+### El PDF se genera al vuelo, no se guarda
+Es determinístico: sale de columnas que no cambian nunca. Guardarlo sería una copia más de un
+dato que ya está, con su propio almacenamiento y su propia forma de quedar vieja frente a una
+corrección del template. Cuesta unas décimas de segundo y se pide pocas veces.
+
+- **El template no hace cuentas ni navega relaciones.** Todo llega resuelto y formateado desde
+  `invoice_pdf.py`, porque los importes que van al papel son los que ARCA autorizó y no algo
+  que se calcule al imprimir. Y como el `Invoice` ya trae copiadas las dos partes, el PDF de
+  una factura de hace un año sale hoy idéntico — que es la otra mitad del motivo por el que
+  esas columnas existen.
+- **`StrictUndefined` y `autoescape`.** Lo primero para que una variable mal escrita explote
+  en vez de imprimir vacío: en un comprobante fiscal, un campo que desaparece en silencio es
+  peor que un error. Lo segundo porque el nombre y el domicilio del cliente son texto que
+  cargó una persona.
+- **El import de weasyprint va adentro de la función.** Al importarse carga las librerías GTK
+  del sistema, y en una máquina sin ellas el import falla: arriba del módulo se llevaría
+  puesta la app entera al arrancar en vez de solo esta operación. Mismo criterio que
+  `EmailSettings` y el `lifespan` de `main.py`.
+- **El template es un paquete (`factumov/templates/`) y se lee con `importlib.resources`**, no
+  con una ruta relativa a `__file__`: así sigue funcionando desde un wheel, donde el paquete
+  puede no estar desplegado en el disco. Verificado: el `.html` viaja adentro del wheel.
+- **El QR lleva los tipos que ARCA espera.** `cuit`, `nroDocRec` y `codAut` van como números
+  y `importe` como float. Un string donde va un número se ve igual y el validador de ARCA lo
+  rechaza — es la clase de error que ningún test superficial encuentra, así que el suyo
+  decodifica el payload y chequea los tipos.
+- **Los importes se formatean a mano y no con `locale`.** `setlocale` es global del proceso y
+  depende de que el sistema tenga `es_AR`, que en un contenedor no pasa.
+- **Una sola copia, no las tres de "Comprobantes en línea".** El original electrónico es uno;
+  duplicado y triplicado son del papel.
+- **`inline` y no `attachment` en el endpoint del PDF**: en el celular abre el visor del
+  navegador, que es lo que uno quiere antes de mandarlo. Bajarlo sigue estando a un toque.
+
+### Enviar sí se puede repetir
+Es lo contrario de emitir, y por eso esta pantalla **no** tiene confirmación. Reenviar es
+legítimo y frecuente —el cliente dice que no le llegó— así que no hay ninguna guarda contra el
+segundo envío: `sent_at` se pisa y ya.
+
+- **`sent_at` es la marca del último envío, no un historial.** La pregunta que la pantalla
+  contesta es "¿esto ya se mandó?". Un historial de reenvíos sería una tabla para una pregunta
+  que nadie hace; si algún día se hace, eso sí es una tabla y no una columna más.
+- **No es acuse de recibo**, y la pantalla lo dice: significa que el servidor de mail lo
+  aceptó, no que el cliente lo haya abierto. Eso necesitaría un proveedor con webhooks.
+- **503 si el mail no sale, con un texto que aclara que la factura está emitida igual.** El
+  error es del envío y no de la emisión; confundirlos haría que alguien vuelva a emitir, que
+  es la única equivocación cara que se puede cometer acá.
+- **409 si el cliente no tiene email**, con el link a su ficha. Es un dato que falta, no un
+  error del servidor.
+- **El mail usa `send_email` y no la versión best effort**: es el producto del request. Misma
+  regla que el resto — ver *El fallo de SMTP se ve*.
+- **`Attachment` recibe los bytes, no una ruta.** El único adjunto que manda FactuMov se
+  genera al vuelo y nunca toca el disco, así que un archivo temporal sería basura que alguien
+  tiene que acordarse de limpiar.
+- **"Sin enviar" es la única marca en la grilla de facturas**, con el mismo criterio que el
+  "Sin verificar" de las identidades fiscales: es el único pendiente que puede tener una
+  factura ya emitida, y sin eso habría que entrar a cada una para encontrar la que falta.
 
 ### `/facturas` no es la grilla de tarjetas
 Es una pila de links con tres datos por renglón: qué comprobante, a quién y por cuánto. La

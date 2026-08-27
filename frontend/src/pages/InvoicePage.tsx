@@ -1,7 +1,7 @@
-import { useCallback } from 'react'
+import { useCallback, useState } from 'react'
 import { Link, Navigate, useParams } from 'react-router'
 
-import { api } from '../api/client'
+import { ApiError, api } from '../api/client'
 import { CONCEPTO_LABELS, IVA_ALIQUOT_LABELS, type Invoice } from '../api/types'
 import { Notice } from '../components/Notice'
 import { formatDate, money } from '../format'
@@ -25,6 +25,28 @@ function InvoiceScreen({ id }: { id: string }) {
   const fetcher = useCallback(() => api.get<Invoice>(`/invoices/${id}`), [id])
   const invoice = useResource(fetcher)
   const data = invoice.data
+
+  const [sending, setSending] = useState(false)
+  const [sendError, setSendError] = useState<string>()
+  const [justSent, setJustSent] = useState(false)
+
+  async function send() {
+    if (sending) return
+    setSending(true)
+    setSendError(undefined)
+    try {
+      await api.post<Invoice>(`/invoices/${id}/send`, undefined)
+      setJustSent(true)
+      // Se recarga en vez de meter la respuesta en el estado: `useResource` es la única
+      // fuente de la factura en esta pantalla, y tener dos formas de actualizarla es cómo se
+      // llega a que muestren cosas distintas.
+      invoice.reload()
+    } catch (caught) {
+      setSendError(caught instanceof ApiError ? caught.detail : 'No se pudo mandar el mail.')
+    } finally {
+      setSending(false)
+    }
+  }
 
   return (
     <div className="page">
@@ -119,6 +141,44 @@ function InvoiceScreen({ id }: { id: string }) {
             {/* A diferencia del editor, acá el total **no** es una cuenta nuestra: es el
                 importe que ARCA autorizó, guardado en la factura. */}
             <p className="totals-note">Importe autorizado por ARCA con el CAE de arriba.</p>
+          </div>
+
+          <div className="card stack">
+            {/* Un `<a>` común y no un fetch a blob: la cookie de sesión viaja sola porque el
+                proxy de Vite deja todo en el mismo origen, y el navegador abre su visor de
+                PDF. Bajarlo a mano quedaría a un toque igual. */}
+            <a className="button-link secondary-link" href={`/api/invoices/${id}/pdf`}
+               target="_blank" rel="noreferrer">
+              Ver el PDF
+            </a>
+
+            {data.customer_email !== null ? (
+              <button onClick={send} disabled={sending}>
+                {sending
+                  ? 'Mandando…'
+                  : data.sent_at !== null
+                    ? 'Mandar de nuevo'
+                    : `Mandar por email a ${data.customer_email}`}
+              </button>
+            ) : (
+              <Notice kind="warn">
+                Este cliente no tiene email cargado.{' '}
+                <Link to={`/clientes/${data.customer_id}`}>Agregáselo</Link> y volvé.
+              </Notice>
+            )}
+
+            <Notice kind="error">{sendError}</Notice>
+            {justSent && sendError === undefined && <Notice kind="ok">Mail enviado.</Notice>}
+
+            {/* La marca es del último envío, no un historial: reenviar la pisa. Y no es acuse
+                de recibo — dice que el servidor de mail lo aceptó, no que el cliente lo haya
+                abierto. El texto lo dice para que nadie lo lea como otra cosa. */}
+            {data.sent_at !== null && (
+              <p className="totals-note" style={{ margin: 0 }}>
+                Enviado por última vez el {formatDate(data.sent_at.slice(0, 10))}. Que haya
+                salido no garantiza que el cliente lo haya abierto.
+              </p>
+            )}
           </div>
         </>
       )}

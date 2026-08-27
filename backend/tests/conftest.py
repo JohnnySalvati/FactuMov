@@ -1,5 +1,5 @@
 import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -27,6 +27,9 @@ class SentEmail:
     to: str
     subject: str
     body: str
+    # Lo que se adjuntó. Es una lista y no un bool porque los tests de la factura por mail
+    # afirman sobre el nombre del archivo y sobre que los bytes sean un PDF de verdad.
+    attachments: list = field(default_factory=list)
 
 
 @pytest.fixture(autouse=True)
@@ -182,11 +185,26 @@ def sent_emails(monkeypatch):
     """
     sent = []
 
-    def fake_send(to, subject, body):
-        sent.append(SentEmail(to=to, subject=subject, body=body))
+    def fake_send(to, subject, body, attachments=()):
+        sent.append(SentEmail(to=to, subject=subject, body=body, attachments=list(attachments)))
 
     monkeypatch.setattr(email_service, "send_email", fake_send)
     return sent
+
+
+@pytest.fixture
+def broken_mail(monkeypatch):
+    """El transporte falla. Reemplaza al fake de `sent_emails`, que es autouse.
+
+    Vive acá y no en un archivo de tests porque lo usan dos: el reset de contraseña y el envío
+    de una factura. Los dos prueban lo mismo desde distinto ángulo — que un mail que **es** el
+    producto del request no se pierda en silencio.
+    """
+
+    def explode(to, subject, body, attachments=()):
+        raise email_service.EmailDeliveryError("no salió")
+
+    monkeypatch.setattr(email_service, "send_email", explode)
 
 
 class Settings(BaseSettings):

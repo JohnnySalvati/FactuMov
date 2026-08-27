@@ -1,0 +1,211 @@
+{# Representación impresa del comprobante (RG 1415), copiando el layout de ARCA.
+
+   Port del `pdf.html` de Balance360, con dos diferencias. La primera es que **el template no
+   hace cuentas ni navega relaciones**: todo llega resuelto y formateado desde
+   `services/invoice_pdf.py`, porque los importes que van al papel son los que ARCA autorizó y
+   no algo que se calcule al imprimir. La segunda es que no hay comprobantes asociados ni
+   tributos: FactuMov no emite notas de crédito ni maneja percepciones.
+
+   Los datos del emisor y del receptor salen de las columnas copiadas en la factura, no de las
+   fichas actuales. Por eso el PDF de una factura de hace un año sale idéntico hoy. #}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<style>
+  @page { size: A4; margin: 1cm; }
+  * { box-sizing: border-box; }
+  /* DejaVu porque es la que weasyprint tiene garantizada en cualquier Linux; sin una familia
+     concreta, un contenedor sin fuentes instaladas imprime cuadraditos. */
+  body { font-family: "DejaVu Sans", sans-serif; font-size: 8pt; color: #000; margin: 0; }
+
+  .doc { border: 1px solid #000; display: flex; flex-direction: column; min-height: 27.4cm; }
+  .body { flex: 1 1 auto; }
+
+  .original { text-align: center; font-weight: bold; font-size: 9pt; padding: 3px 0;
+              border-bottom: 1px solid #000; letter-spacing: 1px; }
+
+  /* --- Encabezado, con el recuadro de la letra montado al medio --- */
+  .head-wrap { position: relative; }
+  .head { display: table; width: 100%; table-layout: fixed; border-bottom: 1px solid #000; }
+  .head-cell { display: table-cell; width: 50%; vertical-align: top; padding: 8px 12px;
+               min-height: 3.2cm; }
+  .head-cell.left { border-right: 1px solid #000; padding-right: 1.1cm; }
+  .head-cell.right { padding-left: 1.3cm; }
+  .fantasia { font-size: 15pt; font-weight: bold; margin-bottom: 10px; text-align: center; }
+  .doc-title { font-size: 14pt; font-weight: bold; margin-bottom: 6px; }
+  .field { margin: 1px 0; }
+  .gap { height: 8px; }
+
+  .letterbox {
+    position: absolute; top: -1px; left: 50%; margin-left: -0.9cm;
+    width: 1.8cm; height: 1.7cm; border: 1px solid #000; background: #fff;
+    text-align: center; padding-top: 2px;
+  }
+  .letterbox .l { font-size: 28pt; font-weight: bold; line-height: 1.05; }
+  .letterbox .c { font-size: 7pt; }
+
+  .box { border: 1px solid #000; margin: 6px; padding: 6px 10px; }
+  .box .field { margin: 2px 0; }
+  .cols { display: table; width: 100%; }
+  .cols > div { display: table-cell; width: 50%; vertical-align: top; }
+
+  .items-box { margin: 6px; }
+  table.items { width: 100%; border-collapse: collapse; border: 1px solid #000; }
+  table.items th, table.items td { padding: 3px 5px; }
+  table.items thead th { border: 1px solid #000; background: #eee; font-size: 7pt;
+                         text-transform: uppercase; text-align: center; }
+  table.items tbody td { border-left: 1px solid #000; border-right: 1px solid #000; }
+  .num { text-align: right; white-space: nowrap; }
+
+  .totals-box { border: 1px solid #000; margin: 6px; padding: 8px 10px; display: table;
+                width: calc(100% - 12px); }
+  .totals-right { display: table-cell; text-align: right; }
+  .totals-right .t { display: table; width: 100%; }
+  .totals-right .t > div { display: table-row; }
+  .totals-right .t span { display: table-cell; padding: 1px 0; }
+  .totals-right .t .lbl { text-align: right; padding-right: 10px; font-weight: bold; }
+  .totals-right .t .val { text-align: right; white-space: nowrap; min-width: 3cm; }
+  .grand .lbl, .grand .val { font-size: 12pt; font-weight: bold; }
+
+  .foot { display: table; width: 100%; border-top: 1px solid #000; padding: 8px 10px; }
+  .foot > div { display: table-cell; vertical-align: middle; }
+  .foot .qr { width: 2.8cm; }
+  .foot .qr img { width: 2.6cm; height: 2.6cm; }
+  .foot .arca { width: 4cm; padding-left: 8px; }
+  .foot .arca .a { font-size: 13pt; font-weight: bold; }
+  .foot .arca .sub { font-size: 6pt; }
+  .foot .arca .auth { font-size: 7pt; font-weight: bold; font-style: italic; margin-top: 4px; }
+  .foot .pag { text-align: center; font-size: 8pt; }
+  .foot .cae { text-align: right; }
+  .foot .cae .big { font-size: 10pt; font-weight: bold; }
+</style>
+</head>
+<body>
+  <div class="doc">
+
+    {# Una sola copia, no las tres de "Comprobantes en línea". El comprobante se manda por mail
+       y el original electrónico es uno: duplicado y triplicado son del papel. #}
+    <div class="original">ORIGINAL</div>
+
+    <div class="head-wrap">
+      <div class="head">
+        <div class="head-cell left">
+          <div class="fantasia">{{ invoice.issuer_name }}</div>
+          <div class="field"><b>Razón Social:</b> {{ invoice.issuer_name }}</div>
+          <div class="field"><b>Domicilio Comercial:</b> {{ invoice.issuer_address or "" }}</div>
+          <div class="field"><b>Condición frente al IVA:</b> {{ issuer_condicion }}</div>
+        </div>
+        <div class="head-cell right">
+          <div class="doc-title">FACTURA</div>
+          <div class="field"><b>Punto de Venta:</b> {{ "%05d"|format(invoice.pos) }}
+              &nbsp;&nbsp;&nbsp; <b>Comp. Nro:</b> {{ "%08d"|format(invoice.number) }}</div>
+          <div class="field"><b>Fecha de Emisión:</b>
+              {{ invoice.date.strftime("%d/%m/%Y") }}</div>
+          <div class="gap"></div>
+          <div class="field"><b>CUIT:</b> {{ issuer_tax_id }}</div>
+          <div class="field"><b>Ingresos Brutos:</b> {{ invoice.issuer_iibb or "" }}</div>
+          <div class="field"><b>Fecha de Inicio de Actividades:</b>
+              {{ invoice.issuer_start_date.strftime("%d/%m/%Y")
+                 if invoice.issuer_start_date else "" }}</div>
+        </div>
+      </div>
+      <div class="letterbox">
+        <div class="l">{{ letter }}</div>
+        <div class="c">COD. {{ voucher_code }}</div>
+      </div>
+    </div>
+
+    <div class="box">
+      <div class="cols">
+        <div><div class="field"><b>{{ customer_doc_label }}:</b> {{ customer_doc }}</div></div>
+        <div><div class="field"><b>Razón Social:</b> {{ invoice.customer_name }}</div></div>
+      </div>
+      <div class="cols">
+        <div><div class="field"><b>Condición frente al IVA:</b> {{ customer_condicion }}</div></div>
+        <div><div class="field"><b>Domicilio Comercial:</b>
+            {{ invoice.customer_address or "" }}</div></div>
+      </div>
+    </div>
+
+    {% if invoice.from_date %}
+    <div class="box">
+      <div class="field">
+        <b>Período Facturado Desde:</b> {{ invoice.from_date.strftime("%d/%m/%Y") }}
+        &nbsp;&nbsp; <b>Hasta:</b> {{ invoice.to_date.strftime("%d/%m/%Y") }}
+        &nbsp;&nbsp; <b>Vto. para el pago:</b> {{ invoice.due_date.strftime("%d/%m/%Y") }}
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="body">
+    <div class="items-box">
+      <table class="items">
+        <thead>
+          <tr>
+            <th style="text-align:left">Producto / Servicio</th>
+            <th>Cantidad</th>
+            <th>Precio Unit.</th>
+            <th>Subtotal</th>
+            {# Solo la A discrimina IVA por línea. En B y C el precio impreso ya lo incluye,
+               así que esas dos columnas no existen — igual que en las facturas que lee el
+               parser. #}
+            {% if discriminates %}<th>Alícuota IVA</th><th>Subtotal c/IVA</th>{% endif %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for line in lines %}
+          <tr>
+            <td>{{ line.description }}</td>
+            <td class="num">{{ line.quantity }}</td>
+            <td class="num">$ {{ line.unit_price }}</td>
+            <td class="num">$ {{ line.subtotal }}</td>
+            {% if discriminates %}
+            <td class="num">{{ line.rate }}%</td>
+            <td class="num">$ {{ line.with_iva }}</td>
+            {% endif %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    </div>
+
+    <div class="totals-box">
+      <div class="totals-right">
+        <div class="t">
+          {% if discriminates %}
+            <div><span class="lbl">Importe Neto Gravado:</span>
+                 <span class="val">$ {{ net_total }}</span></div>
+            {% for item in iva_breakdown %}
+              <div><span class="lbl">IVA {{ item.rate }}%:</span>
+                   <span class="val">$ {{ item.amount }}</span></div>
+            {% endfor %}
+          {% else %}
+            {# B y C no discriminan IVA: el subtotal impreso es el total. #}
+            <div><span class="lbl">Subtotal:</span><span class="val">$ {{ total }}</span></div>
+          {% endif %}
+          <div class="grand"><span class="lbl">Importe Total:</span>
+               <span class="val">$ {{ total }}</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="foot">
+      <div class="qr"><img src="{{ qr }}" alt="QR"></div>
+      <div class="arca">
+        <div class="a">ARCA</div>
+        <div class="sub">Agencia de Recaudación<br>y Control Aduanero</div>
+        <div class="auth">Comprobante Autorizado</div>
+      </div>
+      <div class="pag">Pág. 1/1</div>
+      <div class="cae">
+        <div class="big">CAE N°: {{ invoice.cae }}</div>
+        <div class="big">Fecha de Vto. de CAE:
+            {{ invoice.cae_expiry.strftime("%d/%m/%Y") }}</div>
+      </div>
+    </div>
+
+  </div>
+</body>
+</html>

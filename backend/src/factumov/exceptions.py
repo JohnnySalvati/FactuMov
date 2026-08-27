@@ -49,6 +49,15 @@ class DuplicateInvoiceNumberError(DuplicateError):
     """
 
 
+class InvoicePrintError(Exception):
+    """No se pudo generar el PDF del comprobante.
+
+    Hoy solo puede pasar porque falten weasyprint o las librerías GTK del sistema, que es un
+    problema de la instalación y no del comprobante. Termina en un 500 y no en un 4xx: no hay
+    nada que el usuario pueda hacer distinto.
+    """
+
+
 class DelegationNotVerifiedError(Exception):
     """Se quiso emitir con una identidad fiscal cuya delegación nunca se verificó.
 

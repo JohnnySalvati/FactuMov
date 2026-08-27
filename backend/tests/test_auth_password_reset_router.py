@@ -318,16 +318,6 @@ def test_reset_over_a_confirmed_account_does_not_repeat_the_delegation_mail(
 # --- cuando el mail no sale ----------------------------------------------------------------
 
 
-@pytest.fixture
-def broken_mail(monkeypatch):
-    """El transporte falla. Reemplaza al fake de `sent_emails`, que es autouse."""
-
-    def explode(to, subject, body):
-        raise EmailDeliveryError("no salió")
-
-    monkeypatch.setattr(email_service, "send_email", explode)
-
-
 def test_forgot_answers_503_when_the_mail_cannot_be_sent(
     anonymous_client, confirmed_user, broken_mail
 ):
@@ -364,7 +354,7 @@ def test_the_delegation_mail_cannot_break_the_confirmation(
     anonymous_client.post("/auth/resend-confirmation", json={"email": "ana@cucu.com"})
     token = token_from(sent_emails[0])
 
-    def explode(to, subject, body):
+    def explode(to, subject, body, attachments=()):
         raise EmailDeliveryError("no salió")
 
     monkeypatch.setattr(email_service, "send_email", explode)

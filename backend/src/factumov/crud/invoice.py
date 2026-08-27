@@ -69,6 +69,18 @@ def create(db: Session, invoice: Invoice) -> Invoice:
     return invoice
 
 
+def mark_sent(db: Session, invoice: Invoice) -> None:
+    """Deja constancia de que el mail con el PDF salió.
+
+    Pisa la marca anterior en vez de acumular envíos: lo que la pantalla necesita contestar es
+    "¿esto ya se mandó?", y un historial de reenvíos sería una tabla para una pregunta que
+    nadie hace. Si algún día hace falta —"¿cuándo se lo mandé la primera vez?"— eso sí es una
+    tabla, no una columna más.
+    """
+    invoice.sent_at = func.now()
+    db.flush()
+
+
 def numbering_lock_key(fiscal_identity_id: uuid.UUID, pos: int, voucher_type: str) -> int:
     """Un bigint estable para el advisory lock de la numeración.
 

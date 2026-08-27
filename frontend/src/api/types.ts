@@ -316,6 +316,13 @@ export interface Invoice {
   customer_condicion_iva: CondicionIva
   customer_address: string | null
   customer_email: string | null
+  /**
+   * Cuándo salió el mail con el PDF, la última vez. `null` = todavía no se mandó.
+   *
+   * No es acuse de recibo: dice que el servidor de mail lo aceptó, no que el cliente lo haya
+   * abierto. Reenviar lo pisa.
+   */
+  sent_at: string | null
 
   created_at: string
   updated_at: string

@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     Date,
+    DateTime,
     Enum,
     ForeignKey,
     Integer,
@@ -123,6 +124,15 @@ class Invoice(Base, TimestampMixin):
     # A dónde se mandó o se va a mandar el PDF. Copiado por lo mismo que el resto: el mail del
     # cliente cambia, y lo que interesa después es a qué casilla salió esta factura.
     customer_email: Mapped[str | None] = mapped_column(String(254))
+
+    # Cuándo salió el mail con el PDF, la **última** vez. Reenviar lo pisa: lo que la pantalla
+    # necesita contestar es "¿esto ya se mandó?", y para eso la fecha más reciente es la que
+    # sirve. Timestamp y no booleano, mismo criterio que `email_confirmed_at` y
+    # `delegation_verified_at`: el "cuándo" es justo lo que se quiere saber.
+    #
+    # No es acuse de recibo. Dice que el servidor de mail lo aceptó, no que el cliente lo haya
+    # recibido ni abierto — eso necesitaría un proveedor con webhooks, que es otra unidad.
+    sent_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True))
 
     fiscal_identity: Mapped["FiscalIdentity"] = relationship()
     customer: Mapped["Customer"] = relationship()
