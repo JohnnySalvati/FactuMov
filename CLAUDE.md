@@ -2001,8 +2001,24 @@ Balance360 ya está en producción y su `docs/DEPLOYMENT.md` es la plantilla: **
 con todo en `docker-compose.prod.yml`** (servicio `db` sin puerto publicado + servicio `app`
 construido con el `Dockerfile` del repo), y **`srv-nginx` en `192.168.100.9`** terminando el
 HTTPS y proxeando por HTTP al 8000 de la VM. El `.env` de producción vive solo en la VM.
-Balance360 está publicado en `balance360.insoft.net.ar`, así que lo natural es
-`factumov.insoft.net.ar` — **a confirmar con Miguel**.
+Balance360 está publicado en `balance360.insoft.net.ar`, así que FactuMov va en
+`factumov.insoft.net.ar`.
+
+**Va en la misma VM que Balance360** (decidido el 2026-08-27). Miguel puede armar las que
+hagan falta; la pregunta era si una segunda aporta algo, y aporta poco: Compose ya aísla lo
+que se puede aislar —red propia, Postgres propio, volúmenes propios— así que lo único
+realmente compartido es el kernel, el disco y la RAM. Una VM aparte compra que un deploy de
+FactuMov no pueda tumbar a Balance360, y eso Compose ya lo compra casi entero. Lo que cuesta
+sí es concreto: otro host que parchear, otra copia de los certificados de ARCA en disco, otra
+rutina de backup y un segundo lugar donde mirar cuando algo anda mal.
+
+- **Balance360 se queda con el 8000**, así que FactuMov publica otro puerto — 8001 — y es el
+  contenedor nginx el que lo publica, no el `app`.
+- **Antes de empezar hay que mirar el espacio y la memoria de la VM** (`df -h`, `free -h`).
+  Son dos Postgres y dos apps Python con WeasyPrint; el modo de falla compartido que queda es
+  justamente el disco lleno, y llenarlo se lleva puesta la contabilidad de Balance360.
+- Se revisa si FactuMov empieza a tener carga propia, o el día que convenga poder reiniciar
+  una sin tocar la otra.
 
 Lo que FactuMov necesita y Balance360 no tenía:
 
@@ -2035,8 +2051,31 @@ Lo que FactuMov necesita y Balance360 no tenía:
   validez legal y no hay vuelta atrás — ver *Emisión con CAE*. El default es `homo` a
   propósito. Los certificados de producción del `20182810674` ya existen y son los que usa
   Balance360; van montados como volumen de solo lectura igual que allá
-  (`./certs:/app/certs:ro`, excluidos de la imagen por el `.dockerignore`). **Conviene salir
-  con `homo` y hacer el cambio como un paso aparte y deliberado.**
+  (`./certs:/app/certs:ro`, excluidos de la imagen por el `.dockerignore`). **Se sale con
+  `homo` y el pasaje a `prod` es un paso aparte y deliberado** — confirmado por Miguel el
+  2026-08-27. Estar en producción y estar emitiendo de verdad son dos hitos distintos, y
+  juntarlos hace que la primera prueba contra el server sea también la primera factura
+  irreversible.
+- **Las dos apps no pueden compartir el certificado de producción, y eso hay que resolverlo
+  antes del pasaje a `prod`.** WSAA se niega a emitir un TA nuevo mientras el anterior siga
+  vigente —es el "El CEE ya posee un TA valido" que los dos proyectos ya tienen documentado— y
+  cada app cachea el suyo en **su propia** tabla `arca_tickets`, en **su propia** base. O sea
+  que Balance360 y FactuMov pidiendo un TA de `wsfe` con el mismo certificado se lo van a
+  arrebatar mutuamente, y el que pierde queda afuera de ARCA hasta doce horas. No es teórico:
+  es exactamente la falla contra la que FactuMov puso el advisory lock, solo que el candado
+  vive adentro de una app y estas son dos.
+  - **Hoy no pasa** porque FactuMov va a `homo` y Balance360 está en `prod`: son sistemas
+    separados, con certificados separados. La colisión aparece el día del cambio, que es lo
+    que la vuelve fácil de no ver venir.
+  - **La salida esperada es un certificado propio para FactuMov**, del mismo CUIT
+    `20182810674`. La delegación es al CUIT, así que las que ya nos otorgaron siguen valiendo;
+    lo que hay que hacer es habilitarle a ese certificado nuevo los servicios (WSFE y
+    `ws_sr_constancia_inscripcion`), que es el mismo trámite que ya está documentado en *ARCA*.
+  - **Falta confirmar que un certificado distinto obtiene su propio TA.** El nombre del error
+    dice CEE —el certificado— y no el CUIT, así que todo apunta a que sí, pero es la premisa
+    entera de la salida y conviene verificarla en homologación antes de depender de ella. Si
+    resultara que el TA es por CUIT y servicio, las opciones son que las dos apps compartan un
+    cache de tickets —acoplarlas, feo— o que FactuMov emita bajo un CUIT propio.
 - **Backups.** Hoy no hay ninguno de FactuMov. La sección 4 del `DEPLOYMENT.md` de Balance360
   sirve tal cual.
 - **El barrido de delegaciones no necesita nada especial**: vive en el `lifespan` y con N
