@@ -70,16 +70,19 @@ def wsfe_calls(monkeypatch):
     """Mockea las dos operaciones de emisión y devuelve lo que se les mandó.
 
     `FECompUltimoAutorizado` contesta siempre el mismo último número salvo que el test lo
-    cambie; `FECAESolicitar` contesta lo que el test configure. Las llamadas quedan
+    cambie —y sin fecha, que es el punto de venta que todavía no fija ningún piso—;
+    `FECAESolicitar` contesta lo que el test configure. Las llamadas quedan
     registradas porque la mitad de lo que hay que probar acá es **qué se le manda a ARCA**,
     no solo qué se hace con lo que contesta.
     """
-    state = {"last_number": 41, "response": AUTHORIZED}
+    state = {"last_number": 41, "last_date": None, "response": AUTHORIZED}
     calls: dict[str, list] = {"last": [], "cae": []}
 
     def last_authorized(**kwargs):
         calls["last"].append(kwargs)
-        return SimpleNamespace(Errors=None, CbteNro=state["last_number"])
+        return SimpleNamespace(
+            Errors=None, CbteNro=state["last_number"], CbteFch=state["last_date"]
+        )
 
     def request_cae(**kwargs):
         calls["cae"].append(kwargs)
@@ -430,6 +433,108 @@ def test_a_period_that_ends_before_it_starts_is_rejected(client, template, wsfe_
     assert response.status_code == 422
 
 
+# --- La fecha del comprobante --------------------------------------------------------------
+#
+# Tres límites, de tres fuentes distintas: el default es hoy, la ventana alrededor de hoy la
+# fija el concepto (±5 productos, ±10 servicios), y el piso lo fija el último comprobante
+# autorizado de la serie, que solo ARCA conoce.
+
+
+def test_without_a_date_the_invoice_is_dated_today(client, template, db, wsfe_calls):
+    emit(client, template.id)
+
+    assert db.execute(select(Invoice)).scalars().one().date == date.today()
+
+
+def test_the_chosen_date_is_the_one_saved_and_the_one_declared(client, template, db, wsfe_calls):
+    chosen = date.today() - timedelta(days=3)
+
+    emit(client, template.id, date=chosen.isoformat())
+
+    invoice = db.execute(select(Invoice)).scalars().one()
+    assert invoice.date == chosen
+    detail = wsfe_calls.calls["cae"][0]["FeCAEReq"]["FeDetReq"]["FECAEDetRequest"][0]
+    assert detail["CbteFch"] == chosen.strftime("%Y%m%d")
+
+
+@pytest.mark.parametrize("offset", [-5, 5])
+def test_the_edges_of_the_products_window_are_accepted(client, template, wsfe_calls, offset):
+    response = emit(client, template.id, date=(date.today() + timedelta(days=offset)).isoformat())
+
+    assert response.status_code == 201
+
+
+@pytest.mark.parametrize("offset", [-6, 6])
+def test_a_date_outside_the_products_window_is_a_422(client, template, wsfe_calls, offset):
+    response = emit(client, template.id, date=(date.today() + timedelta(days=offset)).isoformat())
+
+    assert response.status_code == 422
+    assert "ARCA solo acepta" in response.json()["detail"]
+
+
+def test_a_date_outside_the_window_calls_nobody(client, template, wsfe_calls):
+    """Un error del request tiene que morir antes de pedirle un CAE a ARCA para que lo rechace."""
+    emit(client, template.id, date=(date.today() + timedelta(days=30)).isoformat())
+
+    assert wsfe_calls.calls["cae"] == []
+
+
+def test_services_get_the_wider_window(client, db, user, delegated_identity, wsfe_calls):
+    """±10 días y no ±5: la ventana la fija el concepto, no la letra."""
+    customer = make_customer(db, user.id)
+    services = make_invoice_template(db, delegated_identity, customer, concepto=Concepto.services)
+
+    response = emit(
+        client,
+        services.id,
+        date=(date.today() - timedelta(days=9)).isoformat(),
+        from_date="2026-08-01",
+        to_date="2026-08-31",
+        due_date="2026-09-10",
+    )
+
+    assert response.status_code == 201
+
+
+def test_the_numbering_cannot_go_back_in_time(client, template, wsfe_calls):
+    """ARCA rechaza con el 10016, que no dice cuál era la fecha del último. Este 422 sí."""
+    wsfe_calls.state["last_date"] = date.today().strftime("%Y%m%d")
+
+    response = emit(client, template.id, date=(date.today() - timedelta(days=1)).isoformat())
+
+    assert response.status_code == 422
+    assert date.today().strftime("%d/%m/%Y") in response.json()["detail"]
+    assert wsfe_calls.calls["cae"] == []
+
+
+def test_the_same_date_as_the_last_voucher_is_fine(client, template, wsfe_calls):
+    """El piso es "no anterior", no "posterior": varias facturas del mismo día es lo normal."""
+    wsfe_calls.state["last_date"] = date.today().strftime("%Y%m%d")
+
+    assert emit(client, template.id, date=date.today().isoformat()).status_code == 201
+
+
+def test_a_new_pos_has_no_floor(client, template, wsfe_calls):
+    """`CbteNro = 0` y sin fecha: no hay ningún comprobante anterior que respetar."""
+    wsfe_calls.state["last_number"] = 0
+    wsfe_calls.state["last_date"] = None
+
+    assert (
+        emit(client, template.id, date=(date.today() - timedelta(days=5)).isoformat()).status_code
+        == 201
+    )
+
+
+def test_the_preview_says_which_dates_are_allowed(client, template):
+    """La pantalla no puede ofrecer una fecha que el servidor va a rechazar, así que los
+    extremos los calcula el backend con la misma función que después valida."""
+    body = client.get(f"/invoice-templates/{template.id}/preview").json()
+
+    assert body["date"] == date.today().isoformat()
+    assert body["min_date"] == (date.today() - timedelta(days=5)).isoformat()
+    assert body["max_date"] == (date.today() + timedelta(days=5)).isoformat()
+
+
 def test_emitting_someone_elses_template_is_a_404(client, db, other_user, wsfe_calls):
     identity = make_fiscal_identity(db, other_user.id)
     customer = make_customer(db, other_user.id)
@@ -605,6 +710,50 @@ def test_a_customer_without_email_answers_409(client, template, db, wsfe_calls, 
     assert sent_emails == []
 
 
+def test_loading_the_email_afterwards_makes_the_invoice_sendable(
+    client, template, db, wsfe_calls, sent_emails
+):
+    """El bug que motivó separar `customer_email` de `sent_to`.
+
+    Con el mail copiado al emitir, una factura emitida antes de que el cliente tuviera
+    dirección se quedaba sin dirección para siempre: cargarla en la ficha no cambiaba nada, la
+    pantalla seguía diciendo "este cliente no tiene email", y la factura tampoco se puede
+    editar. Un callejón sin salida cuya única salida era emitir de nuevo — o sea la única
+    equivocación cara que se puede cometer en esta app.
+    """
+    template.customer.email = None
+    db.flush()
+    invoice = emit(client, template.id).json()
+    assert client.post(f"/invoices/{invoice['id']}/send").status_code == 409
+
+    template.customer.email = "recien@cargado.com"
+    db.flush()
+
+    assert client.get(f"/invoices/{invoice['id']}").json()["customer_email"] == "recien@cargado.com"
+    assert client.post(f"/invoices/{invoice['id']}/send").status_code == 200
+    assert sent_emails[0].to == "recien@cargado.com"
+
+
+def test_the_invoice_records_the_address_it_went_to(client, emitted, db, sent_emails):
+    """`sent_to` sí es una copia, y es la que corresponde: a dónde salió **este** envío.
+
+    Es el reverso de `customer_email`: uno contesta a dónde mandarla ahora y el otro a dónde
+    se mandó. Que el cliente cambie de casilla después no puede reescribir el segundo.
+    """
+    assert emitted["sent_to"] is None
+
+    client.post(f"/invoices/{emitted['id']}/send")
+    assert client.get(f"/invoices/{emitted['id']}").json()["sent_to"] == "cliente@cucu.com"
+
+    invoice = db.execute(select(Invoice)).scalars().one()
+    invoice.customer.email = "otra@casilla.com"
+    db.flush()
+
+    refreshed = client.get(f"/invoices/{emitted['id']}").json()
+    assert refreshed["sent_to"] == "cliente@cucu.com"
+    assert refreshed["customer_email"] == "otra@casilla.com"
+
+
 def test_send_answers_503_when_the_mail_cannot_go_out(client, emitted, broken_mail, db):
     """La factura sigue emitida: el error es del envío, y el texto lo aclara para que nadie
     vuelva a emitir."""
@@ -646,7 +795,6 @@ def test_sending_someone_elses_invoice_is_a_404(client, db, other_user):
         customer_doc_type=customer.doc_type,
         customer_doc_number=customer.doc_number,
         customer_condicion_iva=customer.condicion_iva,
-        customer_email="ajeno@cucu.com",
     )
     db.add(invoice)
     db.flush()

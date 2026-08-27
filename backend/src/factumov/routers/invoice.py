@@ -98,21 +98,27 @@ def send_invoice(invoice: InvoiceDep, db: SessionDep, user: CurrentUserDep) -> I
     ruidosamente. Ver CLAUDE.md → *El fallo de SMTP se ve*.
 
     **409 si el cliente no tiene email.** Es un dato que falta y que el usuario puede cargar,
-    no un error del servidor; el mensaje dice exactamente dónde.
+    no un error del servidor; el mensaje dice exactamente dónde. Y cargarlo alcanza: la
+    dirección se lee de la ficha del cliente en cada envío, así que volver a esta factura
+    después de completarla la deja mandable.
 
     El `commit` antes del envío es el de siempre: no dejar la transacción abierta durante la
     conexión SMTP.
     """
     enforce_rate_limit(_SEND_LIMITER, str(user.id))
 
-    if not invoice.customer_email:
+    # La dirección sale de la ficha **actual** del cliente y no de una copia hecha al emitir.
+    # Con la copia, una factura emitida antes de que el cliente tuviera mail se quedaba sin
+    # mail para siempre: cargarlo en la ficha no cambiaba nada y la factura tampoco se puede
+    # editar. Ver `models/invoice.py`.
+    address = invoice.customer_email
+    if not address:
         raise HTTPException(status_code=409, detail=_NO_EMAIL_DETAIL)
 
     # El PDF se arma antes del commit porque no toca la base y porque, si fallara, no tiene
     # sentido haber cerrado la transacción para nada.
     pdf = invoice_pdf.render_pdf(invoice)
     filename = invoice_pdf.pdf_filename(invoice)
-    address = invoice.customer_email
     label = invoice.label
     issuer_name = invoice.issuer_name
     total = format_amount(invoice.total)
@@ -131,7 +137,7 @@ def send_invoice(invoice: InvoiceDep, db: SessionDep, user: CurrentUserDep) -> I
         logger.exception("No se pudo mandar la factura %s a %s", label, address)
         raise HTTPException(status_code=503, detail=_MAIL_UNAVAILABLE_DETAIL) from error
 
-    invoice_crud.mark_sent(db, invoice)
+    invoice_crud.mark_sent(db, invoice, address)
     db.commit()
     db.refresh(invoice)
     return invoice

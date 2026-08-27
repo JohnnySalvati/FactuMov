@@ -34,7 +34,9 @@ def get_all(db: Session, user_id: uuid.UUID) -> list[Invoice]:
             # Las más nuevas primero: la pantalla de facturas se abre para ver la última
             # emitida o para reenviarla, no para recorrer el historial desde 2019.
             .order_by(Invoice.date.desc(), Invoice.number.desc())
-            .options(selectinload(Invoice.lines))
+            # El cliente va joineado porque `Invoice.customer_email` lo lee de la relación:
+            # sin esto, listar N facturas son N queries más.
+            .options(selectinload(Invoice.lines), joinedload(Invoice.customer))
         )
         .scalars()
         .all()
@@ -48,7 +50,11 @@ def get_by_id(db: Session, invoice_id: uuid.UUID, user_id: uuid.UUID) -> Invoice
             select(Invoice)
             .join(Invoice.fiscal_identity)
             .where(Invoice.id == invoice_id, FiscalIdentity.user_id == user_id)
-            .options(selectinload(Invoice.lines), joinedload(Invoice.fiscal_identity))
+            .options(
+                selectinload(Invoice.lines),
+                joinedload(Invoice.fiscal_identity),
+                joinedload(Invoice.customer),
+            )
         )
         .scalars()
         .first()
@@ -69,15 +75,20 @@ def create(db: Session, invoice: Invoice) -> Invoice:
     return invoice
 
 
-def mark_sent(db: Session, invoice: Invoice) -> None:
-    """Deja constancia de que el mail con el PDF salió.
+def mark_sent(db: Session, invoice: Invoice, address: str) -> None:
+    """Deja constancia de que el mail con el PDF salió, y a qué dirección.
 
     Pisa la marca anterior en vez de acumular envíos: lo que la pantalla necesita contestar es
     "¿esto ya se mandó?", y un historial de reenvíos sería una tabla para una pregunta que
     nadie hace. Si algún día hace falta —"¿cuándo se lo mandé la primera vez?"— eso sí es una
     tabla, no una columna más.
+
+    La dirección se recibe en vez de releerla del cliente porque acá lo que se registra es un
+    hecho: a qué casilla salió **este** envío. Si el cliente cambia de mail después, la fila
+    tiene que seguir diciendo a dónde fue, no a dónde iría hoy.
     """
     invoice.sent_at = func.now()
+    invoice.sent_to = address
     db.flush()
 
 

@@ -16,10 +16,14 @@ class EmitRequest(BaseModel):
     que ya se revisó. Quien quiera cambiar un importe lo cambia en el modelo y lo guarda, que
     es justamente lo que un modelo existe para permitir.
 
-    **Sin `date`.** La fecha del comprobante es el día de la emisión — ver
-    `services/emission.EmissionRequest`.
+    **`date` es lo único que se agrega al modelo y es opcional.** Su default es hoy, que es
+    lo que se emite casi siempre; poder correrla existe para el papel que tiene que decir otra
+    cosa —se facturó el viernes y se cargó el lunes— y ARCA la acepta dentro de una ventana de
+    pocos días alrededor de hoy. Qué días son lo decide el concepto del modelo, que este
+    schema no ve: lo valida `services/emission.py`, igual que pasa con las fechas de servicio.
     """
 
+    date: datetime.date | None = None
     from_date: datetime.date | None = None
     to_date: datetime.date | None = None
     due_date: datetime.date | None = None
@@ -96,9 +100,14 @@ class InvoiceRead(BaseModel):
     customer_doc_number: str
     customer_condicion_iva: CondicionIva
     customer_address: str | None
+    # El mail **actual** del cliente, no una copia hecha al emitir: es a dónde se le mandaría
+    # el PDF ahora. Cargarlo en la ficha después de emitir alcanza para poder mandar la
+    # factura — ver `models/invoice.py`.
     customer_email: str | None
-    # Cuándo salió el mail con el PDF por última vez. `null` = todavía no se mandó.
+    # Cuándo salió el mail con el PDF por última vez, y a qué dirección. `null` = todavía no
+    # se mandó.
     sent_at: datetime.datetime | None
+    sent_to: str | None
 
     created_at: datetime.datetime
     updated_at: datetime.datetime
@@ -127,6 +136,13 @@ class InvoicePreview(BaseModel):
     iva_total: Decimal
     total: Decimal
     needs_service_dates: bool
+    # La fecha propuesta para el comprobante —hoy— y los dos extremos que ARCA aceptaría. Van
+    # calculados por el backend con la misma función que después valida la emisión: si los
+    # calculara la pantalla, el campo podría ofrecer una fecha que el servidor rechaza, y el
+    # borde de la ventana es exactamente donde eso pasaría.
+    date: datetime.date
+    min_date: datetime.date
+    max_date: datetime.date
     # `None` cuando la delegación está verificada. Cuando no, el motivo por el que el botón de
     # emitir va a fallar, dicho antes de apretarlo.
     blocked_reason: str | None = Field(default=None)

@@ -49,7 +49,6 @@ def make_invoice(voucher_type=VoucherType.B, lines=((Decimal("2"), Decimal("1234
         "customer_doc_number": "30500010912",
         "customer_condicion_iva": CondicionIva.FINAL,
         "customer_address": "Rivadavia 500",
-        "customer_email": "cliente@cucu.com",
     }
     fields.update(over)
     invoice = Invoice(**fields)

@@ -55,6 +55,11 @@ class Invoice(Base, TimestampMixin):
     parte de lo que ARCA autorizó, así que dejarlos apuntando a una fila editable es guardar
     algo distinto de lo que se declaró.
 
+    **El mail del cliente es la excepción, y por el mismo criterio.** No se imprime, no viaja
+    a ARCA y no es parte de nada autorizado: es a dónde entregar el PDF. Eso es una pregunta
+    sobre hoy, así que se lee de la ficha del cliente (`customer_email`, una propiedad) y lo
+    que se guarda acá es otra cosa: `sent_to`, la dirección a la que salió el último envío.
+
     No lleva `user_id`, igual que `invoice_templates` y por el mismo motivo: cuelga de
     `fiscal_identity_id`, que ya está indexado, y el scoping sale de un join.
     """
@@ -121,9 +126,20 @@ class Invoice(Base, TimestampMixin):
     customer_doc_number: Mapped[str] = mapped_column(String(11))
     customer_condicion_iva: Mapped[CondicionIva] = mapped_column(Enum(CondicionIva))
     customer_address: Mapped[str | None] = mapped_column(String(200))
-    # A dónde se mandó o se va a mandar el PDF. Copiado por lo mismo que el resto: el mail del
-    # cliente cambia, y lo que interesa después es a qué casilla salió esta factura.
-    customer_email: Mapped[str | None] = mapped_column(String(254))
+
+    # A qué dirección salió el mail la **última** vez. `None` = todavía no se mandó.
+    #
+    # No es una copia del mail del cliente, y ahí está la diferencia con las cuatro columnas de
+    # arriba. Esas congelan un **hecho fiscal**: son lo que ARCA autorizó y lo que salió
+    # impreso, así que tienen que seguir diciendo lo mismo aunque el cliente se mude. El mail
+    # no se imprime, no viaja a ARCA y no es parte de nada autorizado: es a dónde entregar el
+    # PDF, y "a dónde entregarlo" es una pregunta sobre hoy, no sobre el día de la emisión.
+    #
+    # Copiarlo al emitir producía el bug que motivó la columna: una factura emitida cuando el
+    # cliente todavía no tenía mail se quedaba sin mail para siempre. El usuario cargaba la
+    # dirección en la ficha, volvía a la factura y seguía viendo "este cliente no tiene email"
+    # — un callejón sin salida, porque una factura emitida tampoco se puede editar.
+    sent_to: Mapped[str | None] = mapped_column(String(254))
 
     # Cuándo salió el mail con el PDF, la **última** vez. Reenviar lo pisa: lo que la pantalla
     # necesita contestar es "¿esto ya se mandó?", y para eso la fecha más reciente es la que
@@ -142,6 +158,21 @@ class Invoice(Base, TimestampMixin):
         cascade="all, delete-orphan",
         order_by="InvoiceLine.position",
     )
+
+    @property
+    def customer_email(self) -> str | None:
+        """A qué dirección hay que mandarle el PDF: la que el cliente tiene **ahora**.
+
+        Deducida y no guardada, al revés que el resto de los `customer_*`. La regla del
+        proyecto —"no guardes lo que podés deducir"— da resultados opuestos según si el dato
+        describe un hecho pasado o algo que se va a hacer ahora, y el mail es lo segundo: el
+        destinatario de un envío que todavía no ocurrió.
+
+        Propiedad y no un campo calculado en el schema porque también la necesita el endpoint
+        de envío, que trabaja con el modelo. Toca la relación, así que `crud/invoice.py` la
+        trae con `joinedload`.
+        """
+        return self.customer.email
 
     @property
     def label(self) -> str:

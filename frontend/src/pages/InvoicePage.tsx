@@ -15,6 +15,11 @@ import { useResource } from '../hooks/useResource'
  * vinieron **copiados** en la factura y no los de las fichas actuales — si el cliente cambió
  * de domicilio el mes pasado, esta pantalla sigue mostrando el que salió impreso, que es lo
  * correcto.
+ *
+ * La excepción es el mail, que sale de la ficha del cliente tal como está hoy: no se imprime
+ * ni viaja a ARCA, es a dónde entregar el PDF. Por eso cargarlo después de emitir alcanza para
+ * que el botón de mandar aparezca — antes se copiaba al emitir y la factura quedaba sin
+ * dirección para siempre. Lo que sí es un hecho congelado es `sent_to`: a qué casilla salió.
  */
 export function InvoicePage() {
   const { id } = useParams()
@@ -175,8 +180,9 @@ function InvoiceScreen({ id }: { id: string }) {
                 abierto. El texto lo dice para que nadie lo lea como otra cosa. */}
             {data.sent_at !== null && (
               <p className="totals-note" style={{ margin: 0 }}>
-                Enviado por última vez el {formatDate(data.sent_at.slice(0, 10))}. Que haya
-                salido no garantiza que el cliente lo haya abierto.
+                Enviado por última vez el {formatDate(data.sent_at.slice(0, 10))}
+                {data.sent_to !== null && <> a {data.sent_to}</>}. Que haya salido no garantiza
+                que el cliente lo haya abierto.
               </p>
             )}
           </div>

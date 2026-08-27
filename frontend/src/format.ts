@@ -26,3 +26,16 @@ export function formatDate(iso: string): string {
   const [year, month, day] = iso.split('-')
   return `${day}/${month}/${year}`
 }
+
+/**
+ * Una fecha local → el `YYYY-MM-DD` que esperan la API y el `<input type="date">`.
+ *
+ * Se arma a mano y no con `toISOString()`, que devuelve **UTC**: en Argentina (UTC-3), de las
+ * 21:00 en adelante allá ya es el día siguiente, así que una factura emitida un jueves a la
+ * noche saldría propuesta con fecha del viernes. Es el mismo error de un día que `formatDate`
+ * evita en la dirección contraria, y acá pega sobre la fecha de un comprobante fiscal.
+ */
+export function isoDate(value: Date): string {
+  const pad = (part: number) => String(part).padStart(2, '0')
+  return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`
+}

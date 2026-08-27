@@ -67,6 +67,21 @@ class DelegationNotVerifiedError(Exception):
     """
 
 
+class InvalidEmissionDateError(Exception):
+    """La fecha elegida para el comprobante está fuera de lo que ARCA acepta.
+
+    Dos motivos distintos, y los dos terminan en un 422 con el texto puesto en el mensaje:
+    la fecha se fue de la ventana alrededor de hoy (±5 días para productos, ±10 para
+    servicios), o es anterior a la del último comprobante autorizado de esa serie — ARCA no
+    admite que la numeración de un punto de venta retroceda en el tiempo.
+
+    Es 422 y no 502 a propósito. Sin esto el intento igual fallaría, pero contra WSFE, con un
+    código de ARCA que el usuario no puede leer y después de haberle pedido un CAE: un error
+    del request tiene que morir antes de salir a la red, y el mensaje tiene que decir qué
+    fechas sí se pueden.
+    """
+
+
 class UnknownReferenceError(Exception):
     pass
 

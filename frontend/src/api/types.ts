@@ -315,6 +315,14 @@ export interface Invoice {
   customer_doc_number: string
   customer_condicion_iva: CondicionIva
   customer_address: string | null
+  /**
+   * El mail que el cliente tiene **ahora**, no una copia hecha al emitir.
+   *
+   * Es la única excepción a que los `customer_*` estén congelados, y es deliberada: el mail
+   * no se imprime ni viaja a ARCA, es a dónde entregar el PDF — una pregunta sobre hoy.
+   * Copiado, una factura emitida antes de que el cliente tuviera dirección se quedaba sin
+   * dirección para siempre.
+   */
   customer_email: string | null
   /**
    * Cuándo salió el mail con el PDF, la última vez. `null` = todavía no se mandó.
@@ -323,6 +331,8 @@ export interface Invoice {
    * abierto. Reenviar lo pisa.
    */
   sent_at: string | null
+  /** A qué dirección salió ese último envío. `null` = todavía no se mandó. */
+  sent_to: string | null
 
   created_at: string
   updated_at: string
@@ -350,12 +360,31 @@ export interface InvoicePreview {
   iva_total: string
   total: string
   needs_service_dates: boolean
+  /** La fecha propuesta para el comprobante: hoy. */
+  date: string
+  /**
+   * Los extremos que ARCA acepta — ±5 días para productos, ±10 para servicios.
+   *
+   * Los calcula el backend con la misma función que después valida la emisión. Calcularlos
+   * acá dejaría al campo ofrecer una fecha que el servidor rechaza, y el borde de la ventana
+   * es exactamente donde eso pasaría.
+   */
+  min_date: string
+  max_date: string
   /** `null` cuando se puede emitir. Cuando no, por qué — dicho antes de apretar el botón. */
   blocked_reason: string | null
 }
 
-/** Lo poco que el usuario decide al emitir. Sin fecha: la del comprobante es la de hoy. */
+/**
+ * Lo poco que el usuario decide al emitir.
+ *
+ * `date` es la del comprobante y su default —cuando no se manda— es hoy. Hay un tercer límite
+ * que el preview no puede saber: ARCA no acepta que la numeración de un punto de venta
+ * retroceda en el tiempo, así que una fecha anterior a la del último comprobante de esa serie
+ * vuelve como un 422 con la fecha mínima escrita en el mensaje.
+ */
 export interface EmitRequest {
+  date?: string
   from_date?: string
   to_date?: string
   due_date?: string

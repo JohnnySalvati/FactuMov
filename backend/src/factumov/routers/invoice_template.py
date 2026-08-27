@@ -1,5 +1,6 @@
 import logging
 import uuid
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
@@ -19,6 +20,7 @@ from factumov.exceptions import (
     DuplicateError,
     DuplicateInvoiceNumberError,
     DuplicateInvoiceTemplateNameError,
+    InvalidEmissionDateError,
     UnknownCustomerError,
     UnknownFiscalIdentityError,
     UnknownReferenceError,
@@ -32,7 +34,7 @@ from factumov.schemas.invoice_template import (
     InvoiceTemplateUpdate,
 )
 from factumov.schemas.invoice_template_draft import InvoiceTemplateDraft
-from factumov.services.emission import EmissionRequest, emit
+from factumov.services.emission import EmissionRequest, emission_date_bounds, emit
 from factumov.services.invoice_draft import build_draft
 from factumov.services.invoice_parser import parse_invoice_pdf
 from factumov.services.invoice_totals import LineAmounts, compute_totals
@@ -197,6 +199,10 @@ def preview_emission(invoice_template: InvoiceTemplateDep) -> InvoicePreview:
         if invoice_template.fiscal_identity.delegation_verified_at is None
         else None
     )
+    # La ventana de fechas sale de la misma función que después valida la emisión, para que el
+    # campo de la pantalla no pueda ofrecer una fecha que el servidor rechaza.
+    today = date.today()
+    min_date, max_date = emission_date_bounds(invoice_template.concepto, today)
     return InvoicePreview(
         voucher_type=invoice_template.voucher_type,
         pos=invoice_template.pos,
@@ -209,6 +215,9 @@ def preview_emission(invoice_template: InvoiceTemplateDep) -> InvoicePreview:
         iva_total=totals.iva,
         total=totals.total,
         needs_service_dates=invoice_template.concepto.needs_service_dates,
+        date=today,
+        min_date=min_date,
+        max_date=max_date,
         blocked_reason=blocked,
     )
 
@@ -235,9 +244,10 @@ def emit_invoice(
     que hay que serializar es la secuencia entera —último número, CAE, insert— y un candado
     que se suelte en el medio no serializa nada.
 
-    Los tres errores que pueden llegar tienen remedios distintos y por eso status distintos:
+    Los errores que pueden llegar tienen remedios distintos y por eso status distintos:
     **409** si falta la delegación (el usuario tiene que ir a ARCA), **409** si el número ya
-    estaba tomado (una carrera que perdió: reintentar sirve), y **502** si ARCA no contestó o
+    estaba tomado (una carrera que perdió: reintentar sirve), **422** si la fecha del
+    comprobante está fuera de lo que ARCA acepta (cambiarla), y **502** si ARCA no contestó o
     rechazó el comprobante. El detalle de ARCA no se propaga, por lo mismo que en
     `verify-delegation`: no le dice nada al usuario y filtra cómo estamos armados. Queda en
     el log, que acá importa más que en ningún otro lado.
@@ -257,10 +267,20 @@ def emit_invoice(
         invoice = emit(
             db,
             invoice_template,
-            EmissionRequest(from_date=data.from_date, to_date=data.to_date, due_date=data.due_date),
+            EmissionRequest(
+                date=data.date,
+                from_date=data.from_date,
+                to_date=data.to_date,
+                due_date=data.due_date,
+            ),
         )
     except DelegationNotVerifiedError:
         raise HTTPException(status_code=409, detail=_DELEGATION_MISSING_DETAIL)
+    except InvalidEmissionDateError as error:
+        # 422 y no 502: es un dato del request que el usuario puede corregir, y el mensaje ya
+        # dice qué fechas sí entran. Es la única excepción de ARCA cuyo detalle sí se propaga,
+        # porque es sobre lo que él eligió y no sobre cómo estamos armados.
+        raise HTTPException(status_code=422, detail=str(error))
     except DuplicateInvoiceNumberError:
         # ARCA ya autorizó un comprobante con ese número y nosotros no lo teníamos guardado.
         # El log de `emission.emit` tiene el CAE: es la única forma de recuperarlo.

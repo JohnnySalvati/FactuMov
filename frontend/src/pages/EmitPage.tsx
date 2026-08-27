@@ -4,7 +4,7 @@ import { Link, Navigate, useNavigate, useParams } from 'react-router'
 import { ApiError, api } from '../api/client'
 import type { EmitRequest, Invoice, InvoicePreview } from '../api/types'
 import { Notice } from '../components/Notice'
-import { money } from '../format'
+import { formatDate, isoDate, money } from '../format'
 import { useResource } from '../hooks/useResource'
 
 /**
@@ -24,6 +24,11 @@ import { useResource } from '../hooks/useResource'
  *
  * Los importes salen del `preview` del backend y no de la cuenta del editor. Las dos dan lo
  * mismo hoy; la diferencia es que este número es el que se va a declarar.
+ *
+ * **La fecha del comprobante se puede cambiar, y viene con hoy puesto.** Es lo que se emite
+ * casi siempre; correrla existe para el papel que tiene que decir otra cosa —se facturó el
+ * viernes y se cargó el lunes— y ARCA la admite dentro de una ventana de pocos días. Los
+ * extremos los da el `preview` para que el campo no ofrezca una fecha que el servidor rechaza.
  */
 export function EmitPage() {
   const { id } = useParams()
@@ -33,11 +38,10 @@ export function EmitPage() {
 /** El primer y el último día del mes en curso, y hoy, en el `YYYY-MM-DD` que espera la API. */
 function defaultPeriod() {
   const now = new Date()
-  const iso = (value: Date) => value.toISOString().slice(0, 10)
   return {
-    from_date: iso(new Date(now.getFullYear(), now.getMonth(), 1)),
-    to_date: iso(new Date(now.getFullYear(), now.getMonth() + 1, 0)),
-    due_date: iso(now),
+    from_date: isoDate(new Date(now.getFullYear(), now.getMonth(), 1)),
+    to_date: isoDate(new Date(now.getFullYear(), now.getMonth() + 1, 0)),
+    due_date: isoDate(now),
   }
 }
 
@@ -50,6 +54,10 @@ function EmitScreen({ id }: { id: string }) {
   const navigate = useNavigate()
 
   const [period, setPeriod] = useState(defaultPeriod)
+  // `undefined` = el usuario no la tocó, o sea que vale la que propone el preview. No se
+  // inicializa con `isoDate(new Date())` aunque daría lo mismo: la fecha que se va a declarar
+  // tiene una sola fuente, y es la misma que calculó los extremos de la ventana.
+  const [chosenDate, setChosenDate] = useState<string>()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
 
@@ -61,7 +69,10 @@ function EmitScreen({ id }: { id: string }) {
     if (busy) return
     setBusy(true)
     setError(undefined)
-    const body: EmitRequest = preview.data?.needs_service_dates ? period : {}
+    const body: EmitRequest = {
+      ...(preview.data?.needs_service_dates ? period : {}),
+      ...(chosenDate !== undefined ? { date: chosenDate } : {}),
+    }
     try {
       const invoice = await api.post<Invoice>(`/invoice-templates/${id}/emit`, body)
       // `replace` para que el "atrás" del navegador no vuelva a la pantalla de confirmar una
@@ -74,6 +85,7 @@ function EmitScreen({ id }: { id: string }) {
   }
 
   const data = preview.data
+  const emissionDate = chosenDate ?? data?.date
 
   return (
     <div className="page">
@@ -111,6 +123,26 @@ function EmitScreen({ id }: { id: string }) {
               <dd className="amount">{money.format(Number(data.total))}</dd>
             </div>
           </dl>
+
+          <div>
+            <label htmlFor="date">Fecha del comprobante</label>
+            <input
+              id="date"
+              type="date"
+              required
+              value={emissionDate}
+              min={data.min_date}
+              max={data.max_date}
+              onChange={(e) => setChosenDate(e.target.value)}
+            />
+            {/* `min`/`max` los pone el navegador, pero el usuario puede tipear igual y el
+                selector nativo del celular no siempre los respeta: el 422 del backend es el
+                que manda. Decir cuál es la ventana evita descubrirla a fuerza de rechazos. */}
+            <p className="muted" style={{ margin: '0.35rem 0 0', fontSize: '0.82rem' }}>
+              ARCA la acepta entre el {formatDate(data.min_date)} y el {formatDate(data.max_date)},
+              y nunca anterior a la del último comprobante de esta serie.
+            </p>
+          </div>
 
           {data.needs_service_dates && (
             <>

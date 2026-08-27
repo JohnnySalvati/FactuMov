@@ -11,14 +11,15 @@ sesión para el candado. Que un servicio importe `crud/` ya está establecido: l
 `services/arca.py` con `arca_tickets`.
 """
 
+import datetime
 import logging
 from dataclasses import dataclass
-from datetime import date
 
 from sqlalchemy.orm import Session
 
 from factumov.crud import invoice as invoice_crud
-from factumov.exceptions import DelegationNotVerifiedError
+from factumov.enums import Concepto
+from factumov.exceptions import DelegationNotVerifiedError, InvalidEmissionDateError
 from factumov.models.invoice import Invoice
 from factumov.models.invoice_line import InvoiceLine
 from factumov.models.invoice_template import InvoiceTemplate
@@ -28,28 +29,60 @@ from factumov.services.invoice_totals import InvoiceTotals, LineAmounts, compute
 logger = logging.getLogger(__name__)
 
 
+# Cuántos días corridos hacia atrás y hacia adelante de hoy acepta ARCA como fecha del
+# comprobante. Son dos números y no uno porque la ventana la fija el concepto: 5 días para
+# productos y 10 para servicios (y para "productos y servicios", que ARCA cuenta como
+# servicios). Emitir fuera de esa ventana es un rechazo de WSFE, no una advertencia.
+_PRODUCTS_WINDOW_DAYS = 5
+_SERVICES_WINDOW_DAYS = 10
+
+
+def emission_date_bounds(
+    concepto: Concepto, today: datetime.date
+) -> tuple[datetime.date, datetime.date]:
+    """La primera y la última fecha que ARCA aceptaría hoy para un comprobante de ese concepto.
+
+    Vive acá y no en `wsfe.py` porque no es traducción a SOAP sino una regla sobre qué se
+    puede emitir, y porque la necesitan dos lugares que no se hablan: la vista previa —para
+    ponerle `min` y `max` al campo de fecha, o sea para que la pantalla no ofrezca una fecha
+    que va a fallar— y `emit`, que es donde la regla se hace cumplir. Que la pantalla y el
+    servidor la calculen con la misma función es lo que evita que discrepen justo en el borde.
+
+    Es la mitad de la validación de fecha, no toda: el otro límite es la fecha del último
+    comprobante autorizado de la serie, que solo ARCA conoce y que chequea `wsfe.py`.
+    """
+    days = _SERVICES_WINDOW_DAYS if concepto.needs_service_dates else _PRODUCTS_WINDOW_DAYS
+    return today - datetime.timedelta(days=days), today + datetime.timedelta(days=days)
+
+
 @dataclass(frozen=True)
 class EmissionRequest:
     """Lo poco que el usuario decide en el momento de emitir.
 
-    **No incluye la fecha del comprobante.** Emitir es un acto de hoy: la fecha es el día en
-    que se aprieta el botón. Dejarla elegir agrega un campo a la pantalla que se usa cien
-    veces por semana y una forma nueva de que ARCA rechace el comprobante —acepta la fecha
-    dentro de una ventana de pocos días alrededor de hoy—, a cambio de un caso que el período
-    del servicio ya cubre mejor: facturar el 3 el mes que pasó es `from_date`/`to_date`, no
-    una fecha de emisión retroactiva.
+    **La fecha es opcional y su default es hoy**, que es lo que se emite casi siempre: la
+    factura se hace el día que se hace. Poder correrla existe para los pocos casos en los que
+    el papel tiene que decir otra cosa —se facturó el viernes y se cargó el lunes, o el
+    cliente pide la factura fechada el último día del mes— y ARCA lo admite dentro de una
+    ventana de pocos días alrededor de hoy: ver `emission_date_bounds`.
+
+    No cubre el caso de facturar en marzo un servicio de febrero, y no tiene que cubrirlo:
+    eso es `from_date`/`to_date`, el período del servicio, que no tiene ventana ninguna.
 
     Las tres fechas de servicio son obligatorias cuando el concepto no es "productos", y eso
     lo garantiza el schema del endpoint antes de llegar acá.
     """
 
-    from_date: date | None = None
-    to_date: date | None = None
-    due_date: date | None = None
+    date: datetime.date | None = None
+    from_date: datetime.date | None = None
+    to_date: datetime.date | None = None
+    due_date: datetime.date | None = None
 
 
 def _snapshot(
-    template: InvoiceTemplate, request: EmissionRequest, today: date, totals: InvoiceTotals
+    template: InvoiceTemplate,
+    request: EmissionRequest,
+    today: datetime.date,
+    totals: InvoiceTotals,
 ) -> Invoice:
     """La factura con todo lo que se sabe **antes** de hablar con ARCA.
 
@@ -94,7 +127,9 @@ def _snapshot(
         customer_doc_number=customer.doc_number,
         customer_condicion_iva=customer.condicion_iva,
         customer_address=customer.address,
-        customer_email=customer.email,
+        # El mail del cliente **no** se copia: no se imprime, no viaja a ARCA y no es parte de
+        # nada autorizado. `Invoice.customer_email` lo lee de la ficha, y lo que esta tabla
+        # guarda es `sent_to`, la dirección a la que salió el envío — ver `models/invoice.py`.
         lines=[
             InvoiceLine(
                 position=line.position,
@@ -125,9 +160,22 @@ def emit(db: Session, template: InvoiceTemplate, request: EmissionRequest) -> In
     commit termina, la factura existe para el fisco y no existe para nosotros. Si el insert o
     el commit fallaran, ese renglón de log es lo único que permite reconstruir a mano un
     comprobante que ya tiene validez legal.
+
+    **La fecha se resuelve y se valida antes de salir a la red**, junto con la delegación y
+    por el mismo motivo: son las dos cosas que hacen fallar la emisión y que se pueden saber
+    sin preguntarle nada a ARCA. Un rechazo de WSFE por una fecha fuera de ventana llega como
+    un código que el usuario no puede leer, y llega después de haber pedido un CAE.
     """
     if template.fiscal_identity.delegation_verified_at is None:
         raise DelegationNotVerifiedError(str(template.fiscal_identity_id))
+
+    emission_date = request.date or datetime.date.today()
+    first, last = emission_date_bounds(template.concepto, datetime.date.today())
+    if not first <= emission_date <= last:
+        raise InvalidEmissionDateError(
+            "ARCA solo acepta la fecha del comprobante entre el "
+            f"{first.strftime('%d/%m/%Y')} y el {last.strftime('%d/%m/%Y')}."
+        )
 
     totals = compute_totals(
         template.voucher_type,
@@ -140,7 +188,7 @@ def emit(db: Session, template: InvoiceTemplate, request: EmissionRequest) -> In
             for line in template.lines
         ],
     )
-    invoice = _snapshot(template, request, today=date.today(), totals=totals)
+    invoice = _snapshot(template, request, today=emission_date, totals=totals)
 
     # El candado se toma antes de preguntarle el número a ARCA y se suelta recién en el
     # commit del router. Ver `crud/invoice.lock_numbering`.

@@ -19,7 +19,7 @@ from requests.exceptions import RequestException
 from zeep.exceptions import Fault
 
 from factumov.enums import Concepto, DocType, VoucherType
-from factumov.exceptions import ArcaError, WsfeError
+from factumov.exceptions import ArcaError, InvalidEmissionDateError, WsfeError
 from factumov.services import arca
 from factumov.services.invoice_totals import InvoiceTotals
 
@@ -148,11 +148,26 @@ class AuthorizationResult:
     number: int
 
 
-def get_last_voucher_number(tax_id: str, pos: int, voucher_type: VoucherType) -> int:
-    """El último número autorizado para ese punto de venta y esa letra. 0 si no hay ninguno.
+@dataclass(frozen=True)
+class LastVoucher:
+    """El último comprobante autorizado de una serie: su número y su fecha.
+
+    La fecha viene con el número porque de ella depende una validación que ARCA hace y que
+    conviene hacer antes: **la numeración de un punto de venta no puede retroceder en el
+    tiempo**. Emitir con fecha anterior a la del último autorizado da el código 10016, que no
+    dice cuál era esa fecha y llega después de haber salido a la red.
+    """
+
+    number: int
+    date: datetime.date | None
+
+
+def get_last_voucher(tax_id: str, pos: int, voucher_type: VoucherType) -> LastVoucher:
+    """El último comprobante autorizado para ese punto de venta y esa letra.
 
     ARCA contesta `CbteNro = 0` para un punto de venta recién dado de alta, así que el
-    `or 0` no es un parche defensivo: es el caso normal de la primera factura.
+    `or 0` no es un parche defensivo: es el caso normal de la primera factura. En ese caso la
+    fecha viene vacía, y `None` es la respuesta correcta: no hay ningún piso que respetar.
     """
     ticket = arca.get_access_ticket(SERVICE)
     settings = arca.get_arca_settings()
@@ -176,7 +191,22 @@ def get_last_voucher_number(tax_id: str, pos: int, voucher_type: VoucherType) ->
             + " / ".join(f"{error.Code}: {error.Msg}" for error in errors)
         )
     number: int = response.CbteNro or 0
-    return number
+    return LastVoucher(number=number, date=_parse_arca_date(getattr(response, "CbteFch", None)))
+
+
+def _parse_arca_date(value: Any) -> datetime.date | None:
+    """`"20260827"` → `date(2026, 8, 27)`. `None` para el punto de venta sin comprobantes.
+
+    Tolerante a propósito con lo que no sabe leer: esta fecha alimenta una validación que
+    ARCA repite de su lado, así que no entenderla significa perderse un mensaje mejor, no
+    dejar pasar un comprobante mal.
+    """
+    if not value:
+        return None
+    try:
+        return datetime.datetime.strptime(str(value), "%Y%m%d").date()
+    except ValueError:
+        return None
 
 
 def _detail_request(request: VoucherRequest, number: int) -> dict[str, Any]:
@@ -245,10 +275,16 @@ def authorize_invoice(request: VoucherRequest) -> AuthorizationResult:
     única forma de dejarlo sin efecto es una nota de crédito — que FactuMov no emite. El
     llamador tiene que estar seguro antes de llegar acá.
 
-    El número sale de `get_last_voucher_number` + 1, o sea de una segunda llamada a ARCA
+    El número sale de `get_last_voucher` + 1, o sea de una segunda llamada a ARCA
     inmediatamente anterior. Entre las dos hay una ventana en la que otro proceso podría
     tomar el mismo número; quien serializa eso es el candado de `crud/invoice.py`, y el
     backstop final es el propio ARCA, que rechaza un número ya usado.
+
+    Esa misma respuesta trae la fecha del último autorizado, y con ella se corta acá el caso
+    que ARCA rechazaría con el código 10016: **la numeración no puede retroceder en el
+    tiempo**. Se levanta `InvalidEmissionDateError` —que no es un `ArcaError` y termina en un
+    422— con la fecha mínima escrita en el mensaje, que es el dato que el usuario necesita y
+    que el rechazo de ARCA no incluye.
 
     Dos formas de "no": `Errors` es un problema del request —mal armado, token vencido— y
     `Resultado != "A"` es un rechazo del comprobante en sí, con el motivo en
@@ -257,7 +293,15 @@ def authorize_invoice(request: VoucherRequest) -> AuthorizationResult:
     """
     ticket = arca.get_access_ticket(SERVICE)
     settings = arca.get_arca_settings()
-    number = get_last_voucher_number(request.issuer_tax_id, request.pos, request.voucher_type) + 1
+    last = get_last_voucher(request.issuer_tax_id, request.pos, request.voucher_type)
+    number = last.number + 1
+
+    if last.date is not None and request.date < last.date:
+        raise InvalidEmissionDateError(
+            f"El último comprobante {request.voucher_type.value} del punto de venta "
+            f"{request.pos} es del {last.date.strftime('%d/%m/%Y')}, y ARCA no acepta que la "
+            "numeración retroceda: elegí esa fecha o una posterior."
+        )
 
     try:
         client = arca.build_client(WSDL_URL[settings.arca_env])

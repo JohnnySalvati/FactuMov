@@ -1230,7 +1230,8 @@ según si el dato describe una **intención** o un **hecho**.
 - **El emisor y el receptor están copiados campo por campo.** Las FK quedan para navegar y para
   el scoping. Sin la copia, que un cliente corrija su domicilio reescribiría el PDF de todas las
   facturas que ya se le mandaron — y su documento y su condición frente al IVA son además parte
-  de lo que ARCA autorizó.
+  de lo que ARCA autorizó. **El mail es la excepción y se lee en vivo** — ver *Mandar la factura
+  por email*.
 - **Las líneas no guardan neto ni IVA**, aunque la factura guarde sus totales. Es la misma
   distinción: el total es el hecho autorizado; el importe de la línea es una multiplicación
   exacta de dos números que están al lado. Lo que puede cambiar es el reparto por alícuota, y
@@ -1280,9 +1281,34 @@ verdad.
   de dejar que el botón falle con un 409.
 - **`if (busy) return` además del `disabled` del botón.** El `disabled` cubre el click y no el
   Enter en un campo del formulario, y un segundo submit en vuelo son dos facturas.
-- **Emitir no acepta la fecha del comprobante**: es el día en que se aprieta el botón. Dejarla
-  elegir agrega un campo y una forma nueva de que ARCA rechace —solo acepta una ventana de pocos
-  días—, para un caso que el período del servicio ya cubre mejor.
+- **La fecha del comprobante se puede elegir, con hoy puesto por default** (2026-08-27). Hasta
+  ese día no se podía, con el argumento de que emitir es un acto de hoy. El argumento se cae solo
+  en el caso que lo motivó: se factura el viernes, se carga el lunes, y el papel tiene que decir
+  viernes. Lo que sigue siendo cierto es que el 99% de las veces la fecha es hoy, así que el
+  campo viene lleno y nadie lo toca.
+  - **Los límites los pone ARCA y son tres, de tres fuentes distintas.** La ventana alrededor de
+    hoy —±5 días corridos para productos, ±10 para servicios, y "productos y servicios" cuenta
+    como servicios— la fija el concepto, y sale de `emission_date_bounds` en `services/emission.py`.
+    El tercero solo lo conoce ARCA: **la numeración de un punto de venta no puede retroceder en el
+    tiempo**, así que la fecha tampoco puede ser anterior a la del último comprobante autorizado
+    de esa serie.
+  - **La ventana la calcula el backend y viaja en el `preview`** (`date`, `min_date`, `max_date`),
+    no la pantalla. Es el mismo argumento que el de los importes: si la calcularan las dos, el
+    campo podría ofrecer una fecha que el servidor rechaza, y el borde de la ventana es
+    exactamente donde eso pasaría.
+  - **Los dos rechazos son 422 y no 502**, y son la única excepción a que el detalle de ARCA no
+    se propague: es sobre lo que el usuario eligió, no sobre cómo estamos armados. El de la
+    numeración se chequea en `wsfe.py` con la fecha que ya trae `FECompUltimoAutorizado`, o sea
+    sin una llamada extra, y el mensaje **nombra esa fecha** — el rechazo real de ARCA es el
+    código 10016, que no la dice y llega después de haber pedido un CAE.
+  - **`get_last_voucher_number` pasó a ser `get_last_voucher`** y devuelve número y fecha. Los
+    dos salen de la misma respuesta y los dos son lo que esa respuesta implica sobre el
+    comprobante que se está por pedir.
+  - **El default de hoy se arma con `isoDate` y no con `toISOString()`.** El segundo devuelve
+    **UTC**: en Argentina, de las 21:00 en adelante ya es el día siguiente allá, así que una
+    factura emitida un jueves a la noche saldría propuesta con fecha del viernes. Es el mismo
+    error de un día que `formatDate` evita en la otra dirección, y acá pega sobre la fecha de un
+    comprobante fiscal.
 - **El período y el vencimiento aparecen solo si el modelo es de servicios**, con el mes en
   curso puesto por default. Los tres van juntos o no va ninguno: el schema lo valida, y qué
   hacen falta lo decide el concepto, que el schema no ve y el router sí.
@@ -1337,6 +1363,25 @@ segundo envío: `sent_at` se pisa y ya.
 - **`sent_at` es la marca del último envío, no un historial.** La pregunta que la pantalla
   contesta es "¿esto ya se mandó?". Un historial de reenvíos sería una tabla para una pregunta
   que nadie hace; si algún día se hace, eso sí es una tabla y no una columna más.
+- **El mail del cliente no se copia al emitir** (2026-08-27, migración `b2d5f80c3e17`). Es la
+  excepción a que el receptor esté copiado campo por campo, y la excepción tiene la misma raíz
+  que la regla. Las otras cuatro columnas congelan un **hecho fiscal**: son lo que ARCA autorizó
+  y lo que salió impreso. El mail no se imprime, no viaja a ARCA y no es parte de nada
+  autorizado — es a dónde entregar el PDF, o sea una pregunta sobre **hoy**.
+  - **Copiarlo producía un callejón sin salida.** Una factura emitida cuando el cliente todavía
+    no tenía dirección se quedaba sin dirección para siempre: el aviso mandaba a cargarla en la
+    ficha, cargarla no cambiaba nada, y una factura emitida tampoco se puede editar. La única
+    salida era emitir de nuevo, que es la única equivocación cara que se puede cometer en esta
+    app.
+  - **`Invoice.customer_email` es ahora una propiedad** que lee `customer.email`, y la columna
+    pasó a llamarse **`sent_to`**: la dirección a la que salió el **último** envío, `NULL` si
+    nunca se mandó. Es el compañero de `sent_at` y sí es una copia — a dónde fue este envío es un
+    hecho, y que el cliente cambie de casilla después no puede reescribirlo.
+  - Consecuencia: `crud/invoice.py` trae el cliente con `joinedload` en las dos lecturas. Sin
+    eso, listar N facturas son N queries más.
+  - El `downgrade` de la migración restituye la forma y no los datos, como el de `cf79c4f7610c`:
+    las direcciones de las facturas nunca enviadas se van, y no se pueden re-deducir porque el
+    cliente pudo haber cambiado de mail.
 - **No es acuse de recibo**, y la pantalla lo dice: significa que el servidor de mail lo
   aceptó, no que el cliente lo haya abierto. Eso necesitaría un proveedor con webhooks.
 - **503 si el mail no sale, con un texto que aclara que la factura está emitida igual.** El
