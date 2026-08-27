@@ -1,7 +1,9 @@
 # FactuMov — Deploy a producción
 
-Producción corre en la **misma VM Ubuntu 24.04 que Balance360**, detrás de **srv-nginx**
-(`192.168.100.9`), que termina el HTTPS y proxea por HTTP a la VM. Todo vive en
+Producción corre en la **misma VM Ubuntu 24.04 que Balance360** (`192.168.100.16`), detrás
+de **srv-nginx** (`192.168.100.9`), que termina el HTTPS y proxea por HTTP a la VM. Son dos
+máquinas distintas y es fácil confundirlas: el certificado y el server block van en la `.9`;
+el compose, el `.env` y los certificados de ARCA van en la `.16`. Todo vive en
 `docker-compose.prod.yml`, que levanta tres servicios:
 
 | Servicio | Qué es | Puerto |
@@ -13,8 +15,8 @@ Producción corre en la **misma VM Ubuntu 24.04 que Balance360**, detrás de **s
 La cadena completa es:
 
 ```
-navegador → srv-nginx :443 → VM :8001 → web (nginx) → app :8000 → db
-                                          └─ / → el dist de la SPA
+navegador → srv-nginx .9 :443 → VM .16 :8001 → web (nginx) → app :8000 → db
+                                               └─ / → el dist de la SPA
 ```
 
 **Por qué hay un nginx propio y no dos `location` en srv-nginx.** El prefijo `/api` lo
@@ -51,7 +53,7 @@ entrypoint: el único que puede mandarle un `X-Forwarded-For` es un contenedor n
 ## 2. Primer arranque en la VM
 
 ```bash
-ssh johnny@<vm>
+ssh johnny@192.168.100.16
 git clone https://github.com/JohnnySalvati/FactuMov.git
 cd FactuMov
 ```
@@ -89,10 +91,10 @@ lectura en `/app/certs`.
 
 ```powershell
 # desde la máquina de desarrollo
-ssh johnny@<vm> "mkdir -p ~/FactuMov/certs"
+ssh johnny@192.168.100.16 "mkdir -p ~/FactuMov/certs"
 scp E:\Capacitacion\InSoft\Balance360\Balance360\certs\homo.crt `
     E:\Capacitacion\InSoft\Balance360\Balance360\certs\balance360.key `
-    johnny@<vm>:~/FactuMov/certs/
+    johnny@192.168.100.16:~/FactuMov/certs/
 ```
 
 Los de homologación son los de Balance360, que son de este mismo CUIT (`20182810674`). Las
@@ -126,7 +128,7 @@ server {
     server_name factumov.insoft.net.ar;
 
     location / {
-        proxy_pass http://<ip-de-la-vm>:8001;
+        proxy_pass http://192.168.100.16:8001;
         proxy_set_header Host              $host;
         proxy_set_header X-Real-IP         $remote_addr;
         proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
@@ -292,7 +294,7 @@ docker compose -f docker-compose.prod.yml exec db sh -c \
 Bajarlo:
 
 ```powershell
-scp johnny@<vm>:~/FactuMov/backup_20260827.dump .\prod.dump
+scp johnny@192.168.100.16:~/FactuMov/backup_20260827.dump .\prod.dump
 ```
 
 Restaurar, con la app apagada para que nadie escriba en el medio:

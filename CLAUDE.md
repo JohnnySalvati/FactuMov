@@ -2212,9 +2212,16 @@ Las tres cosas necesitan accesos que no están acá:
 1. **El registro DNS** de `factumov.insoft.net.ar` apuntando a srv-nginx.
 2. **El server block en `srv-nginx`** (`administrator@192.168.100.9`) más el certificado de
    certbot. El bloque está escrito en `docs/DEPLOYMENT.md` § 3.
-3. **El deploy en la VM**: clonar, completar el `.env`, subir los certificados de homologación
-   y `up -d --build`. Falta el host de la VM — el `DEPLOYMENT.md` de Balance360 lo tiene como
-   `<vm>` y el de FactuMov lo copió igual.
+3. **El deploy en la VM** (`192.168.100.16`): clonar, completar el `.env`, subir los
+   certificados de homologación y `up -d --build`.
+
+**Son dos máquinas y se confunden fácil.** srv-nginx es la `192.168.100.9` —ahí van el server
+block y el certificado— y la VM es la `192.168.100.16`, donde viven el compose, el `.env` y los
+certificados de ARCA. El `DEPLOYMENT.md` de Balance360 nombra a la segunda como `<vm>` y nunca
+la escribe; el de FactuMov la tiene puesta.
+
+Ninguna de las dos se alcanza desde la máquina de desarrollo sin la VPN levantada: están en
+`192.168.100.x` y la LAN de casa es `192.168.1.x`.
 
 #### Lo que ya estaba decidido y sigue igual
 - **Las dos apps no pueden compartir el certificado de producción, y eso hay que resolverlo
