@@ -76,3 +76,13 @@ class PadronError(Exception):
     Deliberadamente **no** baja de `ArcaError`: no es que ARCA falló, es que la pregunta no
     tiene respuesta. Termina en un 404 sobre el CUIT consultado, no en un 502 sobre nosotros.
     """
+
+
+class UndecidableVoucherTypeError(Exception):
+    """No hay una letra de comprobante posible entre esas dos condiciones frente al IVA.
+
+    Hoy solo puede pasar con un emisor consumidor final, que `FiscalIdentityCreate` ya rechaza
+    con un 422 — o sea que por la API no se llega. Existe para que el invariante de
+    `services/voucher.py` se rompa ruidosamente si mañana alguien afloja aquel validador, en
+    vez de que la deducción devuelva una letra plausible y equivocada.
+    """

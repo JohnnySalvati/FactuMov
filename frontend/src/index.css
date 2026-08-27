@@ -632,6 +632,15 @@ button.danger {
   color: var(--muted);
 }
 
+/* Un dato que la app calcula y el usuario no edita. Se parece a un campo —misma etiqueta,
+   misma tipografía— pero sin caja ni borde: lo que distingue "esto lo elegís vos" de "esto sale
+   de lo que ya elegiste" es justamente que no parezca tocable. */
+.derived {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
 /* --- Hoja de selección --------------------------------------------------------------- */
 
 .sheet-backdrop {

@@ -2,7 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from factumov.crud import fiscal_identity as fiscal_identity_crud
-from factumov.enums import Concepto, CondicionIva, DocType, VoucherType
+from factumov.enums import Concepto, CondicionIva, DocType
 from factumov.exceptions import (
     DuplicateFiscalIdentityNameError,
     DuplicateFiscalIdentityTaxIdError,
@@ -130,7 +130,6 @@ def test_delete(db, user):
         name="Template",
         fiscal_identity_id=identity.id,
         customer_id=customer.id,
-        voucher_type=VoucherType.A,
         pos=5,
         concepto=Concepto.services,
     )

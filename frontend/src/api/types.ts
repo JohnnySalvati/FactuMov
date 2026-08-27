@@ -137,6 +137,30 @@ export const VOUCHER_TYPE_LABELS: Record<VoucherType, string> = {
   [VoucherType.NCC]: 'Nota de crédito C',
 }
 
+/**
+ * La letra que corresponde entre dos condiciones frente al IVA — espejo de
+ * `services/voucher.py`.
+ *
+ * **La letra no se elige: se deduce.** La decide ARCA a partir de quién le factura a quién, y
+ * sacadas las notas de crédito —que FactuMov no ofrece— la combinación determina exactamente
+ * una. El backend hace la misma cuenta y es el que manda; acá se repite porque el editor tiene
+ * que mostrar la letra y calcular el total **mientras** el usuario cambia de cliente, o sea
+ * antes de que exista nada que guardar. Es la misma copia a mano que el resto de este archivo.
+ *
+ * `undefined` es "esa combinación no emite nada", que hoy solo pasa con un emisor consumidor
+ * final — imposible de elegir, porque no está en el desplegable de identidad fiscal.
+ */
+export function voucherTypeFor(
+  issuer: CondicionIva,
+  customer: CondicionIva,
+): VoucherType | undefined {
+  if (issuer === CondicionIva.FINAL) return undefined
+  // Solo el inscripto puede emitir A o B, y la A solo la recibe otro inscripto. El
+  // monotributista y el exento emiten C contra cualquiera.
+  if (issuer !== CondicionIva.INSCRIPTO) return VoucherType.C
+  return customer === CondicionIva.INSCRIPTO ? VoucherType.A : VoucherType.B
+}
+
 export const Concepto = {
   products: 'products',
   services: 'services',
@@ -216,7 +240,8 @@ export interface InvoiceTemplateCreate {
   name: string
   fiscal_identity_id: string
   customer_id: string
-  voucher_type: VoucherType
+  // Sin `voucher_type`: el backend la deduce de las dos condiciones frente al IVA. Mandarla
+  // sería decirle al servidor algo que él sabe mejor — y que puede cambiar después.
   pos: number
   concepto: Concepto
   lines: InvoiceTemplateLineCreate[]
@@ -250,7 +275,6 @@ export interface InvoiceTemplateDraft {
   issuer_tax_id: string | null
   customer_id: string | null
   customer: CustomerDraft
-  voucher_type: VoucherType | null
   pos: number | null
   concepto: Concepto
   lines: InvoiceTemplateLineDraft[]

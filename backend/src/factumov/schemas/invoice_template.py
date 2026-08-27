@@ -14,7 +14,6 @@ class InvoiceTemplateCreate(BaseModel):
     name: str = Field(max_length=200)
     fiscal_identity_id: UUID
     customer_id: UUID
-    voucher_type: VoucherType
     pos: int = Field(gt=0)
     concepto: Concepto = Concepto.products
 
@@ -27,6 +26,9 @@ class InvoiceTemplateRead(BaseModel):
     name: str
     fiscal_identity_id: UUID
     customer_id: UUID
+    # No entra por ningún schema de escritura: se deduce de las condiciones frente al IVA del
+    # emisor y del receptor. Sale en el Read porque la pantalla la muestra y porque el cliente
+    # no debería tener que rehacer la cuenta para saber qué se va a emitir.
     voucher_type: VoucherType
     pos: int
     concepto: Concepto
@@ -40,7 +42,6 @@ class InvoiceTemplateUpdate(BaseModel):
     name: str | None = Field(default=None, max_length=200)
     fiscal_identity_id: UUID | None = None
     customer_id: UUID | None = None
-    voucher_type: VoucherType | None = None
     pos: int | None = Field(default=None, gt=0)
     concepto: Concepto | None = None
 

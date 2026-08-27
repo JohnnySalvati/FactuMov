@@ -15,13 +15,17 @@ than defaulting to a freshly created user. Defaulting would be shorter to call a
 quietly hand a test's identity and its customer two different owners, and the failure that
 follows — `UnknownCustomerError` out of a template create — points nowhere near the cause.
 `make_invoice_template` needs no owner of its own: it reads one off the fiscal identity.
+
+Neither template factory takes a `voucher_type`: the letter is derived from the issuer's and
+the customer's IVA conditions, so a test that wants a particular letter sets those conditions
+on the parents — see `services/voucher.py` for the table.
 """
 
 import itertools
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from factumov.enums import Concepto, CondicionIva, DocType, IvaAliquot, VoucherType
+from factumov.enums import Concepto, CondicionIva, DocType, IvaAliquot
 from factumov.models.arca_ticket import ArcaTicket
 from factumov.models.customer import Customer
 from factumov.models.email_confirmation import EmailConfirmation
@@ -96,7 +100,6 @@ def make_template_create(
     customer_id,
     name="Template",
     descriptions=("First", "Second"),
-    voucher_type=VoucherType.B,
     pos=1,
     concepto=Concepto.products,
 ):
@@ -109,7 +112,6 @@ def make_template_create(
         name=name,
         fiscal_identity_id=fiscal_identity_id,
         customer_id=customer_id,
-        voucher_type=voucher_type,
         pos=pos,
         concepto=concepto,
         lines=[make_line_create(description=description) for description in descriptions],
@@ -122,7 +124,6 @@ def make_invoice_template(
     customer,
     name="Template",
     lines=((0, "First"), (1, "Second")),
-    voucher_type=VoucherType.B,
     pos=1,
     concepto=Concepto.products,
 ):
@@ -136,7 +137,6 @@ def make_invoice_template(
         name=name,
         fiscal_identity_id=fiscal_identity.id,
         customer_id=customer.id,
-        voucher_type=voucher_type,
         pos=pos,
         concepto=concepto,
         lines=[

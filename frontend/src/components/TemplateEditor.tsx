@@ -5,10 +5,10 @@ import {
   IVA_ALIQUOT_LABELS,
   IvaAliquot,
   VOUCHER_TYPE_LABELS,
+  voucherTypeFor,
   type Concepto,
   type Customer,
   type FiscalIdentity,
-  type VoucherType,
 } from '../api/types'
 import {
   lineAmount,
@@ -50,7 +50,18 @@ export function TemplateEditor({
   error?: string
 }) {
   const navigate = useNavigate()
-  const sums = totals(value)
+
+  // La letra del comprobante **se deduce, no se elige**: la decide ARCA a partir de la
+  // condición frente al IVA del emisor y de la del receptor. Antes había un desplegable con
+  // seis opciones, cinco de las cuales eran siempre incorrectas para un par dado; ahora hay un
+  // renglón que dice cuál sale. El backend hace la misma cuenta y es el que manda — acá se
+  // repite para poder mostrarla y sumar mientras el usuario todavía no guardó nada.
+  const issuer = fiscalIdentities.find((identity) => identity.id === value.fiscal_identity_id)
+  const customer = customers.find((option) => option.id === value.customer_id)
+  const voucherType =
+    issuer && customer ? voucherTypeFor(issuer.condicion_iva, customer.condicion_iva) : undefined
+
+  const sums = totals(value, voucherType)
 
   function patch(changes: Partial<TemplateForm>) {
     onChange({ ...value, ...changes })
@@ -117,21 +128,19 @@ export function TemplateEditor({
           emptyLabel="Elegí un cliente"
         />
 
+        <div className="derived">
+          <span className="field-label">Comprobante</span>
+          {voucherType !== undefined ? (
+            <strong>{VOUCHER_TYPE_LABELS[voucherType]}</strong>
+          ) : (
+            <span className="muted">Elegí el emisor y el cliente</span>
+          )}
+          <span className="field-hint">
+            La define ARCA según la condición frente al IVA de los dos, no se elige.
+          </span>
+        </div>
+
         <div className="row">
-          <div>
-            <label htmlFor="t-voucher">Comprobante</label>
-            <select
-              id="t-voucher"
-              value={value.voucher_type}
-              onChange={(event) => patch({ voucher_type: event.target.value as VoucherType })}
-            >
-              {Object.entries(VOUCHER_TYPE_LABELS).map(([code, label]) => (
-                <option key={code} value={code}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </div>
           <div className="narrow">
             <label htmlFor="t-pos">Punto de venta</label>
             <input

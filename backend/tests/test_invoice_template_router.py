@@ -50,7 +50,9 @@ def test_create_numbers_the_lines_in_array_order(client, fiscal_identity, custom
     assert body["name"] == "Template"
     assert body["fiscal_identity_id"] == str(fiscal_identity.id)
     assert body["customer_id"] == str(customer.id)
-    assert body["voucher_type"] == "B"
+    # Deducida, no elegida: los dos fixtures son responsables inscriptos y esa
+    # combinación es la única que da A. Ver `services/voucher.py`.
+    assert body["voucher_type"] == "A"
     assert body["concepto"] == "products"
 
     # `position` is never sent by the client: the order of the array is the order of the

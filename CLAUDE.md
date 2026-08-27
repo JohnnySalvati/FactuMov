@@ -262,7 +262,8 @@ campos de `Invoice` de Balance360 se parten en tres grupos:
 
 | Grupo | Campos | ¿Va en el template? |
 |---|---|---|
-| Identidad / relaciones | `entity_id`, `fiscal_identity_id`, receptor, `voucher_type`, `pos`, `concepto` | ✅ Sí — es lo que define al modelo |
+| Identidad / relaciones | `entity_id`, `fiscal_identity_id`, receptor, `pos`, `concepto` | ✅ Sí — es lo que define al modelo |
+| Derivados | `voucher_type` | ❌ No — sale de los dos anteriores; ver *La letra del comprobante* |
 | Contenido | líneas (descripción, cantidad, precio, alícuota) | ✅ Sí — se ajusta al emitir |
 | Hechos de la emisión | `date`, `number`, `cae`, `cae_expiry`, `confirmed`, `paid`, `authorized`, `from_date`/`to_date`/`due_date` | ❌ No — los asigna ARCA o el momento de emisión |
 
@@ -299,7 +300,7 @@ Emitir = tomar un `InvoiceTemplate`, permitir retoques, y crear una `Invoice` nu
 |---|---|
 | `FiscalIdentity` | Emisor: CUIT, razón social, condición IVA, IIBB, domicilio, estado de la delegación |
 | `Customer` | Receptor |
-| `InvoiceTemplate` | Emisor + cliente + tipo de comprobante + punto de venta + concepto |
+| `InvoiceTemplate` | Emisor + cliente + punto de venta + concepto (la letra se deduce) |
 | `InvoiceTemplateLine` | Descripción, cantidad, precio unitario, alícuota, posición |
 | `User` | Cuenta: email, hash de contraseña, confirmación, alta/baja |
 | `UserSession` | Sesión abierta: hash del token, vencimiento absoluto, revocación |
@@ -325,6 +326,64 @@ Emitir = tomar un `InvoiceTemplate`, permitir retoques, y crear una `Invoice` nu
 - **`lines` con `min_length=1` en create y update, y `None` como "no tocar".** Un template sin
   líneas no se puede emitir, así que `[]` es 422 y el CRUD solo distingue entre `None` y una
   lista no vacía.
+
+### La letra del comprobante se deduce (2026-08-26)
+**A, B o C no es una elección del usuario: es una consecuencia de quién le factura a quién.**
+Lo fija ARCA a partir de la condición frente al IVA del emisor y de la del receptor. Port de
+`allowed_for` de Balance360 —que intersecta dos conjuntos, "lo que esta condición puede emitir"
+y "lo que esta condición puede recibir"— en `services/voucher.py`.
+
+**FactuMov no ofrece notas de crédito**, y eso es lo que cambia el resultado. La app automatiza
+el comprobante que se repite todos los meses; nadie le emite una NC a sus clientes todos los
+meses. La NC es la excepción, y la excepción se hace a mano en el sitio de ARCA. Sacadas las
+tres NC de los conjuntos de Balance360, la intersección pasa de ser un menú a ser **siempre un
+solo elemento**:
+
+| Emisor \ Receptor | Inscripto | Monotributo | Exento | Consumidor final |
+|---|---|---|---|---|
+| **Inscripto**   | A | B | B | B |
+| **Monotributo** | C | C | C | C |
+| **Exento**      | C | C | C | C |
+
+No hay fila de emisor consumidor final porque no puede emitir: `FiscalIdentityCreate` lo rechaza
+con 422 desde antes, y `voucher_type_for` levanta `UndecidableVoucherTypeError` si alguien
+aflojara ese validador — un error ruidoso en vez de una letra plausible y equivocada.
+
+- **`voucher_type` dejó de ser una columna** de `invoice_templates` (migración `3d9a71e0c4b2`).
+  Guardar un valor que es función de otros dos valores guardados es una tercera fuente de verdad
+  capaz de contradecir a sus padres — el mismo argumento por el que `invoice_templates` no lleva
+  `user_id`. Y acá no es teórico: el día que un cliente se inscribe en IVA, todos los modelos que
+  le facturan pasan de B a A. Con la columna, siguen diciendo B hasta que alguien se dé cuenta, y
+  lo que sigue es un CAE rechazado o —peor— una factura aceptada y legalmente equivocada.
+- **Es una propiedad de `InvoiceTemplate`, no un campo calculado en el schema.** El que la va a
+  necesitar de nuevo es el código de emisión, que trabaja con el modelo y no con el `Read`.
+  Consecuencia: toca las dos relaciones, así que el CRUD las trae con `joinedload` — sin eso,
+  listar N modelos son 2N queries más.
+- **Sale en `InvoiceTemplateRead` y no entra por ningún schema de escritura.** Mismo criterio que
+  `delegation_verified_at`: la pantalla la necesita, el cliente no la decide. Mandarla en el body
+  no rompe nada porque Pydantic la descarta, y hay un test que lo fija.
+- **El desplegable del editor desapareció.** Tenía seis opciones de las cuales cinco eran siempre
+  incorrectas para un par dado; ahora hay un renglón que dice qué comprobante sale, con la
+  aclaración de que la define ARCA. Es un campo menos que llenar en la pantalla que se usa cien
+  veces por semana, y una forma menos de emitir mal.
+- **El `VoucherType` del enum conserva las NC**, y el tipo `vouchertype` de Postgres no se borró.
+  Es el vocabulario de ARCA: el parser tiene que poder representar un PDF que sea una nota de
+  crédito (`_ARCA_VOUCHER_TYPE` mapea los códigos 3, 8 y 13), y la tabla `invoices` de la unidad
+  de emisión las va a necesitar. Lo que no existe es una NC *como modelo*.
+- **El draft de importación ya no trae `voucher_type`.** El PDF sí dice qué letra era, y el
+  parser la sigue leyendo —la necesita para deducir la alícuota en B y C—, pero el draft existe
+  para sembrar el editor y el editor ya no tiene ese campo. Proponer una letra que después se
+  recalcula sola es ofrecer una discusión que no puede ganar nadie.
+- **La tabla está escrita tres veces, y las tres tienen su motivo.** `services/voucher.py` es la
+  autoridad. `api/types.ts` la repite porque el editor muestra la letra y calcula el total
+  *mientras* el usuario cambia de cliente, o sea antes de que exista nada que guardar — la misma
+  copia a mano que el resto de ese archivo. Y la migración la repite en SQL porque una migración
+  no puede depender del código de la app: el modelo de mañana no describe el esquema de hoy.
+- **La migración se niega a borrar un dato que no cuadra.** Antes de tirar la columna compara
+  cada fila guardada contra lo que la deducción da para sus padres, y corta con `RuntimeError` si
+  alguna discrepa: puede ser una condición frente al IVA mal cargada o una letra elegida a mano a
+  propósito, y las dos merecen una mirada humana. El `downgrade` sí puede ser exacto, al revés
+  que el de `cf79c4f7610c`: reconstruye el valor de datos que siguen estando.
 
 ## Endpoint de importación (2026-08-17)
 `POST /invoice-templates/import` recibe un PDF y devuelve un `InvoiceTemplateDraft`. Cierra
@@ -1140,8 +1199,11 @@ lleva a `/modelos/nuevo`, `/identidades/nueva`, `/clientes/nuevo`.
   flotante en el camino de ida es pedirle centavos al azar.
 - **El total de la pantalla aplica la convención del proyecto**: en A el precio va neto y en B
   y C ya viene con el IVA adentro. No es una regla nueva, es la misma que usa el parser al leer
-  un PDF. Está escrito abajo del total que es una cuenta nuestra y que el importe que vale es
-  el que autorice ARCA.
+  un PDF. La letra que decide cuál de las dos aplica es la **deducida** —ver *La letra del
+  comprobante se deduce*—, así que el total se recalcula solo al cambiar de cliente. Mientras
+  falte elegir emisor o cliente no hay letra y se asume IVA incluido, que es lo que vale en tres
+  de las cuatro combinaciones. Está escrito abajo del total que es una cuenta nuestra y que el
+  importe que vale es el que autorice ARCA.
 - **La importación ofrece dar de alta el cliente que trajo el PDF.** El draft trae los datos
   del receptor pero no un id cuando no está cargado, y sin ese botón importar una factura de un
   cliente nuevo es un callejón sin salida: el editor pide un id. El alta sigue siendo explícita

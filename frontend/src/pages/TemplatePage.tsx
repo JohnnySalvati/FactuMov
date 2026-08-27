@@ -27,7 +27,9 @@ function fromTemplate(template: InvoiceTemplate): TemplateForm {
     name: template.name,
     fiscal_identity_id: template.fiscal_identity_id,
     customer_id: template.customer_id,
-    voucher_type: template.voucher_type,
+    // `voucher_type` viene en la respuesta pero no entra al formulario: se deduce de las dos
+    // condiciones frente al IVA, así que sembrarlo sería guardar una copia que puede quedar
+    // vieja apenas el usuario cambie de cliente.
     pos: String(template.pos),
     concepto: template.concepto,
     // Vienen ordenadas por `position`: lo declara el `order_by` de la relación en el modelo.

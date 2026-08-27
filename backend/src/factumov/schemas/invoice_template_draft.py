@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
-from factumov.enums import Concepto, CondicionIva, DocType, IvaAliquot, VoucherType
+from factumov.enums import Concepto, CondicionIva, DocType, IvaAliquot
 
 
 class CustomerDraft(BaseModel):
@@ -27,7 +27,6 @@ class InvoiceTemplateDraft(BaseModel):
     issuer_tax_id: str | None = None
     customer_id: UUID | None = None
     customer: CustomerDraft
-    voucher_type: VoucherType | None = None
     pos: int | None = None
     concepto: Concepto
 

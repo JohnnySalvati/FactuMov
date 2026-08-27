@@ -2,7 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from factumov.crud import customer as customer_crud
-from factumov.enums import Concepto, CondicionIva, DocType, VoucherType
+from factumov.enums import Concepto, CondicionIva, DocType
 from factumov.exceptions import CustomerInUseError, DuplicateCustomerError
 from factumov.models.fiscal_identity import FiscalIdentity
 from factumov.models.invoice_template import InvoiceTemplate
@@ -145,7 +145,6 @@ def test_delete_in_use(db, user):
         name="Template 1",
         fiscal_identity_id=fiscal_identity.id,
         customer_id=customer.id,
-        voucher_type=VoucherType.B,
         pos=1,
         concepto=Concepto.services,
     )

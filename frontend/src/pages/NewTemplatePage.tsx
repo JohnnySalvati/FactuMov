@@ -4,7 +4,6 @@ import { Link, useNavigate } from 'react-router'
 import { ApiError, api } from '../api/client'
 import {
   IvaAliquot,
-  VoucherType,
   type Customer,
   type CustomerCreate,
   type FiscalIdentity,
@@ -268,7 +267,6 @@ function fromDraft(draft: InvoiceTemplateDraft): TemplateForm {
     name: draft.name ?? '',
     fiscal_identity_id: draft.fiscal_identity_id,
     customer_id: draft.customer_id,
-    voucher_type: draft.voucher_type ?? VoucherType.C,
     pos: draft.pos !== null ? String(draft.pos) : blank.pos,
     concepto: draft.concepto,
     lines:

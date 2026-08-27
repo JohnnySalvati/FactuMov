@@ -72,7 +72,6 @@ def test_import_resolves_the_ids_of_an_issuer_and_customer_already_stored(user, 
     # The PDF carries no template name — the user picks one in the editor.
     assert draft["name"] is None
 
-    assert draft["voucher_type"] == "C"
     assert draft["pos"] == 1
     assert draft["concepto"] == "services"
 
@@ -131,7 +130,6 @@ def test_import_reads_a_type_b_invoice_with_two_lines(client):
     assert response.status_code == 200
     draft = response.json()
 
-    assert draft["voucher_type"] == "B"
     assert draft["pos"] == 10
     assert draft["customer"]["doc_number"] == "30535621159"
 
@@ -164,7 +162,6 @@ def test_import_reads_a_type_a_invoice(client):
     assert response.status_code == 200
     draft = response.json()
 
-    assert draft["voucher_type"] == "A"
     assert draft["pos"] == 2
     assert draft["issuer_tax_id"] == "20182810674"
 
@@ -223,7 +220,6 @@ def test_import_accepts_a_pdf_it_cannot_read_and_answers_an_empty_draft(client):
     draft = response.json()
 
     assert draft["lines"] == []
-    assert draft["voucher_type"] is None
     assert draft["fiscal_identity_id"] is None
 
 

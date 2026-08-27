@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from factumov.models.fiscal_identity import FiscalIdentity
     from factumov.models.invoice_template_line import InvoiceTemplateLine
 from factumov.enums import Concepto, VoucherType
+from factumov.services.voucher import voucher_type_for
 
 
 class InvoiceTemplate(Base, TimestampMixin):
@@ -26,7 +27,6 @@ class InvoiceTemplate(Base, TimestampMixin):
         ForeignKey("fiscal_identities.id"), index=True
     )
     customer_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("customers.id"), index=True)
-    voucher_type: Mapped[VoucherType] = mapped_column(Enum(VoucherType))
     pos: Mapped[int] = mapped_column(Integer)
     concepto: Mapped[Concepto] = mapped_column(
         Enum(Concepto), default=Concepto.products, server_default=Concepto.products.name
@@ -39,3 +39,18 @@ class InvoiceTemplate(Base, TimestampMixin):
         cascade="all, delete-orphan",
         order_by="InvoiceTemplateLine.position",
     )
+
+    @property
+    def voucher_type(self) -> VoucherType:
+        """La letra del comprobante. **Se deduce, no se guarda.**
+
+        Sale de las dos condiciones frente al IVA — ver `services/voucher.py`, que explica por
+        qué sin notas de crédito la respuesta es siempre una sola. Fue una columna hasta el
+        2026-08-26: guardarla es una tercera fuente de verdad capaz de contradecir a sus dos
+        padres, y el día que un cliente pasa de monotributista a inscripto el modelo guardado
+        seguiría diciendo B cuando ARCA ya espera A.
+
+        Toca las dos relaciones, así que el CRUD las trae con `joinedload`: sin eso, listar N
+        modelos son 2N queries.
+        """
+        return voucher_type_for(self.fiscal_identity.condicion_iva, self.customer.condicion_iva)

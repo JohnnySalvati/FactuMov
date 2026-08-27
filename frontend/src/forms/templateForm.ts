@@ -38,7 +38,6 @@ export interface TemplateForm {
   name: string
   fiscal_identity_id: string | null
   customer_id: string | null
-  voucher_type: VoucherType
   pos: string
   concepto: Concepto
   lines: LineForm[]
@@ -63,7 +62,6 @@ export function emptyForm(): TemplateForm {
     name: '',
     fiscal_identity_id: null,
     customer_id: null,
-    voucher_type: VoucherType.C,
     pos: '1',
     concepto: Concepto.products,
     lines: [newLine()],
@@ -125,8 +123,15 @@ const PRICE_INCLUDES_IVA: Record<VoucherType, boolean> = {
 
 export const money = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' })
 
-export function totals(form: TemplateForm) {
-  const includesIva = PRICE_INCLUDES_IVA[form.voucher_type]
+/**
+ * La letra llega como parámetro y no sale del formulario, porque **ya no es un campo del
+ * formulario**: se deduce de las condiciones frente al IVA del emisor y del receptor, que son
+ * dos filas de otras dos listas. Mientras falte elegir alguna de las dos no hay letra, y ahí se
+ * asume que el precio trae el IVA adentro — es lo que vale en B y en C, o sea en tres de las
+ * cuatro combinaciones, y el número se corrige solo en cuanto el usuario elige.
+ */
+export function totals(form: TemplateForm, voucherType: VoucherType | undefined) {
+  const includesIva = voucherType === undefined ? true : PRICE_INCLUDES_IVA[voucherType]
   let net = 0
   let iva = 0
   for (const line of form.lines) {
@@ -157,7 +162,6 @@ export function toPayload(form: TemplateForm): InvoiceTemplateCreate {
     name: form.name.trim(),
     fiscal_identity_id: form.fiscal_identity_id,
     customer_id: form.customer_id,
-    voucher_type: form.voucher_type,
     pos: Number(form.pos),
     concepto: form.concepto,
     // `position` no se manda: el orden del array **es** la posición, y el CRUD la asigna con

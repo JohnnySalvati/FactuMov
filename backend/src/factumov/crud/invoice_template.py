@@ -14,7 +14,7 @@ apuntan siempre al mismo dueño, así que las dos dan la misma respuesta.
 import uuid
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from factumov.crud import customer as customer_crud
 from factumov.crud import fiscal_identity as fiscal_identity_crud
@@ -78,7 +78,13 @@ def get_all(db: Session, user_id: uuid.UUID) -> list[InvoiceTemplate]:
             select(InvoiceTemplate)
             .join(InvoiceTemplate.fiscal_identity)
             .where(FiscalIdentity.user_id == user_id)
-            .options(selectinload(InvoiceTemplate.lines))
+            # Los dos padres vienen con el modelo porque `InvoiceTemplate.voucher_type` los
+            # lee para deducir la letra. Sin esto, listar N modelos son 2N queries más.
+            .options(
+                selectinload(InvoiceTemplate.lines),
+                joinedload(InvoiceTemplate.fiscal_identity),
+                joinedload(InvoiceTemplate.customer),
+            )
         )
         .scalars()
         .all()
@@ -96,6 +102,10 @@ def get_by_id(
             .where(
                 InvoiceTemplate.id == invoice_template_id,
                 FiscalIdentity.user_id == user_id,
+            )
+            .options(
+                joinedload(InvoiceTemplate.fiscal_identity),
+                joinedload(InvoiceTemplate.customer),
             )
         )
         .scalars()
