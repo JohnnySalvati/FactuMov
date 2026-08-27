@@ -90,9 +90,8 @@ explique el *por qué*, no el *qué* (el diff ya dice qué cambió).
 ## Estructura del repo
 ```
 FactuMov/
-├── CLAUDE.md
-├── README.md
-├── docker-compose.yml
+├── CLAUDE.md                       # no hay README: este archivo es la documentación
+├── docker-compose.yml              # solo Postgres — ver *Cómo se corre*
 ├── backend/
 │   ├── pyproject.toml
 │   ├── .env.example
@@ -114,9 +113,9 @@ FactuMov/
     └── src/
         ├── api/                    # client.ts (fetch) + types.ts (espejo de los schemas)
         ├── auth/                   # contexto de sesión
-        ├── components/             # layout, guard de rutas, avisos
-        ├── hooks/                  # useResource
-        └── pages/                  # una por pantalla
+        ├── components/             # layout, guard de rutas, avisos, TileGrid, editor
+        ├── hooks/                  # useResource, useLongPress
+        └── pages/                  # una grilla y un editor por recurso
 ```
 
 ## Relevamiento de servicios de Balance360 (hecho — 2026-08-08)
@@ -1037,13 +1036,13 @@ El estilo base es el de pantalla angosta; `@media (min-width: 700px)` agrega lo 
 El corte está elegido por el contenido —el ancho a partir del cual dos campos conviven en un
 renglón sin apretarse— y no por el tamaño de ningún dispositivo.
 
-- **Las tablas se vuelven tarjetas en angosto**, con la etiqueta de la columna al lado del
-  dato. Se hace con CSS y `data-label` en el `<td>`, no renderizando dos árboles distintos
-  según el ancho: con JS habría que elegir un breakpoint en el cliente y ese número se
-  desincroniza del CSS el día que alguien toque uno solo. Además el markup sigue siendo una
-  `<table>`, que es lo que un lector de pantalla necesita para anunciar fila y columna.
-- **El `<thead>` se esconde con `clip-path`, no con `display: none`.** Lo segundo se lo
-  escondería también al lector de pantalla, y ahí las celdas se quedan sin nombre.
+- **Ya no hay tablas.** Las tres pantallas de listado son la grilla de tarjetas — ver *La
+  grilla de tarjetas*. Hasta el 2026-08-26 eran `<table>` que en angosto se volvían tarjetas con
+  `data-label` en el `<td>` y el `<thead>` escondido con `clip-path` (no con `display: none`,
+  que se lo esconde también al lector de pantalla y deja a las celdas sin nombre). El truco
+  seguía siendo bueno; lo que dejó de haber es una tabla que pintar, así que el CSS se borró en
+  vez de quedar decorando el archivo. **Queda anotado acá por si vuelve a hacer falta** — el día
+  que aparezca una pantalla que sea de verdad tabular, como el listado de facturas emitidas.
 - **Los inputs van a 16 px como mínimo.** Safari en iOS hace zoom automático al enfocar un
   campo con tipografía más chica y después no vuelve solo: el usuario queda con la página
   agrandada y la despincha a mano. No es estética.
@@ -1057,17 +1056,44 @@ renglón sin apretarse— y no por el tamaño de ningún dispositivo.
 - **`overflow-x: hidden` en el `body`.** Sin eso, cualquier cosa ancha estira la página y todo
   se va de costado.
 
-### La grilla de modelos y su editor (2026-08-26)
-La pantalla de entrada (`/`) es una tarjeta por `InvoiceTemplate` y una vacía con un `+` al
-final. Adentro (`/modelos/:id`) está el editor; `/modelos/nuevo` importa un PDF o arranca en
-blanco. Confirmado por Miguel el 2026-08-26: es la forma que pidió, no una interpretación.
+### La grilla de tarjetas (2026-08-26)
+**Las tres pantallas de listado tienen la misma forma**: una tarjeta por elemento con el nombre,
+una vacía con un `+` al final, se entra tocando y se elimina manteniendo apretado. Vale para
+modelos (`/`), identidades fiscales (`/identidades`) y clientes (`/clientes`). Confirmado por
+Miguel el 2026-08-26: la grilla de modelos es la forma que pidió, y pidió explícitamente que las
+otras dos se comportaran igual.
 
-- **La raíz es la grilla y no las identidades fiscales.** Identidades y clientes son
-  configuración: se tocan al empezar y después casi nunca. Dejar una de ellas de portada le
-  cobra un toque a la pantalla que se abre cien veces por semana.
-- **La tarjeta muestra solo el nombre.** Lo que hace falta ahí es reconocer el modelo de un
+Cada elemento tiene su pantalla: `/modelos/:id`, `/identidades/:id`, `/clientes/:id`; y el `+`
+lleva a `/modelos/nuevo`, `/identidades/nueva`, `/clientes/nuevo`.
+
+- **El markup y los gestos viven en `components/TileGrid.tsx`, una sola vez.** No es un patrón
+  visual que se pueda copiar y pegar: adentro tiene el estado de cuál tarjeta está armada, el
+  gesto y las tres precauciones de `useLongPress`. Copiado tres veces, la próxima corrección del
+  gesto arregla una pantalla y deja dos rotas — y el síntoma sería "en clientes el borrar se
+  comporta raro", que nadie va a atribuir a un `onClickCapture` que falta.
+- **Identidades y clientes dejaron de ser una tabla con el formulario de alta arriba.** Esa
+  forma no estaba mal en la computadora, pero en 360 px una tabla de cinco columnas es una pila
+  de tarjetas improvisadas con dos íconos de 44 px apretados al final de cada una — y el celular
+  es el caso principal. De paso desaparece la pregunta de "en esta pantalla cuál era el gesto".
+- **La raíz sigue siendo la grilla de modelos y no las identidades fiscales.** Identidades y
+  clientes son configuración: se tocan al empezar y después casi nunca. Dejar una de ellas de
+  portada le cobra un toque a la pantalla que se abre cien veces por semana.
+- **La tarjeta muestra solo el nombre.** Lo que hace falta ahí es reconocer el elemento de un
   vistazo y llegar con un dedo; el CUIT, el cliente y los importes están adentro, que es donde
   se los mira. Una lista con cuatro columnas diría más y se leería peor.
+- **La única excepción es "Sin verificar" en la identidad fiscal**, y está acotada a ese caso a
+  propósito: una identidad sin delegación verificada **no puede emitir**, así que sin el aviso el
+  usuario tendría que entrar tarjeta por tarjeta a buscar cuál lo está frenando. Aparece solo
+  cuando falta, o sea que el estado normal sigue siendo una grilla de nombres. La regla que fija
+  el `warning` de `TileItem` es esa: un estado que bloquea, no un dato más que mostrar.
+- **Se fue `DeleteButton` con las tablas.** El tacho de dos pasos ("¿Eliminar? Sí / No") existía
+  para las filas; en la grilla, sostener el dedo medio segundo ya *es* el paso deliberado, y lo
+  que hace falta después es un objetivo grande y sin ambigüedad. Lo que se conserva de él es la
+  decisión que importaba: nada de `window.confirm` —bloquea el hilo, no se puede estilar, y en
+  algunos navegadores queda suprimido si el usuario marcó "no mostrar más", o sea que la
+  confirmación desaparece sin que nadie se entere—, y el error del 409 se muestra **adentro de
+  la tarjeta**, porque "tiene modelos asociados" es sobre ese elemento y mostrarlo arriba obliga
+  a adivinar cuál se quejó.
 - **Se entra tocando y se borra manteniendo apretado.** Que eliminar quede detrás de un gesto
   y no de un tacho siempre visible es a propósito: en una grilla de objetivos de 150 px, un
   ícono de borrar pegado al área que se toca cien veces por semana se aprieta solo. La tarjeta
@@ -1090,12 +1116,18 @@ blanco. Confirmado por Miguel el 2026-08-26: es la forma que pidió, no una inte
   sistema —que en el celular está muy bien— pero no deja colgarle un gesto propio ni mostrar
   dos renglones por opción, y el CUIT abajo del nombre es lo que distingue dos clientes que se
   llaman parecido.
-- **El id a editar viaja en la URL** (`/identidades?editar=<id>`), no en un estado compartido.
-  Es lo que hace que el gesto sea un link común: sin eso haría falta un canal aparte para
-  decirle a la pantalla de identidades con qué fila arrancar. De paso, las dos pantallas de
-  listas pasaron a **editar además de dar de alta**, con el mismo formulario y un `key` que lo
-  remonta al cambiar de fila — copiar la prop al estado con un efecto es el mismo resultado con
-  un render de más y una forma conocida de pisar lo que el usuario ya tipeó.
+- **El id a editar viaja en el path** (`/identidades/<id>`), no en un estado compartido. Es lo
+  que hace que el gesto sea un link común: sin eso haría falta un canal aparte para decirle a la
+  pantalla de identidades con qué fila arrancar. Fue `?editar=<id>` sobre la lista mientras la
+  edición era un formulario arriba de una tabla; con una pantalla por elemento el path dice lo
+  mismo sin que haya que explicar la URL. El alta y la edición comparten componente, con un `key`
+  que lo remonta al cambiar de id — copiar la prop al estado con un efecto es el mismo resultado
+  con un render de más y una forma conocida de pisar lo que el usuario ya tipeó.
+- **El alta vuelve a la grilla; la edición se queda y dice "Guardado".** La tarjeta nueva en la
+  grilla es la confirmación de que se creó, y es además donde el usuario iba a ir igual. En la
+  edición no hay tarjeta nueva que mirar, así que hace falta decirlo — y el cartel se apaga al
+  primer cambio, que es la forma más barata de que nadie salga creyendo que guardó lo que acaba
+  de tipear.
 - **El formulario es controlado desde afuera.** Que el editor se guarde el estado adentro no
   serviría para la pantalla de importación, que después de dar de alta un cliente tiene que
   meterle el id al formulario que el usuario ya empezó a tocar.
@@ -1163,12 +1195,6 @@ dependencia con su propio build. Revisar cuando el editor de facturas traiga dra
   delegación faltante y el usuario iría a otorgar una que ya tiene. **Pasó de verdad el
   2026-08-26:** ARCA homologación no contestó, salió el 502, y el cartel rojo se leyó como un
   rechazo. Ver *ARCA → Los 502 son transitorios*.
-- **El tacho de basura confirma en dos pasos y no con `window.confirm`.** Ese diálogo bloquea
-  el hilo, no se puede estilar, y en algunos navegadores queda suprimido si el usuario marcó
-  "no mostrar más" — o sea que la confirmación desaparece sin que nadie se entere y el
-  próximo click borra directo. El error del 409 se muestra **en la fila**, no arriba de la
-  tabla: "tiene modelos asociados" es sobre esa fila, y mostrarlo arriba obliga a adivinar
-  cuál se quejó.
 
 ## Ownership scoping (2026-08-26)
 `user_id` en `fiscal_identities` y `customers`, todas las queries de esas dos tablas

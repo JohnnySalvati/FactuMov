@@ -145,7 +145,7 @@ export function NewTemplatePage() {
       {noIdentities && (
         <Notice kind="warn">
           Todavía no cargaste ninguna identidad fiscal, y un modelo necesita saber desde qué
-          CUIT emitís. <Link to="/identidades">Cargá la primera</Link> y volvé.
+          CUIT emitís. <Link to="/identidades/nueva">Cargá la primera</Link> y volvé.
         </Notice>
       )}
 
@@ -191,7 +191,7 @@ export function NewTemplatePage() {
               <Notice kind="warn">
                 El PDF lo emitió el CUIT <strong className="mono">{draft.issuer_tax_id}</strong>,
                 que no está entre tus identidades fiscales.{' '}
-                <Link to="/identidades">Cargalo</Link> o elegí otro más abajo.
+                <Link to="/identidades/nueva">Cargalo</Link> o elegí otro más abajo.
               </Notice>
             )}
 

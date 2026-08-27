@@ -92,9 +92,9 @@ export function TemplateEditor({
           }))}
           value={value.fiscal_identity_id}
           onChange={(id) => patch({ fiscal_identity_id: id })}
-          // El "mantener apretado" aterriza en la pantalla que ya existe, con la fila abierta
-          // para editar: el id viaja en la URL justamente para que esto sea un link común.
-          onEditCurrent={(id) => navigate(`/identidades?editar=${id}`)}
+          // El "mantener apretado" aterriza en la pantalla de esa identidad fiscal. El id
+          // viaja en el path justamente para que esto sea un link común.
+          onEditCurrent={(id) => navigate(`/identidades/${id}`)}
           editHint="Tocá para cambiar · mantené apretado para editarla"
           manageTo="/identidades"
           manageLabel="Administrar identidades fiscales"
@@ -110,7 +110,7 @@ export function TemplateEditor({
           }))}
           value={value.customer_id}
           onChange={(id) => patch({ customer_id: id })}
-          onEditCurrent={(id) => navigate(`/clientes?editar=${id}`)}
+          onEditCurrent={(id) => navigate(`/clientes/${id}`)}
           editHint="Tocá para cambiar · mantené apretado para editarlo"
           manageTo="/clientes"
           manageLabel="Administrar clientes"

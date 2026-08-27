@@ -288,81 +288,14 @@ button.link {
 
 /* --- Listas ------------------------------------------------------------------------- */
 /*
- * En angosto cada fila es una tarjeta con la etiqueta de la columna al lado del dato; en
- * ancho vuelve a ser una tabla de verdad.
+ * Acá vivían las tablas que en angosto se volvían tarjetas con `data-label`. Se fueron enteras
+ * cuando las tres pantallas de listado —modelos, identidades fiscales y clientes— pasaron a la
+ * grilla de tarjetas: ya no queda ninguna `<table>` en la app.
  *
- * Se hace con CSS y `data-label` en vez de renderizar dos árboles distintos según el ancho.
- * Con JS habría que elegir un breakpoint en el cliente, y ese número se desincroniza del CSS
- * el día que alguien toque uno de los dos. Además el markup sigue siendo una `<table>`, que
- * es lo que un lector de pantalla necesita para anunciar "columna X, fila Y".
+ * El truco era bueno y está anotado en CLAUDE.md por si vuelve a hacer falta. Lo que no se
+ * justifica es dejar ciento y pico de líneas de CSS que no pinta ningún elemento: la próxima
+ * persona que las lea va a buscar la tabla que las usa.
  */
-
-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-thead {
-  /* Oculta el encabezado sin sacarlo del árbol de accesibilidad: `display: none` se lo
-     escondería también al lector de pantalla, y ahí las celdas pierden su nombre. */
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
-
-tbody tr {
-  display: block;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 0.6rem 0.75rem;
-  margin-bottom: 0.75rem;
-}
-
-tbody tr:last-child {
-  margin-bottom: 0;
-}
-
-td {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 1rem;
-  padding: 0.35rem 0;
-  border: none;
-}
-
-/* La etiqueta de la columna, que en la tabla vive en el `<th>`. */
-td::before {
-  content: attr(data-label);
-  color: var(--muted);
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  flex: 0 0 auto;
-}
-
-/* Las celdas con un bloque adentro —el estado de la delegación— no entran en dos columnas:
-   la etiqueta va arriba y el contenido abajo, a lo ancho. */
-td.block {
-  display: block;
-}
-
-td.block::before {
-  display: block;
-  margin-bottom: 0.35rem;
-}
-
-td.actions {
-  justify-content: flex-end;
-  padding-top: 0.5rem;
-}
-
-td.actions::before {
-  content: '';
-}
 
 .empty {
   color: var(--muted);
@@ -421,23 +354,6 @@ button.danger {
   background: var(--danger);
   border-color: var(--danger);
   color: #fff;
-}
-
-.confirm-group {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.confirm-group button {
-  width: auto;
-  padding: 0.4rem 0.9rem;
-}
-
-.delete-error {
-  color: var(--danger);
-  font-size: 0.85rem;
-  text-align: right;
 }
 
 /* --- Pantalla ancha ----------------------------------------------------------------- */
@@ -529,57 +445,6 @@ button.danger {
     font-size: inherit;
   }
 
-  /* La tabla vuelve a ser una tabla. */
-  thead {
-    position: static;
-    width: auto;
-    height: auto;
-    clip-path: none;
-  }
-
-  th {
-    text-align: left;
-    padding: 0.55rem 0.5rem;
-    border-bottom: 1px solid var(--border);
-    font-size: 0.78rem;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-    color: var(--muted);
-  }
-
-  tbody tr {
-    display: table-row;
-    border: none;
-    border-radius: 0;
-    padding: 0;
-    margin: 0;
-  }
-
-  td {
-    display: table-cell;
-    padding: 0.55rem 0.5rem;
-    border-bottom: 1px solid var(--border);
-    vertical-align: middle;
-  }
-
-  td::before {
-    content: none;
-  }
-
-  td.block {
-    display: table-cell;
-  }
-
-  tbody tr:last-child td {
-    border-bottom: none;
-  }
-
-  td.actions {
-    width: 1%;
-    white-space: nowrap;
-    text-align: right;
-  }
-
   button.icon {
     width: auto;
     min-width: 0;
@@ -587,28 +452,13 @@ button.danger {
     padding: 0.15rem 0.35rem;
     font-size: 1rem;
   }
-
-  .confirm-group {
-    display: inline-flex;
-    gap: 0.4rem;
-    white-space: nowrap;
-  }
-
-  .confirm-group button {
-    padding: 0.25rem 0.6rem;
-    font-size: 0.85rem;
-  }
-
-  .delete-error {
-    display: inline-block;
-  }
 }
 
-/* --- Grilla de modelos --------------------------------------------------------------- */
+/* --- Grilla de tarjetas --------------------------------------------------------------- */
 /*
- * La pantalla de entrada. Tarjetas cuadradas con el nombre y nada más: es la pantalla que se
- * abre cien veces por semana para hacer siempre lo mismo, y lo único que hace falta ahí es
- * reconocer el modelo y llegar con un dedo.
+ * La forma de las tres pantallas de listado: modelos, identidades fiscales y clientes.
+ * Tarjetas cuadradas con el nombre y nada más — lo único que hace falta ahí es reconocer el
+ * elemento y llegar con un dedo. El markup y los gestos están en `components/TileGrid.tsx`.
  */
 
 .tiles {
@@ -652,6 +502,17 @@ button.danger {
   overflow-wrap: anywhere;
 }
 
+/* El aviso corto de una tarjeta. Va chico y en el tono de advertencia a propósito: no compite
+   con el nombre, que sigue siendo lo que se lee primero. */
+.tile-badge {
+  font-size: 0.72rem;
+  line-height: 1.2;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+
 .tile-new {
   border-style: dashed;
   color: var(--muted);
@@ -689,6 +550,15 @@ button.danger {
 .tile-error {
   color: var(--danger);
   font-size: 0.78rem;
+}
+
+/* El badge y la fecha de la última verificación, en un renglón. */
+.delegation-state {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  font-size: 0.85rem;
 }
 
 .back {
@@ -871,20 +741,16 @@ button.danger {
   border-top: 1px dashed var(--border);
 }
 
+.totals-note {
+  font-size: 0.82rem;
+  color: var(--muted);
+  margin: 0;
+}
+
 /* El control nativo de archivo no se puede estilar y en el celular es el objetivo más chico de
    la pantalla. Sigue existiendo —es el que abre el selector— pero lo dispara un botón. */
 .hidden-file {
   display: none;
-}
-
-/* La fila que se está editando arriba, para no perderla de vista en una lista larga. */
-tbody tr.editing {
-  border-color: var(--accent);
-  background: #eef4fe;
-}
-
-td.actions {
-  gap: 0.25rem;
 }
 
 /* --- Pantalla ancha, parte dos ------------------------------------------------------- */
@@ -922,10 +788,4 @@ td.actions {
     align-self: flex-end;
     min-width: 280px;
   }
-
-  tbody tr.editing td {
-    background: #eef4fe;
-  }
 }
-
-.totals-note { font-size: 0.82rem; color: var(--muted); margin: 0; }

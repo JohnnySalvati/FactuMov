@@ -4,8 +4,10 @@ import { AppLayout } from './components/AppLayout'
 import { RequireAuth } from './components/RequireAuth'
 import { AuthProvider } from './auth/AuthProvider'
 import { ConfirmEmailPage } from './pages/ConfirmEmailPage'
+import { CustomerPage } from './pages/CustomerPage'
 import { CustomersPage } from './pages/CustomersPage'
 import { FiscalIdentitiesPage } from './pages/FiscalIdentitiesPage'
+import { FiscalIdentityPage } from './pages/FiscalIdentityPage'
 import { LoginPage } from './pages/LoginPage'
 import { NewTemplatePage } from './pages/NewTemplatePage'
 import { RegisterPage } from './pages/RegisterPage'
@@ -34,8 +36,16 @@ export function App() {
                   router ordena por especificidad y `nuevo` le gana a `:id` igual. */}
               <Route path="/modelos/nuevo" element={<NewTemplatePage />} />
               <Route path="/modelos/:id" element={<TemplatePage />} />
+              {/* Identidades y clientes siguen la misma forma que los modelos: la grilla en
+                  la ruta pelada y una pantalla por elemento. Que el id vaya en el path y no
+                  como `?editar=` es lo que hace que el "mantener apretado" del editor de
+                  modelos sea un link común. */}
               <Route path="/identidades" element={<FiscalIdentitiesPage />} />
+              <Route path="/identidades/nueva" element={<FiscalIdentityPage />} />
+              <Route path="/identidades/:id" element={<FiscalIdentityPage />} />
               <Route path="/clientes" element={<CustomersPage />} />
+              <Route path="/clientes/nuevo" element={<CustomerPage />} />
+              <Route path="/clientes/:id" element={<CustomerPage />} />
             </Route>
           </Route>
 
