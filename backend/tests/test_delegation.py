@@ -228,3 +228,145 @@ def test_verify_delegation_is_rate_limited(client, fiscal_identity, wsfe_returns
         assert verify(client, fiscal_identity).status_code == 200
 
     assert verify(client, fiscal_identity).status_code == 429
+
+
+# --- El aviso del usuario y la revocación ----------------------------------------------
+#
+# Delegar tiene dos partes y la segunda es de FactuMov: el contribuyente designa, y después hay
+# que aceptar esa designación a mano en ARCA. WSFE contesta el mismo código 600 antes y después
+# de la designación, así que `delegation_claimed_at` es lo único que separa los dos estados —
+# ver `models/fiscal_identity.py`.
+
+
+def claim(client, fiscal_identity):
+    return client.post(f"/fiscal-identities/{fiscal_identity.id}/claim-delegation")
+
+
+def test_claiming_records_the_notice_when_arca_still_says_no(
+    client, db, fiscal_identity, wsfe_returns
+):
+    wsfe_returns(NOT_DELEGATED)
+
+    response = claim(client, fiscal_identity)
+
+    assert response.status_code == 200
+    assert response.json()["granted"] is False
+    assert response.json()["delegation_claimed_at"] is not None
+    db.refresh(fiscal_identity)
+    assert fiscal_identity.delegation_claimed_at is not None
+
+
+def test_claiming_verifies_first_and_records_nothing_when_it_already_works(
+    client, db, fiscal_identity, wsfe_returns
+):
+    """El usuario pudo haber delegado en otra pestaña entre que cargó la pantalla y apretó.
+
+    Anotar el aviso igual dispararía trabajo manual del operador para algo que ya funciona.
+    """
+    wsfe_returns(OK)
+
+    response = claim(client, fiscal_identity)
+
+    assert response.json()["granted"] is True
+    assert response.json()["delegation_claimed_at"] is None
+    db.refresh(fiscal_identity)
+    assert fiscal_identity.delegation_claimed_at is None
+    assert fiscal_identity.delegation_verified_at is not None
+
+
+def test_the_first_notice_is_the_one_that_counts(client, db, fiscal_identity, wsfe_returns):
+    """La fecha mide cuánto hace que esa persona espera. Pisarla con cada click la borraría."""
+    wsfe_returns(NOT_DELEGATED)
+
+    first = claim(client, fiscal_identity).json()["delegation_claimed_at"]
+    second = claim(client, fiscal_identity).json()["delegation_claimed_at"]
+
+    assert second == first
+
+
+def test_verifying_does_not_record_a_notice(client, db, fiscal_identity, wsfe_returns):
+    """El chequeo automático de la pantalla no puede afirmar nada en nombre del usuario."""
+    wsfe_returns(NOT_DELEGATED)
+
+    verify(client, fiscal_identity)
+
+    db.refresh(fiscal_identity)
+    assert fiscal_identity.delegation_claimed_at is None
+
+
+def test_getting_verified_clears_the_notice(client, db, fiscal_identity, wsfe_returns):
+    """El aviso existía para explicar una espera que ya terminó."""
+    wsfe_returns(NOT_DELEGATED)
+    claim(client, fiscal_identity)
+
+    wsfe_returns(OK)
+    response = verify(client, fiscal_identity)
+
+    assert response.json()["delegation_claimed_at"] is None
+    db.refresh(fiscal_identity)
+    assert fiscal_identity.delegation_claimed_at is None
+
+
+def test_a_revoked_delegation_stops_being_verified(client, db, fiscal_identity, wsfe_returns):
+    """`delegation_verified_at` siempre dijo "esto era verdad en esta fecha".
+
+    Esto es lo que le da consecuencias: cuando ARCA vuelve a decir que no, la identidad deja de
+    poder emitir. Sin esto la app se enteraría recién con un rechazo al emitir.
+    """
+    wsfe_returns(OK)
+    verify(client, fiscal_identity)
+    db.refresh(fiscal_identity)
+    assert fiscal_identity.delegation_verified_at is not None
+
+    wsfe_returns(NOT_DELEGATED)
+    response = verify(client, fiscal_identity)
+
+    assert response.json()["granted"] is False
+    assert response.json()["delegation_verified_at"] is None
+    db.refresh(fiscal_identity)
+    assert fiscal_identity.delegation_verified_at is None
+
+
+def test_a_transient_arca_failure_does_not_unverify_anything(
+    client, db, fiscal_identity, wsfe_returns
+):
+    """Solo el 600 desverifica. Un ARCA caído es un 502 y no toca la fila.
+
+    Es la contracara del test de arriba, y es lo que hace que desverificar sea seguro: cualquier
+    respuesta que no sea "no apareció el CUIT en la lista de relaciones" levanta excepción en
+    `check_delegation` justamente para que una respuesta ambigua no le saque a nadie la
+    posibilidad de emitir.
+    """
+    wsfe_returns(OK)
+    verify(client, fiscal_identity)
+
+    wsfe_returns(RequestsConnectionError("cortó"))
+    assert verify(client, fiscal_identity).status_code == 502
+
+    db.refresh(fiscal_identity)
+    assert fiscal_identity.delegation_verified_at is not None
+
+
+def test_claiming_on_someone_elses_identity_is_404(client, db, other_user, wsfe_returns):
+    wsfe_returns(NOT_DELEGATED)
+    ajena = make_fiscal_identity(db, user_id=other_user.id)
+
+    assert claim(client, ajena).status_code == 404
+
+
+def test_claiming_needs_a_session(anonymous_client, fiscal_identity, wsfe_returns):
+    wsfe_returns(NOT_DELEGATED)
+
+    assert claim(anonymous_client, fiscal_identity).status_code == 401
+
+
+def test_claiming_shares_the_arca_budget_with_verifying(client, fiscal_identity, wsfe_returns):
+    """Los dos salen a ARCA, y la cuota es del certificado: un presupuesto por endpoint dejaría
+    gastar el doble alternando entre ellos."""
+    from factumov.routers.fiscal_identity import _VERIFY_DELEGATION_LIMITER
+
+    wsfe_returns(NOT_DELEGATED)
+    for _ in range(_VERIFY_DELEGATION_LIMITER.limit):
+        assert verify(client, fiscal_identity).status_code == 200
+
+    assert claim(client, fiscal_identity).status_code == 429

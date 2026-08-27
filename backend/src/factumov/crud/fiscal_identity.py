@@ -88,7 +88,47 @@ def mark_delegation_verified(db: Session, fiscal_identity: FiscalIdentity) -> Fi
 
     `func.now()` y no `datetime.now()`, igual que `user_session.revoke`: el reloj es el de la
     base, que es el mismo con el que se comparan las demás fechas.
+
+    Borra el aviso del usuario, que ya cumplió su función: existía para explicar por qué una
+    delegación que él dice haber otorgado todavía no anda. Contestada esa pregunta, dejarlo
+    puesto haría que los tres estados de la pantalla dejaran de ser excluyentes. Y si algún día
+    la delegación se revoca, el aviso que corresponde es uno nuevo y no el de hace un año.
     """
     fiscal_identity.delegation_verified_at = func.now()
+    fiscal_identity.delegation_claimed_at = None
+    db_flush(db, exception_map)
+    return fiscal_identity
+
+
+def mark_delegation_claimed(db: Session, fiscal_identity: FiscalIdentity) -> FiscalIdentity:
+    """Registra que el usuario dice haber otorgado la delegación, con ARCA diciendo que no.
+
+    Es lo único que separa "todavía no delegó" de "delegó y falta que FactuMov acepte la
+    designación", porque WSFE contesta el mismo 600 en los dos casos — ver
+    `models/fiscal_identity.py`.
+
+    No se pisa si ya había uno. La fecha que importa es la del **primer** aviso: es la que
+    mide cuánto hace que esa persona está esperando, y es la que acota el reenvío del mail al
+    operador. Pisarla con cada click convertiría un botón en un generador de mails.
+    """
+    if fiscal_identity.delegation_claimed_at is None:
+        fiscal_identity.delegation_claimed_at = func.now()
+        db_flush(db, exception_map)
+    return fiscal_identity
+
+
+def clear_delegation_verified(db: Session, fiscal_identity: FiscalIdentity) -> FiscalIdentity:
+    """ARCA dice que ya no estamos delegados para este CUIT: la verificación deja de valer.
+
+    `delegation_verified_at` siempre significó "esto era verdad en esta fecha" y no "esto es
+    verdad" — la delegación se revoca del lado de ARCA sin avisarnos. Esto es lo que hace que
+    esa distinción tenga consecuencias en vez de ser una nota al pie: cuando una verificación
+    vuelve negativa, la columna se limpia y la identidad deja de poder emitir.
+
+    Solo se llega acá con un `granted=False`, que es el código 600 y nada más. Cualquier otra
+    respuesta de ARCA levanta excepción en `wsfe.check_delegation` justamente para que una
+    respuesta ambigua no pueda desverificar a nadie.
+    """
+    fiscal_identity.delegation_verified_at = None
     db_flush(db, exception_map)
     return fiscal_identity

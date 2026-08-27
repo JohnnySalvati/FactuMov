@@ -42,6 +42,10 @@ class FiscalIdentityRead(BaseModel):
     # cartel de "todavía falta delegar". No entra por ningún schema de escritura: lo escribe
     # la verificación contra ARCA, no el cliente.
     delegation_verified_at: datetime | None
+    # Cuándo el usuario dijo "ya delegué" con ARCA todavía diciendo que no. Es lo que le
+    # permite a la pantalla tener tres estados en vez de dos, que es la diferencia entre
+    # decirle "andá a delegar" a alguien que ya delegó y decirle que espere.
+    delegation_claimed_at: datetime | None
     created_at: datetime
     updated_at: datetime
 
@@ -72,19 +76,23 @@ class FiscalIdentityUpdate(BaseModel):
 
 
 class DelegationStatus(BaseModel):
-    """La respuesta de `POST /fiscal-identities/{id}/verify-delegation`.
+    """La respuesta de los dos endpoints de delegación: `verify-delegation` y `claim-delegation`.
 
     Sale con 200 tanto si la delegación está como si no: preguntar y que te contesten "no
     todavía" no es un error del cliente. El 4xx quedaría reservado para un pedido mal hecho,
     y esto está bien hecho — la respuesta simplemente es negativa.
+
+    Los dos endpoints devuelven lo mismo porque los dos contestan la misma pregunta; lo que
+    cambia es qué escriben cuando la respuesta es que no.
     """
 
     granted: bool
     # `None` cuando `granted`. Cuando no, es el texto con el que ARCA lo explicó, que sirve
     # de guía al usuario y de pista al soporte.
     message: str | None = None
-    # El mismo valor que quedó en la fila. Ahorra un GET para refrescar la pantalla.
+    # Los dos valores que quedaron en la fila. Ahorran un GET para refrescar la pantalla.
     delegation_verified_at: datetime | None = None
+    delegation_claimed_at: datetime | None = None
     # El CUIT al que hay que autorizar en ARCA — el del certificado de FactuMov. Va solo en la
     # respuesta negativa, que es la única donde hay una instrucción que dar: cuando la
     # delegación ya está, repetir a quién había que autorizar no le sirve a la pantalla.

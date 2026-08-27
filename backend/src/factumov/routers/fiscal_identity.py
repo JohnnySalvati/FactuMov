@@ -28,6 +28,7 @@ from factumov.schemas.fiscal_identity import (
 )
 from factumov.services import arca, wsfe
 from factumov.services.rate_limit import RateLimiter
+from factumov.services.wsfe import DelegationCheck
 
 logger = logging.getLogger(__name__)
 
@@ -51,10 +52,15 @@ def get_fiscal_identity_or_404(
 FiscalIdentityDep = Annotated[FiscalIdentity, Depends(get_fiscal_identity_or_404)]
 
 # Verificar la delegación sale a WSAA y a WSFE, y esa cuota la fija ARCA contra el
-# certificado de FactuMov, que es uno solo para todos los usuarios. Diez por hora es de sobra
-# para alguien que acaba de entrar a ARCA y viene a apretar "ya está": la delegación no
-# cambia varias veces por hora.
-_VERIFY_DELEGATION_LIMITER = RateLimiter(limit=10, window_seconds=60 * 60)
+# certificado de FactuMov, que es uno solo para todos los usuarios.
+#
+# Eran diez por hora cuando la única forma de gastarlos era apretar el botón. Ahora la
+# pantalla verifica sola al abrir una identidad que todavía no está verificada, así que el
+# presupuesto lo comparten un gesto deliberado y una consulta automática: alguien que está
+# configurando tres CUIT y navega entre ellos llegaba a diez sin hacer nada raro. Treinta
+# sigue siendo un techo bajo —la delegación no cambia varias veces por hora— y deja lugar para
+# que el chequeo automático no le coma el turno al botón.
+_VERIFY_DELEGATION_LIMITER = RateLimiter(limit=30, window_seconds=60 * 60)
 
 
 @router.get("", response_model=list[FiscalIdentityRead])
@@ -113,37 +119,23 @@ def delete_fiscal_identity(
         raise HTTPException(status_code=409, detail="No se puede eliminar, existen asociaciones")
 
 
-@router.post("/{fiscal_identity_id}/verify-delegation", response_model=DelegationStatus)
-def verify_delegation(
-    fiscal_identity: FiscalIdentityDep, db: SessionDep, user: CurrentUserDep
-) -> DelegationStatus:
-    """Le pregunta a ARCA si FactuMov ya puede emitir por este CUIT.
+def _ask_arca(fiscal_identity: FiscalIdentity, db: SessionDep, user_id: str) -> DelegationCheck:
+    """Le pregunta a ARCA si FactuMov puede emitir por este CUIT, y traduce el fallo a un 502.
 
-    **200 con `granted=False`** cuando la delegación no está: el request estaba bien hecho y
-    la respuesta es simplemente que no. Un 4xx haría que la UI tuviera que distinguir "te
-    equivocaste" de "todavía no autorizaste", que son cosas distintas.
-
-    **502** cuando no se pudo preguntar —ARCA caído, certificado mal configurado, respuesta
-    ilegible—. El detalle no se propaga: "WSAA rechazó el TRA" no le dice nada al usuario y sí
-    filtra cómo está armado nuestro lado. El traceback queda en el log.
-
-    Es POST y no GET aunque parezca una consulta: sale a la red, tarda segundos y **escribe**
-    `delegation_verified_at`. Un GET con esos tres atributos es algo que un proxy o un
-    prefetch del navegador pueden repetir solos.
+    El commit cierra la transacción del request *antes* de la llamada SOAP, que puede tardar
+    decenas de segundos. Sin esto, la conexión a Postgres se queda tomada y con una transacción
+    abierta todo ese rato — el mismo problema, y la misma solución, que el commit explícito del
+    registro antes de mandar el mail. `rollback()` no sirve: bajo el
+    `join_transaction_mode="create_savepoint"` del fixture de tests revertiría al savepoint y se
+    llevaría puestas las filas que el test armó.
     """
-    enforce_rate_limit(_VERIFY_DELEGATION_LIMITER, str(user.id))
+    enforce_rate_limit(_VERIFY_DELEGATION_LIMITER, user_id)
 
-    # El commit cierra la transacción del request *antes* de la llamada SOAP, que puede tardar
-    # decenas de segundos. Sin esto, la conexión a Postgres se queda tomada y con una
-    # transacción abierta todo ese rato — el mismo problema, y la misma solución, que el
-    # commit explícito del registro antes de mandar el mail. `rollback()` no sirve: bajo el
-    # `join_transaction_mode="create_savepoint"` del fixture de tests revertiría al savepoint
-    # y se llevaría puestas las filas que el test armó.
     tax_id = fiscal_identity.tax_id
     db.commit()
 
     try:
-        check = wsfe.check_delegation(tax_id)
+        return wsfe.check_delegation(tax_id)
     except ArcaError:
         # El `logger.exception` no es decorativo: es la **única** forma de saber por qué falló.
         # El detalle no puede ir en la respuesta —no le dice nada al usuario y filtra cómo
@@ -156,20 +148,94 @@ def verify_delegation(
             "contestó. Probá de nuevo en un momento.",
         )
 
-    if not check.granted:
-        return DelegationStatus(
-            granted=False,
-            message=check.message,
-            delegation_verified_at=fiscal_identity.delegation_verified_at,
-            delegate_tax_id=arca.get_delegate_tax_id(),
-        )
 
-    fiscal_identity_crud.mark_delegation_verified(db, fiscal_identity)
-    # Refresca el `func.now()` que quedó como expresión SQL sin evaluar, para poder
-    # devolver el timestamp real y no un objeto de SQLAlchemy.
+def _apply(
+    db: SessionDep, fiscal_identity: FiscalIdentity, check: DelegationCheck, *, claim: bool
+) -> DelegationStatus:
+    """Escribe lo que la respuesta de ARCA implica y arma el cuerpo de la respuesta.
+
+    Tres transiciones, y las tres son sobre el par de columnas que la pantalla lee:
+
+    - **Que sí**: se sella `delegation_verified_at` y se borra el aviso del usuario, que ya
+      cumplió su función.
+    - **Que no, sobre una identidad que estaba verificada**: se limpia la verificación. Es lo
+      que le da consecuencias a que `delegation_verified_at` haya significado siempre "esto era
+      verdad en esta fecha": la delegación se revoca del lado de ARCA sin avisarnos, y sin esto
+      la app se enteraría recién con un rechazo al emitir.
+    - **Que no, con `claim`**: se registra que el usuario dice haber delegado, que es lo único
+      que distingue "no delegó" de "delegó y falta que aceptemos la designación".
+
+    `claim` es un flag y no dos funciones porque es exactamente la única diferencia entre los
+    dos endpoints: los dos preguntan lo mismo y difieren en qué escriben cuando la respuesta es
+    que no.
+    """
+    if check.granted:
+        fiscal_identity_crud.mark_delegation_verified(db, fiscal_identity)
+    else:
+        if fiscal_identity.delegation_verified_at is not None:
+            fiscal_identity_crud.clear_delegation_verified(db, fiscal_identity)
+        if claim:
+            fiscal_identity_crud.mark_delegation_claimed(db, fiscal_identity)
+
+    # Refresca los `func.now()` que quedaron como expresiones SQL sin evaluar, para poder
+    # devolver timestamps reales y no objetos de SQLAlchemy.
     db.commit()
     db.refresh(fiscal_identity)
     return DelegationStatus(
-        granted=True,
+        granted=check.granted,
+        message=None if check.granted else check.message,
         delegation_verified_at=fiscal_identity.delegation_verified_at,
+        delegation_claimed_at=fiscal_identity.delegation_claimed_at,
+        # Va solo en la respuesta negativa, que es la única donde hay una instrucción que dar.
+        delegate_tax_id=None if check.granted else arca.get_delegate_tax_id(),
     )
+
+
+@router.post("/{fiscal_identity_id}/verify-delegation", response_model=DelegationStatus)
+def verify_delegation(
+    fiscal_identity: FiscalIdentityDep, db: SessionDep, user: CurrentUserDep
+) -> DelegationStatus:
+    """Le pregunta a ARCA si FactuMov ya puede emitir por este CUIT. **No afirma nada.**
+
+    Es el que dispara la pantalla sola al abrir una identidad sin verificar, y también el que
+    dispara el link del mail que le avisa al operador que aceptó una designación. Los dos son
+    "andá a fijarte", no "ya está": la única fuente de verdad es ARCA, y cualquier otra cosa
+    sería alguien afirmando algo que después se descubre al emitir.
+
+    **200 con `granted=False`** cuando la delegación no está: el request estaba bien hecho y la
+    respuesta es simplemente que no. Un 4xx haría que la UI tuviera que distinguir "te
+    equivocaste" de "todavía no autorizaste", que son cosas distintas.
+
+    **502** cuando no se pudo preguntar —ARCA caído, certificado mal configurado, respuesta
+    ilegible—. El detalle no se propaga: "WSAA rechazó el TRA" no le dice nada al usuario y sí
+    filtra cómo está armado nuestro lado. El traceback queda en el log.
+
+    Es POST y no GET aunque parezca una consulta: sale a la red, tarda segundos y **escribe**
+    `delegation_verified_at`. Un GET con esos tres atributos es algo que un proxy o un prefetch
+    del navegador pueden repetir solos.
+    """
+    check = _ask_arca(fiscal_identity, db, str(user.id))
+    return _apply(db, fiscal_identity, check, claim=False)
+
+
+@router.post("/{fiscal_identity_id}/claim-delegation", response_model=DelegationStatus)
+def claim_delegation(
+    fiscal_identity: FiscalIdentityDep, db: SessionDep, user: CurrentUserDep
+) -> DelegationStatus:
+    """El usuario dice que ya delegó. Se verifica igual, y recién si ARCA dice que no se anota.
+
+    **Verifica antes de anotar, y ese orden es la decisión.** Entre que la pantalla cargó y que
+    el usuario apretó el botón pudo haber ido a ARCA en otra pestaña y otorgado la delegación:
+    en ese caso lo que corresponde es verificarla y terminar, no registrar un aviso que
+    dispararía trabajo manual del lado del operador para algo que ya funciona.
+
+    Cuando ARCA sigue diciendo que no, el aviso queda guardado y es lo único que separa los dos
+    estados que WSFE colapsa en el código 600: "todavía no delegó" y "delegó, y falta que
+    FactuMov acepte la designación en `adminrel/pending.aspx`". Esa aceptación es un click con
+    Clave Fiscal y no existe ningún web service que la haga ni que la anuncie, así que la
+    información tiene que venir del usuario.
+
+    Mismos status que `verify-delegation`, y por los mismos motivos.
+    """
+    check = _ask_arca(fiscal_identity, db, str(user.id))
+    return _apply(db, fiscal_identity, check, claim=True)

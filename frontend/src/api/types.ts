@@ -69,6 +69,14 @@ export interface FiscalIdentity {
   start_date: string | null
   /** Cuándo ARCA confirmó la delegación por última vez. `null` = nunca se verificó. */
   delegation_verified_at: string | null
+  /**
+   * Cuándo el usuario dijo «ya delegué» con ARCA todavía diciendo que no. `null` = no avisó.
+   *
+   * Delegar tiene dos partes y la segunda es de FactuMov: el contribuyente designa, y después
+   * hay que aceptar esa designación a mano en ARCA. WSFE contesta lo mismo en los dos casos,
+   * así que este campo es lo único que distingue «no delegó» de «está esperándonos».
+   */
+  delegation_claimed_at: string | null
   created_at: string
   updated_at: string
 }
@@ -86,6 +94,7 @@ export interface DelegationStatus {
   granted: boolean
   message: string | null
   delegation_verified_at: string | null
+  delegation_claimed_at: string | null
   /** El CUIT de FactuMov, el que hay que autorizar en ARCA. Solo viene cuando `!granted`. */
   delegate_tax_id: string | null
 }

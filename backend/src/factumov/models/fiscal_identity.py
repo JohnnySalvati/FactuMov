@@ -42,6 +42,22 @@ class FiscalIdentity(Base, TimestampMixin):
     # Vive acá y no en `User` porque un usuario puede tener varios CUIT y cada uno se delega
     # por separado.
     delegation_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Cuándo el usuario dijo "ya delegué" sin que ARCA todavía lo confirme. `None` = no avisó.
+    #
+    # Existe porque delegar tiene **dos** partes y la segunda es nuestra: el contribuyente
+    # designa a FactuMov como representante, y después FactuMov tiene que aceptar esa
+    # designación en `adminrel/pending.aspx`, a mano y con Clave Fiscal. Hasta que eso pasa,
+    # WSFE contesta exactamente lo mismo que si el usuario no hubiera hecho nada — el código
+    # 600 no distingue "no delegó" de "delegó y está pendiente de aceptación".
+    #
+    # Esa es toda la razón de esta columna: es la única información que separa esos dos
+    # estados, y no puede salir de ARCA porque ARCA no la publica. Sale del usuario, que es el
+    # único que sabe si ya hizo su parte. Sin ella la pantalla le dice a quien ya delegó que
+    # vaya a delegar, o sea que le manda a rehacer un trámite que hizo bien.
+    #
+    # Timestamp y no booleano, como las otras tres del proyecto: el "cuándo" es lo que la
+    # pantalla muestra ("nos avisaste hace 2 horas") y lo que acota el reenvío del aviso.
+    delegation_claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     invoice_templates: Mapped[list["InvoiceTemplate"]] = relationship(
         back_populates="fiscal_identity", passive_deletes="all"
