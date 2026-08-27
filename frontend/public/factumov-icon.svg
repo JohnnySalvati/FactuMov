@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-label="FactuMov">
+  <title>FactuMov</title>
+  <!--
+    Ícono de producto de FactuMov, en la familia del de Gastin: fondo redondeado con el radio
+    de un ícono de app, un solo trazo grueso de punta redonda que dibuja la inicial, y un punto
+    donde ese trazo termina. El punto es la cita al círculo blanco del interruptor de InSoft
+    —la pastilla verde encendida—, que es la idea de toda la marca.
+
+    La F no se puede dibujar de un trazo continuo como la G de Gastin: le falta una rama. Son
+    dos subpaths de un mismo `path` — el asta con el travesaño de arriba, y el travesaño del
+    medio, que arranca sobre el asta (su punta redonda queda escondida adentro) y termina en el
+    punto. Ese travesaño más corto es el análogo exacto de la barra interna de la G, o sea que
+    el punto cae en el mismo lugar de la letra.
+  -->
+  <defs>
+    <!-- El mismo gradiente vertical de la pastilla de InSoft. `userSpaceOnUse` sobre la altura
+         real de la letra (26 a 94, o sea el trazo con sus puntas) y no sobre el bounding box,
+         que en un path con stroke no incluye el ancho del trazo. -->
+    <linearGradient id="fm-stroke" gradientUnits="userSpaceOnUse" x1="0" y1="26" x2="0" y2="94">
+      <stop offset="0" stop-color="#2EBD59"/>
+      <stop offset="1" stop-color="#1B9E4B"/>
+    </linearGradient>
+  </defs>
+  <rect width="120" height="120" rx="23" fill="#0F172A"/>
+  <path d="M82 33 H38 V87 M38 60 H68" fill="none" stroke="url(#fm-stroke)"
+        stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="68" cy="60" r="6" fill="#FFFFFF"/>
+</svg>

@@ -35,7 +35,7 @@ export function LoginPage() {
 
   return (
     <div className="centered">
-      <h1>Entrar a FactuMov</h1>
+      <h1>Entrar</h1>
       <form className="card stack" onSubmit={onSubmit}>
         <div>
           <label htmlFor="email">Email</label>

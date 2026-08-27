@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router'
 
 import { AppLayout } from './components/AppLayout'
+import { PublicLayout } from './components/PublicLayout'
 import { RequireAuth } from './components/RequireAuth'
 import { AuthProvider } from './auth/AuthProvider'
 import { ConfirmEmailPage } from './pages/ConfirmEmailPage'
@@ -24,14 +25,19 @@ export function App() {
     <AuthProvider>
       <BrowserRouter>
         <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/registro" element={<RegisterPage />} />
-          {/* Las dos rutas que nombran un link de mail. Sus nombres los fijan
-              `_CONFIRMATION_PATH` y `_PASSWORD_RESET_PATH` del backend: cambiarlos acá rompe
-              los mails que ya se enviaron. */}
-          <Route path="/confirmar-email" element={<ConfirmEmailPage />} />
-          <Route path="/olvide-password" element={<ForgotPasswordPage />} />
-          <Route path="/restablecer-password" element={<ResetPasswordPage />} />
+          {/* Las cinco pantallas sin sesión comparten layout: la marca arriba y el crédito
+              de InSoft abajo. Es también el único lugar de la app donde se muestra la marca a
+              alguien que todavía no entró. */}
+          <Route element={<PublicLayout />}>
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/registro" element={<RegisterPage />} />
+            {/* Las dos rutas que nombran un link de mail. Sus nombres los fijan
+                `_CONFIRMATION_PATH` y `_PASSWORD_RESET_PATH` del backend: cambiarlos acá rompe
+                los mails que ya se enviaron. */}
+            <Route path="/confirmar-email" element={<ConfirmEmailPage />} />
+            <Route path="/olvide-password" element={<ForgotPasswordPage />} />
+            <Route path="/restablecer-password" element={<ResetPasswordPage />} />
+          </Route>
 
           <Route element={<RequireAuth />}>
             <Route element={<AppLayout />}>

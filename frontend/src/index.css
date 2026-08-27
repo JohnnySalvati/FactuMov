@@ -18,7 +18,15 @@
   --border: #dfe3e8;
   --text: #1c2430;
   --muted: #64707d;
-  --accent: #1f6feb;
+  /* El verde de InSoft, oscurecido.
+     El de la marca es `#2EBD59` (y su fondo de gradiente `#1B9E4B`), pero ninguno de los dos
+     sirve para lo que este token hace: sobre el blanco de las tarjetas dan 2,5:1 y 3,5:1 de
+     contraste, y `--accent` es el color de **todos los links** y el fondo de los botones
+     primarios con texto blanco encima — o sea texto, que necesita 4,5:1. Este verde es el
+     mismo tono, bajado hasta 5,0:1 contra el blanco y 4,7:1 contra el fondo de la página.
+     El verde de la marca sigue vivo tal cual adentro de los SVG del ícono y del logo, que es
+     donde es un dibujo y no un texto. */
+  --accent: #15803d;
   --accent-text: #ffffff;
   --danger: #c0392b;
   --danger-bg: #fdecea;
@@ -81,9 +89,31 @@ a {
 }
 
 .app-brand {
+  flex: 1;
+  /* Sin esto el `<img>` del ícono se apoya en la línea de base del texto y queda unos píxeles
+     alto respecto del nombre. */
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+/* El ícono con el nombre al lado. Se usa en la barra de las pantallas con sesión y, más
+   grande, arriba de las cinco pantallas sin sesión. */
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.brand img {
+  display: block;
+  flex: 0 0 auto;
+}
+
+.brand-name {
   font-weight: 700;
   font-size: 1.05rem;
-  flex: 1;
+  letter-spacing: -0.01em;
 }
 
 .app-nav {
@@ -150,6 +180,44 @@ a {
   max-width: 380px;
   margin: 2rem auto;
   padding: 0 1rem;
+}
+
+/* --- Marca en las pantallas sin sesión ----------------------------------------------- */
+
+.public-brand {
+  display: flex;
+  justify-content: center;
+  padding-top: 2rem;
+}
+
+.public-brand .brand-name {
+  font-size: 1.5rem;
+}
+
+/* El `.centered` de adentro trae sus propios 2rem de margen, que arriba de la marca sumarían
+   el doble de aire del que hace falta. */
+.public-layout .centered {
+  margin-top: 1.25rem;
+}
+
+.insoft-credit {
+  margin: 2rem 0 3rem;
+  text-align: center;
+}
+
+.insoft-credit a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  text-decoration: none;
+  /* El objetivo táctil del proyecto: es un link que en el celular se toca con el dedo. */
+  min-height: var(--touch);
+}
+
+.insoft-credit img {
+  display: block;
 }
 
 /* --- Superficies -------------------------------------------------------------------- */

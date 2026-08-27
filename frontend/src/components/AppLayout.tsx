@@ -1,5 +1,6 @@
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router'
 
+import { BrandMark } from './BrandMark'
 import { useAuth } from '../auth/useAuth'
 
 /** El marco de las pantallas con sesión: barra arriba y `<Outlet />` para la ruta activa. */
@@ -21,7 +22,9 @@ export function AppLayout() {
   return (
     <>
       <header className="app-header">
-        <span className="app-brand">FactuMov</span>
+        <span className="app-brand">
+          <BrandMark />
+        </span>
         <nav className="app-nav">
           <NavLink to="/" className={inTemplates ? 'active' : ''}>
             Modelos

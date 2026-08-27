@@ -2,9 +2,22 @@
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>FactuMov</title>
+    <meta
+      name="description"
+      content="Facturá desde el celular: importás una factura, la guardás como modelo y emitís con CAE."
+    />
+
+    <!-- El SVG es la fuente del ícono y los navegadores modernos lo prefieren: escala solo a
+         cualquier tamaño. Los PNG salen de él con `scripts/render_icons.py`. -->
+    <link rel="icon" type="image/svg+xml" href="/factumov-icon.svg" />
+    <!-- iOS no lee el manifest ni acepta SVG acá, así que su ícono va aparte. -->
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <!-- El color de la barra del sistema cuando la app corre instalada. Es el blanco de la
+         barra de arriba —que es lo que queda pegado a ella— y no el fondo de la página. -->
+    <meta name="theme-color" content="#ffffff" />
   </head>
   <body>
     <div id="root"></div>
