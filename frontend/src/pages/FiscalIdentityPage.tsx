@@ -391,8 +391,9 @@ function DelegationCard({
         <Notice kind="warn">
           <strong>Falta un paso nuestro.</strong> Nos avisaste el {formatDate(claimed)} y ARCA
           todavía no nos habilita. Delegar tiene dos partes: vos designás a FactuMov y nosotros
-          tenemos que aceptar esa designación en ARCA. Ya estamos en eso — vas a poder emitir con
-          este CUIT en cuanto se acepte, y no hace falta que hagas nada más.
+          tenemos que aceptar esa designación en ARCA. Ya estamos en eso —{' '}
+          <strong>te avisamos por email en cuanto puedas emitir</strong> y no hace falta que
+          hagas nada más.
         </Notice>
       )}
     </div>

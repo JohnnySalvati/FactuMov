@@ -253,3 +253,26 @@ def send_delegation_pending_email(tax_id: str, identity_name: str, user_email: s
             "habilitado.\n"
         ),
     )
+
+
+def send_delegation_ready_email(to: str, identity_name: str, tax_id: str) -> None:
+    """Le avisa al usuario que su CUIT ya puede emitir.
+
+    Cierra la única espera de la app que el usuario no puede resolver ni observar. Él hizo
+    su parte, le dijimos que faltaba un paso nuestro, y desde entonces no tiene forma de
+    saber cuándo terminó salvo volver a la pantalla a probar. Este mail es el "ya está".
+
+    Lo dispara el barrido de `services/delegation_watch.py`, o sea que llega solo. Best
+    effort: la verificación ya quedó guardada y no se puede deshacer por un SMTP caído — y
+    si el mail no sale, el usuario se entera igual la próxima vez que abra la pantalla.
+    """
+    email.send_email_best_effort(
+        to=to,
+        subject=f"Ya podés emitir con el CUIT {tax_id}",
+        body=(
+            "Hola,\n\n"
+            f"Ya aceptamos la designación en ARCA: la identidad fiscal «{identity_name}» "
+            f"(CUIT {tax_id}) quedó habilitada y podés emitir facturas con ella.\n\n"
+            "No hace falta que hagas nada más — entrá a FactuMov y emití.\n"
+        ),
+    )

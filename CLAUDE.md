@@ -304,7 +304,7 @@ Emitir = tomar un `InvoiceTemplate`, permitir retoques, y crear una `Invoice` nu
 ### Tablas del modelo
 | Tabla | Rol |
 |---|---|
-| `FiscalIdentity` | Emisor: CUIT, razón social, condición IVA, IIBB, domicilio, estado de la delegación |
+| `FiscalIdentity` | Emisor: CUIT, razón social, condición IVA, IIBB, domicilio, estado de la delegación (verificada, y el aviso del usuario de que ya delegó) |
 | `Customer` | Receptor |
 | `InvoiceTemplate` | Emisor + cliente + punto de venta + concepto (la letra se deduce) |
 | `InvoiceTemplateLine` | Descripción, cantidad, precio unitario, alícuota, posición |
@@ -1055,7 +1055,9 @@ en el cwd de un contenedor no coordina eso, y encima no sobrevive al deploy.
   revertiría al savepoint y se llevaría puestas las filas que el test armó.
 - **`delegation_verified_at` es timestamp y no booleano**, por lo mismo que
   `email_confirmed_at`: la delegación se puede revocar del lado de ARCA sin avisarnos, así
-  que la columna dice "esto era verdad en esta fecha", no "esto es verdad".
+  que la columna dice "esto era verdad en esta fecha", no "esto es verdad". Desde el
+  2026-08-27 eso tiene consecuencias y no es solo una advertencia — ver *Delegar tiene dos
+  partes*.
 
 ### `GET /customers/lookup/{tax_id}`
 - **No escribe nada.** Igual que `POST /invoice-templates/import`, devuelve una propuesta que
@@ -1143,6 +1145,128 @@ Que ese mismo CUIT dé `PadronError` **no es un bug**: el padrón de homologaci�
 contribuyentes de prueba, no los reales. Los tres de arriba sí están, y devuelven una
 condición IVA cada uno, que es lo que hace que la deducción por `idImpuesto` esté probada
 contra datos de ARCA y no solo contra un `SimpleNamespace`.
+
+## Delegar tiene dos partes, y la segunda es nuestra (2026-08-27)
+Descubierto mirando `serviciosweb.afip.gob.ar/clavefiscal/adminrel/pending.aspx`: el CUIT
+`27177624441` había designado a FactuMov para Facturación Electrónica y la fila decía
+**Aceptada: Pendiente**, con un link "Aceptar" esperando. O sea que el trámite no termina cuando
+el contribuyente confirma:
+
+1. El **representado** entra a ARCA con su Clave Fiscal → *Administrador de Relaciones* → *Nueva
+   Relación* → servicio Facturación Electrónica → representante `20182810674`.
+2. **FactuMov acepta esa designación** en *Aceptación de Designación*, con la Clave Fiscal del
+   `20182810674`. A mano.
+3. Recién ahí WSFE habilita el CUIT.
+
+**Hasta el paso 2, WSFE contesta exactamente lo mismo que si nadie hubiera delegado nada**: el
+código 600. Esa es la raíz de todo lo que sigue.
+
+- **El `granted=True` de `27177624441` que figura en *Verificado contra ARCA homologación* es de
+  homo, y homo no ejercita el paso 2.** La tabla ya estaba rotulada así; queda anotado igual
+  porque es fácil leerla como si el camino de producción estuviera probado entero.
+
+### El estado que ARCA no publica
+`fiscal_identities.delegation_claimed_at` (migración `c8a1e4f60b92`): cuándo el usuario dijo "ya
+delegué" con ARCA todavía diciendo que no.
+
+- **Es la única forma de separar dos estados que WSFE colapsa**, y no puede salir de ARCA: no
+  hay ningún web service que liste las designaciones pendientes. Sale del usuario, que es el
+  único que sabe si hizo su parte.
+- **Sin ella la pantalla daba consejo equivocado.** A quien ya había hecho los cinco pasos y
+  estaba en nuestra lista de pendientes le decía "entrá a autorizarnos" con los cinco pasos de
+  nuevo: mandarlo a rehacer un trámite que hizo bien, sin contarle que la demora es nuestra.
+- Timestamp y no booleano, como las otras tres del proyecto.
+- **La verificación lo borra.** El aviso existía para explicar una espera que terminó, y
+  dejarlo puesto haría que los tres estados de la pantalla dejaran de ser excluyentes.
+
+### `POST /fiscal-identities/{id}/claim-delegation`
+- **Verifica antes de anotar.** Entre que la pantalla cargó y que el usuario apretó pudo haber
+  delegado en otra pestaña; ahí lo que corresponde es verificar y terminar, no anotar un aviso
+  que le genera trabajo manual al operador para algo que ya funciona.
+- **El primer aviso es el que queda.** `mark_delegation_claimed` no pisa la fecha: mide cuánto
+  hace que esa persona espera, y pisarla convertiría un botón en un generador de mails.
+- **Comparte el presupuesto de ARCA con `verify-delegation`**, que subió de 10 a 30 por hora
+  porque ahora la pantalla verifica sola al abrir. La cuota es del certificado, o sea de todos
+  los usuarios: presupuestos separados por endpoint dejarían gastar el doble alternando.
+- Es un flag `claim` y no dos funciones porque es exactamente la única diferencia entre los dos
+  endpoints: los dos preguntan lo mismo y difieren en qué escriben cuando la respuesta es no.
+
+### El aviso al operador
+`OPERATOR_EMAIL` en `EmailSettings`, y `notifications.send_delegation_pending_email`.
+
+- **Es el único mail de la app que no le va a un usuario.** Aceptar la designación es un click
+  con Clave Fiscal que ARCA no expone por ningún web service, así que la app no puede enterarse
+  sola de que alguien la está esperando. El click del usuario es la única evidencia que va a
+  existir nunca, y desperdiciarla deja al usuario esperando a que el operador mire la lista de
+  pendientes de ARCA por casualidad.
+- **Una sola vez por identidad**, colgado del primer aviso.
+- **Opcional y sin default.** Es el único destinatario que no sale de una fila de `users`, y una
+  instalación sin operador tiene que poder arrancar. Sin él, el aviso queda en el log — misma
+  política que `send_email_best_effort`, un escalón antes.
+
+### El rechequeo, en dos lugares
+Nadie nos avisa cuando la delegación empieza a funcionar, así que lo único que se puede hacer es
+volver a preguntar. Se pregunta en dos momentos y por dos motivos distintos:
+
+- **Al abrir la identidad en la pantalla**, una vez por montaje (`useRef`, contra el doble
+  montaje de StrictMode). Solo si no está verificada **o si la verificación tiene más de una
+  semana** — repreguntar por una verificada hace días no aprende nada y gasta cuota compartida.
+  Es silencioso: no lo pidió nadie, así que un ARCA caído deja la pantalla como estaba en vez de
+  pintar un cartel rojo.
+- **`services/delegation_watch.py`, cada 15 minutos**, sobre las que avisaron y siguen sin
+  verificar. Lo que se espera es que una persona lea un mail y haga un click, o sea tiempo
+  humano: 15 minutos deja la espera del usuario en unos 7 de promedio y cuesta 4 llamadas por
+  hora **por identidad pendiente**, que en el caso normal son cero.
+
+**Descartado: un link en el mail del operador para avisarle al sistema que ya aceptó.** Era la
+idea original y tiene dos problemas. El primero es que un link que *afirma* "ya acepté" es una
+segunda fuente de verdad capaz de mentir —aceptaste otra fila, clickeaste antes de tiempo— y el
+usuario se enteraría con un rechazo al emitir. Eso se arregla haciendo que el link solo
+**dispare** la verificación. Pero entonces queda el segundo: con el barrido cada 15 minutos, el
+link ahorra siete minutos a cambio de un endpoint sin sesión protegido por un secreto en el
+`.env`, que además los clientes de mail suelen prefetchear. No paga.
+
+Detalles del barrido:
+
+- **`pg_try_advisory_xact_lock`, no el bloqueante** de las otras dos veces que el proyecto usa
+  este mecanismo. Si otro worker ya está barriendo, este tick no tiene trabajo: quedarse
+  esperando solo acumularía barridos para dispararlos juntos cuando el candado se libere.
+- **Un solo commit, al final.** No es una optimización: el candado es de transacción, así que
+  commitear adentro del loop lo soltaría en la primera identidad verificada.
+- **Los mails salen después del commit y fuera del candado.** Lo primero porque el mail dice que
+  ya puede emitir y tiene que ser verdad cuando llega; lo segundo porque un SMTP colgado no
+  puede quedarse con el candado que le impide barrer al resto.
+- **Solo mira las pendientes**, no todas las identidades. Barrer las verificadas sería buscar
+  revocaciones sobre filas que nadie está mirando y multiplicar por N la cuota de ARCA.
+- **Deja de repreguntar después de 30 días** (`CLAIM_MAX_AGE_DAYS`). Un aviso de hace un mes que
+  sigue sin verificar no se arregla preguntando cuatro veces por hora para siempre: o el usuario
+  se confundió de trámite o hay algo mal de nuestro lado, y las dos cosas necesitan una persona.
+  El rechequeo al abrir la pantalla sigue funcionando, así que nadie queda sin salida.
+- **El fallo de una identidad no se lleva puestas a las demás.** ARCA homologación corta
+  conexiones cada tanto, y la próxima vuelta es en 15 minutos.
+- **Vive en el `lifespan` de `main.py`** y no en un cron ni en un worker aparte. Un comando
+  colgado del Task Scheduler es más prolijo en producción y **en desarrollo simplemente no
+  corre**, o sea que el circuito que esto cierra no se podría probar donde se prueba todo. Con N
+  workers barre uno solo: se encarga el advisory lock.
+- **Duerme antes de la primera vuelta.** Arrancar barriendo alargaría el arranque con una
+  llamada que nadie pidió y convertiría un proceso que crashea y se reinicia en un martillo
+  contra ARCA.
+- **`asyncio.to_thread`**, porque `recheck_pending` es sincrónico de punta a punta (SQLAlchemy
+  sync y zeep sobre requests) y correrlo derecho bloquearía el event loop toda la conversación
+  con ARCA.
+
+### La revocación deja de ser una nota al pie
+`delegation_verified_at` siempre significó "esto era verdad en esta fecha". Ahora tiene
+consecuencias: **una respuesta negativa sobre una identidad verificada limpia la columna**, y la
+identidad deja de poder emitir. Antes la app se enteraba de una revocación recién con un rechazo
+al emitir, que es el peor momento posible.
+
+- **Solo el 600 desverifica.** Cualquier otra respuesta de ARCA levanta excepción en
+  `check_delegation` —eso ya era así— justamente para que una respuesta ambigua o un ARCA caído
+  no le saquen a nadie la posibilidad de emitir. Hay un test de cada lado.
+- **Por eso el estado verificado ya no tiene botón.** Lo tenía para poder repreguntar, pero
+  depender de que alguien se acuerde de apretarlo para detectar una revocación nunca iba a
+  funcionar. Lo reemplaza el rechequeo por vencimiento al abrir la pantalla.
 
 ## Emisión con CAE (2026-08-27)
 `POST /invoice-templates/{id}/emit` le pide el CAE a ARCA y guarda la factura; el `GET
