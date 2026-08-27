@@ -65,6 +65,14 @@ class EmailSettings(BaseSettings):
     # server de Vite habla TLS (la cookie de sesión es Secure): con http el link del mail
     # llega inservible, y el navegador dice ERR_EMPTY_RESPONSE en vez de nombrar la causa.
     app_base_url: str = "https://localhost:5173"
+    # A quién avisarle de lo que solo puede resolver una persona con la Clave Fiscal de
+    # FactuMov. Hoy es un caso: aceptar en ARCA la designación de un usuario que ya delegó.
+    #
+    # Sin default y opcional, no obligatorio: es el único destinatario de la app que no sale de
+    # una fila de `users`, y una instalación sin operador —un entorno de pruebas, un worker que
+    # solo emite— tiene que poder arrancar igual. Cuando falta, el aviso queda en el log en vez
+    # de tumbar nada, que es la misma política que `send_email_best_effort`.
+    operator_email: str | None = None
 
     @model_validator(mode="after")
     def _reject_unusable_transport(self) -> "EmailSettings":

@@ -2,7 +2,7 @@ import logging
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
 from factumov.crud import fiscal_identity as fiscal_identity_crud
 from factumov.dependencies import (
@@ -26,7 +26,7 @@ from factumov.schemas.fiscal_identity import (
     FiscalIdentityRead,
     FiscalIdentityUpdate,
 )
-from factumov.services import arca, wsfe
+from factumov.services import arca, notifications, wsfe
 from factumov.services.rate_limit import RateLimiter
 from factumov.services.wsfe import DelegationCheck
 
@@ -220,7 +220,10 @@ def verify_delegation(
 
 @router.post("/{fiscal_identity_id}/claim-delegation", response_model=DelegationStatus)
 def claim_delegation(
-    fiscal_identity: FiscalIdentityDep, db: SessionDep, user: CurrentUserDep
+    fiscal_identity: FiscalIdentityDep,
+    background: BackgroundTasks,
+    db: SessionDep,
+    user: CurrentUserDep,
 ) -> DelegationStatus:
     """El usuario dice que ya delegó. Se verifica igual, y recién si ARCA dice que no se anota.
 
@@ -235,7 +238,31 @@ def claim_delegation(
     Clave Fiscal y no existe ningún web service que la haga ni que la anuncie, así que la
     información tiene que venir del usuario.
 
+    **El aviso al operador sale de acá, y es la mitad que importa.** Aceptar la designación es
+    un click con Clave Fiscal que ARCA no expone por ningún web service, así que la app no
+    puede enterarse sola de que alguien la está esperando. Este es el único momento en que
+    existe evidencia de que hay una persona del otro lado, y desperdiciarlo dejaría al usuario
+    esperando a que el operador mire la lista de pendientes de ARCA por casualidad.
+
+    Sale **una sola vez por identidad**, con el primer aviso: `mark_delegation_claimed` no pisa
+    la fecha, así que un usuario impaciente apretando el botón no se convierte en veinte mails.
+    Y va en `BackgroundTasks` porque acompaña a algo que ya quedó guardado — el aviso está
+    commiteado antes de que el mail se intente, así que un SMTP caído no puede hacer que el
+    usuario reintente un click que ya surtió efecto.
+
     Mismos status que `verify-delegation`, y por los mismos motivos.
     """
     check = _ask_arca(fiscal_identity, db, str(user.id))
-    return _apply(db, fiscal_identity, check, claim=True)
+    # Antes de escribir: lo que decide si hay que avisar es que este aviso sea nuevo, y después
+    # del `_apply` ya no se puede distinguir del que estaba.
+    already_claimed = fiscal_identity.delegation_claimed_at is not None
+    status = _apply(db, fiscal_identity, check, claim=True)
+
+    if not already_claimed and status.delegation_claimed_at is not None:
+        background.add_task(
+            notifications.send_delegation_pending_email,
+            fiscal_identity.tax_id,
+            fiscal_identity.name,
+            user.email,
+        )
+    return status

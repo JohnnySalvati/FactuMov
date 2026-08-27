@@ -10,6 +10,7 @@ venta" y cuáles son un error que no sabemos leer.
 test de router eso escribiría filas fuera de la transacción del fixture.
 """
 
+import logging
 from types import SimpleNamespace
 
 import pytest
@@ -18,6 +19,7 @@ from zeep.exceptions import Fault
 
 from factumov.exceptions import ArcaError, WsfeError
 from factumov.services import arca, wsfe
+from factumov.services import email as email_service
 from tests.conftest import FALLBACK_DELEGATE_TAX_ID
 from tests.factories import make_fiscal_identity
 
@@ -370,3 +372,95 @@ def test_claiming_shares_the_arca_budget_with_verifying(client, fiscal_identity,
         assert verify(client, fiscal_identity).status_code == 200
 
     assert claim(client, fiscal_identity).status_code == 429
+
+
+# --- El aviso al operador --------------------------------------------------------------
+#
+# Es el único mail de la app que no le va a un usuario. Existe porque aceptar la designación es
+# un click con Clave Fiscal que ARCA no expone por ningún web service: la app no puede
+# enterarse sola de que alguien la está esperando, y el click del usuario es la única evidencia
+# que va a existir nunca.
+
+
+@pytest.fixture
+def operator(monkeypatch):
+    """Un `OPERATOR_EMAIL` configurado. Por default la suite no tiene, como la app."""
+    monkeypatch.setenv("OPERATOR_EMAIL", "operador@factumov.com.ar")
+    email_service.get_email_settings.cache_clear()
+    yield "operador@factumov.com.ar"
+    email_service.get_email_settings.cache_clear()
+
+
+def test_claiming_mails_the_operator(client, fiscal_identity, wsfe_returns, operator, sent_emails):
+    wsfe_returns(NOT_DELEGATED)
+
+    claim(client, fiscal_identity)
+
+    assert len(sent_emails) == 1
+    assert sent_emails[0].to == operator
+    assert fiscal_identity.tax_id in sent_emails[0].subject
+
+
+def test_the_notice_names_who_is_waiting(
+    client, fiscal_identity, user, wsfe_returns, operator, sent_emails
+):
+    """El operador tiene que poder encontrar la fila en ARCA y saber a quién está frenando."""
+    wsfe_returns(NOT_DELEGATED)
+
+    claim(client, fiscal_identity)
+
+    body = sent_emails[0].body
+    assert fiscal_identity.tax_id in body
+    assert user.email in body
+    assert "Aceptación de Designación" in body
+
+
+def test_only_the_first_claim_mails(client, fiscal_identity, wsfe_returns, operator, sent_emails):
+    """Un usuario impaciente apretando el botón no puede convertirse en veinte mails."""
+    wsfe_returns(NOT_DELEGATED)
+
+    claim(client, fiscal_identity)
+    claim(client, fiscal_identity)
+    claim(client, fiscal_identity)
+
+    assert len(sent_emails) == 1
+
+
+def test_a_claim_that_verifies_mails_nobody(
+    client, fiscal_identity, wsfe_returns, operator, sent_emails
+):
+    """No hay nada que aceptar: la delegación ya andaba cuando el usuario apretó."""
+    wsfe_returns(OK)
+
+    claim(client, fiscal_identity)
+
+    assert sent_emails == []
+
+
+def test_verifying_mails_nobody(client, fiscal_identity, wsfe_returns, operator, sent_emails):
+    """El chequeo automático de la pantalla no puede generar trabajo manual del operador."""
+    wsfe_returns(NOT_DELEGATED)
+
+    verify(client, fiscal_identity)
+
+    assert sent_emails == []
+
+
+def test_without_an_operator_the_claim_still_works(
+    client, db, fiscal_identity, wsfe_returns, sent_emails, caplog
+):
+    """No hay a quién avisarle, y eso no puede romperle el request al usuario.
+
+    El aviso queda en el log, que es donde lo va a ver quien configura el `.env` — misma
+    política que `send_email_best_effort`, un escalón antes.
+    """
+    wsfe_returns(NOT_DELEGATED)
+
+    with caplog.at_level(logging.WARNING):
+        response = claim(client, fiscal_identity)
+
+    assert response.status_code == 200
+    assert sent_emails == []
+    db.refresh(fiscal_identity)
+    assert fiscal_identity.delegation_claimed_at is not None
+    assert fiscal_identity.tax_id in caplog.text

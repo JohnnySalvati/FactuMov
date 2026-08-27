@@ -8,6 +8,7 @@ a leer código de sockets.
 Los textos van en español, como el resto de los strings de cara al usuario.
 """
 
+import logging
 from urllib.parse import quote
 
 # Importado como módulo, no por nombre: `send_email` se resuelve en cada llamada, así que
@@ -15,6 +16,8 @@ from urllib.parse import quote
 # funciones miran el parche. Con `from ... import send_email` la referencia quedaría fija al
 # importar y el parche no llegaría acá nunca.
 from factumov.services import arca, email
+
+logger = logging.getLogger(__name__)
 
 _CONFIRMATION_PATH = "/confirmar-email"
 _PASSWORD_RESET_PATH = "/restablecer-password"
@@ -197,5 +200,56 @@ def send_delegation_instructions_email(to: str) -> None:
             "5. Confirmá.\n\n"
             "Después cargá tu CUIT en FactuMov: verificamos la autorización solos, no hace "
             "falta que nos avises.\n"
+        ),
+    )
+
+
+def send_delegation_pending_email(tax_id: str, identity_name: str, user_email: str) -> None:
+    """Le avisa al operador que hay una designación esperando que la acepte en ARCA.
+
+    **Es el único mail de la app que no le va a un usuario**, y existe porque hay un paso
+    del alta que ninguna máquina puede dar: aceptar la designación en «Aceptación de
+    Designación» es un click con Clave Fiscal, y ARCA no publica las designaciones
+    pendientes por ningún web service. O sea que la app no puede enterarse sola de que
+    alguien la está esperando.
+
+    Lo que sí puede es enterarse por el usuario. Este mail sale del momento exacto en que
+    él dice "ya delegué" y ARCA sigue diciendo que no — el único instante en que existe
+    evidencia de que hay una persona esperando del otro lado.
+
+    Best effort, y sale una sola vez por identidad: lo dispara el **primer** aviso, no cada
+    click. Ver `crud/fiscal_identity.mark_delegation_claimed`.
+
+    Sin `OPERATOR_EMAIL` configurado no hay a quién avisarle, y eso no puede romper el
+    request del usuario: queda un WARNING en el log, que es donde lo va a ver quien
+    configura el `.env`. Es la misma política que `send_email_best_effort`, un escalón
+    antes.
+    """
+    settings = email.get_email_settings()
+    if settings.operator_email is None:
+        logger.warning(
+            "El CUIT %s (%s) dice haber delegado y ARCA todavía no lo confirma, pero no hay "
+            "OPERATOR_EMAIL configurado para avisar. Hay que aceptar la designación a mano "
+            "en el «Administrador de Relaciones» de ARCA.",
+            tax_id,
+            user_email,
+        )
+        return
+
+    email.send_email_best_effort(
+        to=settings.operator_email,
+        subject=f"Aceptar la delegación del CUIT {tax_id}",
+        body=(
+            f"{user_email} cargó la identidad fiscal «{identity_name}» (CUIT {tax_id}) "
+            "y dice que ya nos designó como representante en ARCA. WSFE todavía no nos "
+            "habilita, así que falta aceptar la designación:\n\n"
+            "1. Entrá a arca.gob.ar con la Clave Fiscal de FactuMov.\n"
+            "2. Abrí 'Administrador de Relaciones de Clave Fiscal'.\n"
+            "3. Entrá en 'Aceptación de Designación'.\n"
+            f"4. Aceptá la fila del representado {tax_id}, servicio Facturación "
+            "Electrónica.\n\n"
+            "El usuario ya sabe que la demora es nuestra y está esperando. No hace falta "
+            "que le contestes: FactuMov reverifica contra ARCA y le avisa cuando quede "
+            "habilitado.\n"
         ),
     )

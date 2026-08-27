@@ -67,7 +67,16 @@ def email_settings(monkeypatch):
     siguientes una config armada con variables que `monkeypatch` está por deshacer.
     """
     monkeypatch.setitem(email_service.EmailSettings.model_config, "env_file", None)
-    for absent in ("SMTP_USER", "SMTP_PASSWORD", "SMTP_PORT", "SMTP_STARTTLS"):
+    # `OPERATOR_EMAIL` va en la lista de ausentes y no fijado: el default de la app es que no
+    # haya operador, y hay un test que cubre justamente esa rama. Los que necesitan uno lo
+    # ponen ellos.
+    for absent in (
+        "SMTP_USER",
+        "SMTP_PASSWORD",
+        "SMTP_PORT",
+        "SMTP_STARTTLS",
+        "OPERATOR_EMAIL",
+    ):
         monkeypatch.delenv(absent, raising=False)
     monkeypatch.setenv("SMTP_HOST", "smtp.test")
     monkeypatch.setenv("EMAIL_FROM", "FactuMov <no-reply@test>")
