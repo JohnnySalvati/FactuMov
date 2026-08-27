@@ -52,22 +52,44 @@ export function NewTemplatePage() {
   const fileInput = useRef<HTMLInputElement>(null)
 
   async function onFileChosen(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0]
-    // El input se limpia siempre: sin esto, elegir el mismo archivo dos veces seguidas no
-    // dispara `change` y el botón parece roto.
-    event.target.value = ''
+    const input = event.target
+    const file = input.files?.[0]
     if (file === undefined) return
 
     setReading(true)
     setError(undefined)
     try {
-      const imported = await api.upload<InvoiceTemplateDraft>('/invoice-templates/import', file)
+      // Los bytes se leen **acá**, antes de armar el request. Un `File` recién elegido no es
+      // memoria: es un puntero a algo que el sistema todavía tiene que ir a buscar, y cuando ese
+      // algo lo sirve un proveedor de la nube —Google Drive en el selector de Android— la
+      // lectura puede fallar o devolver un archivo vacío. Pasándole el `File` directo al
+      // `fetch`, esa falla revienta adentro del `fetch` y llega como "no se pudo conectar con el
+      // servidor": un mensaje que manda al usuario a mirar la red cuando el problema es el
+      // archivo. Leyéndolo antes, el error aparece donde ocurre.
+      const bytes = await file.arrayBuffer().catch(() => undefined)
+      if (bytes === undefined || bytes.byteLength === 0) {
+        setError(
+          'No se pudo leer ese archivo. Si lo elegiste desde Google Drive o de otra nube, ' +
+            'bajalo al teléfono primero y volvé a intentar.',
+        )
+        return
+      }
+
+      const imported = await api.upload<InvoiceTemplateDraft>(
+        '/invoice-templates/import',
+        new Blob([bytes], { type: 'application/pdf' }),
+        file.name,
+      )
       setDraft(imported)
       setForm(fromDraft(imported))
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.detail : 'No se pudo leer el archivo.')
     } finally {
       setReading(false)
+      // El input se limpia siempre: sin esto, elegir el mismo archivo dos veces seguidas no
+      // dispara `change` y el botón parece roto. Va acá y no antes de subir porque en algunos
+      // navegadores limpiarlo suelta la referencia al archivo que todavía estamos por leer.
+      input.value = ''
     }
   }
 

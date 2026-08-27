@@ -87,11 +87,21 @@ export const api = {
   patch: <T>(path: string, body: unknown) =>
     request<T>(path, { method: 'PATCH', body: JSON.stringify(body) }),
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
-  /** Sube un archivo como `multipart/form-data`. El campo se llama `file` porque así se llama
-   *  el parámetro `UploadFile` del endpoint: FastAPI lo busca por nombre. */
-  upload: <T>(path: string, file: File) => {
+  /**
+   * Sube un archivo como `multipart/form-data`. El campo se llama `file` porque así se llama el
+   * parámetro `UploadFile` del endpoint: FastAPI lo busca por nombre.
+   *
+   * Recibe un `Blob` **ya leído** y el nombre por separado, y no el `File` que devolvió el
+   * `<input>`. Es a propósito: un `File` no es necesariamente bytes en memoria, es un puntero a
+   * algo que el sistema todavía tiene que ir a buscar, y cuando ese algo es un archivo de la
+   * nube —Google Drive en el selector de Android— la lectura puede fallar **adentro de `fetch`**.
+   * Ahí el `fetch` rechaza igual que si el server estuviera apagado y el usuario ve "no se pudo
+   * conectar con el servidor", que es una explicación falsa. Leyendo los bytes antes, ese error
+   * aparece donde ocurre y con el texto que corresponde — ver `NewTemplatePage`.
+   */
+  upload: <T>(path: string, content: Blob, filename: string) => {
     const form = new FormData()
-    form.append('file', file)
+    form.append('file', content, filename)
     return request<T>(path, { method: 'POST', body: form })
   },
 }

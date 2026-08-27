@@ -1155,6 +1155,35 @@ lleva a `/modelos/nuevo`, `/identidades/nueva`, `/clientes/nuevo`.
   encontrado", "No se puede eliminar un cliente con modelos asociados") y tener la pantalla
   diciendo una cosa y el error otra es peor que cualquiera de las dos.
 
+### El PDF que llega de la nube (2026-08-26)
+Importar una factura elegida **desde Google Drive** en el selector de Android fallaba con «No se
+pudo conectar con el servidor», que es el mensaje de `ApiError(0, …)` — el que el cliente HTTP
+usa cuando `fetch` **rechaza**, o sea cuando no hubo respuesta: backend apagado, DNS, red
+cortada. Nada de eso pasaba: la sesión andaba y el resto de las pantallas cargaban.
+
+**Un `File` recién elegido no es memoria, es un puntero.** El navegador lo resuelve recién
+cuando alguien lee sus bytes, y con un proveedor de la nube esa lectura sale a buscar el archivo
+a Drive. Si falla —o si el proveedor entrega un archivo vacío— y el `File` se le pasó directo al
+`fetch`, la falla revienta **adentro del `fetch`**, que rechaza igual que si el server no
+estuviera. De ahí el mensaje: era verdadero sobre el `fetch` y falso sobre el mundo, y mandaba a
+Miguel a mirar la red cuando el problema era el archivo.
+
+Entonces `api.upload` pasó a recibir un `Blob` ya leído más el nombre, y la pantalla lee los
+bytes con `file.arrayBuffer()` antes de armar el request. Con eso el error aparece donde ocurre y
+con el texto que corresponde: «bajalo al teléfono primero y volvé a intentar», que es la acción
+que lo resuelve. Un archivo de largo cero cae en la misma rama, porque para el usuario es el
+mismo problema.
+
+Dos detalles que van con esto:
+
+- **El `<input type=file>` se limpia en el `finally`, no antes de subir.** Se limpia porque sin
+  eso elegir el mismo archivo dos veces seguidas no dispara `change` y el botón parece roto; pero
+  hacerlo antes de leer los bytes es soltar la referencia al archivo que todavía falta leer, que
+  es una segunda forma de llegar al mismo bug.
+- **No convierte a `ApiError` un problema local.** El 415 por magic bytes y el 200 con draft
+  vacío siguen siendo del backend y siguen significando lo que significaban; esto es una tercera
+  cosa —el archivo no se pudo leer— y se contesta antes de salir a la red.
+
 ### Sin TanStack Query y sin Tailwind
 Las dos por el mismo motivo: resuelven problemas que esta app todavía no tiene.
 
