@@ -934,9 +934,20 @@ Cerradas el 2026-08-27: el **reset de contraseña**, la **visibilidad del fallo 
 **Con eso las cinco funcionalidades core están hechas** y el circuito cierra de punta a punta:
 importar un PDF, editar el modelo, guardarlo, emitir con CAE y mandarlo.
 
-1. **Segundo layout del parser** — ver *Parser → Pendiente: un segundo layout*. No bloquea
+Lo que sigue ya no es funcionalidad: es **salir a la cancha**. Las tres primeras se pidieron
+el 2026-08-27 y van en ese orden por dependencia, no por importancia — ver *Marca, landing y
+producción*.
+
+1. **Marca de FactuMov** — el logo de InSoft en la app y un ícono propio en la línea del de
+   Gastin. Es lo primero porque lo consumen las otras dos: la tarjeta de la landing, el
+   favicon, los íconos de la PWA y el encabezado de la SPA.
+2. **Producción** — la app corriendo en la VM detrás de `srv-nginx`, con su dominio propio.
+   Es lo que la landing va a linkear, así que va antes que ella.
+3. **FactuMov en la landing de InSoft** — tarjeta en *Nuestros SaaS* y entrada en el
+   lanzador de apps, apuntando a la URL del punto anterior.
+4. **Segundo layout del parser** — ver *Parser → Pendiente: un segundo layout*. No bloquea
    nada: hoy el usuario puede cargar el modelo a mano.
-2. **WhatsApp**, la otra mitad de la funcionalidad #5. Sin empezar y sin decisión tomada
+5. **WhatsApp**, la otra mitad de la funcionalidad #5. Sin empezar y sin decisión tomada
    sobre qué proveedor.
 
 Y dos cosas que la emisión dejó anotadas y no son unidades todavía:
@@ -1925,6 +1936,125 @@ Migración `2c2b5ddd2d8d`.
   `httpx` con un `StarletteDeprecationWarning`; la rama de fallback ya tiene un
   `RuntimeError` para cuando no esté ninguno. `httpx` igual sigue instalado porque
   `fastapi[standard]` lo requiere: es esperable, no un resto sin limpiar.
+
+## Marca, landing y producción (pendiente — anotado el 2026-08-27)
+Tres pedidos de Miguel del 2026-08-27 que no son funcionalidad de la app: ponerle la marca de
+InSoft, publicarla en la landing y sacarla a producción. Van en ese orden porque cada una es
+insumo de la siguiente: sin ícono no hay tarjeta ni favicon, y sin URL de producción la
+tarjeta no tiene a dónde linkear.
+
+Nada de esto está hecho todavía. Lo que sigue es el relevamiento, para que la sesión que lo
+implemente no lo tenga que rehacer.
+
+### Lo que ya existe y hay que reusar
+La landing vive en `E:\Capacitacion\InSoft\LandingPage`, **fuera de este repo y sin git**: un
+solo `insoft-v3-seo.html` (~570 líneas, CSS y JS inline), las imágenes sueltas al lado y
+`scp.ps1`, que lo publica.
+
+| Cosa | Dónde |
+|---|---|
+| Logo horizontal, vertical y tagline, en claro y oscuro | `LandingPage/insoft-logo-pack/*.svg` |
+| Ícono suelto (la pastilla verde con el círculo blanco) | `LandingPage/insoft-icono.svg` |
+| Favicons y `icon-512` ya generados | `LandingPage/insoft-logo-pack/` |
+| Paleta | `--green:#2EBD59`, `--deep:#1B9E4B`, `--night:#0E1626`, tinta `#1E293B` |
+| Tipografía de la landing | Manrope |
+
+**El logo de InSoft es un interruptor**: una pastilla con gradiente vertical `#2EBD59 →
+#1B9E4B` y un círculo blanco a la derecha, o sea encendido. Eso es la idea de toda la marca
+("el software puede ser intuitivo"), y es lo que un ícono de producto tiene que citar sin
+copiar.
+
+### El ícono en la línea de Gastin
+El de Gastin está inline en la landing (`<button class="mini">`, cerca de la línea 470) y su
+construcción es la receta a seguir:
+
+- `viewBox="0 0 120 120"`, fondo `<rect rx="23">` — o sea el radio de un ícono de app.
+- **Un solo trazo** de 14 px con `stroke-linecap="round"`, que dibuja la inicial: una `G` que
+  es un arco abierto.
+- **El trazo termina en un punto** (`<circle r="6">`), que es la cita al círculo blanco del
+  interruptor de InSoft.
+- Dos estados: apagado en grises (`#E4EAE5` / `#BDC9C0`) y encendido con fondo `#0F172A` y el
+  trazo en `var(--green)`. La landing los usa para su truquito de "encender" la tarjeta.
+
+O sea que el de FactuMov es: fondo redondeado, un trazo verde que dibuje la `F`, y el punto al
+final del trazo. La familia es la construcción, no el dibujo.
+
+**Cuidado con no inventar una tercera marca.** FactuMov hoy es azul (`--accent: #1f6feb` en
+`frontend/src/index.css`), que es el default del scaffold y no tiene nada que ver con InSoft.
+La unidad de marca incluye pasar el acento de la SPA al verde de la casa.
+
+### Lo que hay que tocar en la app
+- **`frontend/public/favicon.svg` y `frontend/public/icons.svg` son basura del scaffold** —
+  una flecha violeta y un juego de íconos de redes sociales que nadie importa. Se reemplazan y
+  se borran, respectivamente.
+- **No hay `manifest.webmanifest` ni íconos de PWA**, aunque CLAUDE.md diga "SPA/PWA" desde el
+  día uno. Es la unidad que corresponde: los íconos se generan una vez y de ahí salen los tres
+  tamaños.
+- **El encabezado de la SPA no tiene logo**, solo el texto. Va el horizontal de InSoft o el
+  lockup de FactuMov, según cómo quede el ícono.
+- **El PDF del comprobante no lleva ninguna marca** (`templates/invoice.html`). Es lo que ve el
+  cliente del usuario, no el usuario: **decisión abierta**, porque el emisor es el
+  contribuyente y no FactuMov. Lo razonable es a lo sumo un pie chiquito.
+
+### Producción
+Balance360 ya está en producción y su `docs/DEPLOYMENT.md` es la plantilla: **VM Ubuntu 24.04
+con todo en `docker-compose.prod.yml`** (servicio `db` sin puerto publicado + servicio `app`
+construido con el `Dockerfile` del repo), y **`srv-nginx` en `192.168.100.9`** terminando el
+HTTPS y proxeando por HTTP al 8000 de la VM. El `.env` de producción vive solo en la VM.
+Balance360 está publicado en `balance360.insoft.net.ar`, así que lo natural es
+`factumov.insoft.net.ar` — **a confirmar con Miguel**.
+
+Lo que FactuMov necesita y Balance360 no tenía:
+
+- **Hay una SPA que servir, no solo una API.** Balance360 es HTMX, o sea que su contenedor
+  contesta HTML y listo. Acá hay un `dist/` estático y un backend JSON, y **el prefijo `/api`
+  lo inventa el proxy de Vite**: el backend no sabe nada de él (`rewrite` en
+  `vite.config.ts`). En producción eso lo tiene que hacer alguien, y hay dos formas:
+  - **nginx en `srv-nginx` con dos `location`** — `/api/` proxeado a la VM con la barra final
+    que come el prefijo, y `/` sirviendo el `dist`. Es lo que el comentario de
+    `vite.config.ts` dice que imita el proxy, pero obliga a subir el `dist` a `.9` en cada
+    deploy, o sea un segundo camino de publicación al lado del de la VM.
+  - **un contenedor nginx más en el compose de la VM**, que sirve el `dist` y proxea `/api` al
+    `app`. El deploy sigue siendo un solo `git pull` + `up -d --build`, y `srv-nginx` no
+    necesita saber de FactuMov más que "proxeá todo a la VM". **Es la que conviene**, y de
+    paso es donde va el `client_max_body_size`.
+  - El `dist` se puede construir en el mismo Dockerfile con una etapa `node`, así el deploy no
+    depende de que alguien se acuerde de correr `npm run build`.
+- **`client_max_body_size`** cierra el pendiente que dejó anotado el endpoint de importación:
+  el guard de `MAX_UPLOAD_BYTES` acota lo que el proceso parsea, no lo que el server ingiere.
+- **`--proxy-headers` y `--forwarded-allow-ips` en uvicorn.** Sin eso `request.client` es el
+  proxy y **todos los usuarios comparten un solo cubo** en el rate limiter — ver *Rate
+  limiting*, que decidió leer `request.client` justamente porque esa reescritura es
+  responsabilidad de uvicorn.
+- **`limit_req` en nginx**, porque el limitador en memoria es un piso por worker y no un techo.
+- **El `.env` de producción**: `APP_BASE_URL` con el dominio real y `https://` (de ahí cuelgan
+  los links de los mails), `SMTP_*` reales, `OPERATOR_EMAIL` —que hoy es lo único que avisa que
+  alguien está esperando que aceptemos su designación en ARCA— y `ARCA_WSDL_CACHE_PATH` en un
+  volumen, o cada deploy vuelve a bajar los WSDL.
+- **`ARCA_ENV`: la decisión más cara de todas.** En `prod` cada emisión es un comprobante con
+  validez legal y no hay vuelta atrás — ver *Emisión con CAE*. El default es `homo` a
+  propósito. Los certificados de producción del `20182810674` ya existen y son los que usa
+  Balance360; van montados como volumen de solo lectura igual que allá
+  (`./certs:/app/certs:ro`, excluidos de la imagen por el `.dockerignore`). **Conviene salir
+  con `homo` y hacer el cambio como un paso aparte y deliberado.**
+- **Backups.** Hoy no hay ninguno de FactuMov. La sección 4 del `DEPLOYMENT.md` de Balance360
+  sirve tal cual.
+- **El barrido de delegaciones no necesita nada especial**: vive en el `lifespan` y con N
+  workers barre uno solo, por el `pg_try_advisory_xact_lock`.
+
+### La landing
+La tarjeta de FactuMov va en `#productos`, al lado de Balance360 y Gastin, y **la entrada en el
+lanzador de apps del header** (`.apps-panel`), que es donde el usuario que ya la conoce va a
+buscarla. Las dos con el mismo criterio que ya usa la página: un `chip` de estado ("En
+producción" / "Beta") y un `.go` con el link.
+
+- El texto tiene que decir qué hace en una línea, en el registro de las otras dos ("Tus
+  finanzas completas en un solo lugar…"). Algo de la forma "Facturá desde el celular en dos
+  toques: importás una factura, la guardás como modelo y emitís con CAE".
+- Las capturas van como PNG al lado del HTML y **hay que sumarlas al `scp.ps1`**, que lista los
+  archivos a subir uno por uno y no sube lo que no esté nombrado.
+- La landing no tiene git. Antes de tocarla, copia de respaldo — el `scp.ps1` ya guarda un
+  `index.html.bak` **del lado del server**, que es la única red que hay.
 
 ## Notas
 - Este archivo es un documento vivo — editalo a medida que el proyecto avance.
