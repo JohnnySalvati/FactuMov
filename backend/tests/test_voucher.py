@@ -18,7 +18,9 @@ from tests.factories import make_customer, make_fiscal_identity, make_template_c
 # has its own test below.
 COMBINATIONS = [
     (CondicionIva.INSCRIPTO, CondicionIva.INSCRIPTO, VoucherType.A),
-    (CondicionIva.INSCRIPTO, CondicionIva.MONOTRIBUTO, VoucherType.B),
+    # A y no B: Ley 27.618. ARCA rechaza la B en este par con el código 10243, verificado
+    # emitiendo las dos en homologación el 2026-08-27.
+    (CondicionIva.INSCRIPTO, CondicionIva.MONOTRIBUTO, VoucherType.A),
     (CondicionIva.INSCRIPTO, CondicionIva.EXENTO, VoucherType.B),
     (CondicionIva.INSCRIPTO, CondicionIva.FINAL, VoucherType.B),
     (CondicionIva.MONOTRIBUTO, CondicionIva.INSCRIPTO, VoucherType.C),
@@ -37,12 +39,33 @@ def test_the_letter_is_a_function_of_the_two_conditions(issuer, customer, expect
     assert voucher_type_for(issuer, customer) == expected
 
 
-def test_only_an_inscripto_selling_to_an_inscripto_gets_an_a():
-    """The A is the only letter that discriminates IVA, and only a registered taxpayer can
-    take that IVA as a credit — so it is also the only pair that produces one."""
-    with_an_a = [pair for *pair, letter in COMBINATIONS if letter == VoucherType.A]
+def test_only_an_inscripto_issues_an_a():
+    """The A is the only letter that discriminates IVA, so only a registered taxpayer emits one.
 
-    assert with_an_a == [[CondicionIva.INSCRIPTO, CondicionIva.INSCRIPTO]]
+    Its receivers are the registered taxpayer and the monotributista — the latter since Ley
+    27.618. This used to assert that the inscripto/inscripto pair was the *only* one producing
+    an A, which was wrong: ARCA refuses a B to a monotributista.
+    """
+    issuers = {issuer for issuer, _, letter in COMBINATIONS if letter == VoucherType.A}
+    receivers = {customer for _, customer, letter in COMBINATIONS if letter == VoucherType.A}
+
+    assert issuers == {CondicionIva.INSCRIPTO}
+    assert receivers == {CondicionIva.INSCRIPTO, CondicionIva.MONOTRIBUTO}
+
+
+def test_the_condition_codes_are_the_ones_arca_publishes():
+    """Guarda del bug del 2026-08-27, que no se veía desde ningún test.
+
+    `FINAL` valía 6 y `MONOTRIBUTO` 13, heredados de Balance360. Para ARCA el 6 es "Responsable
+    Monotributo" y el 13 es "Monotributista Social", así que el nombre y el código decían cosas
+    distintas — y una factura B a consumidor final, el caso más común que hay, la rechazaba
+    ARCA con el código 10243. Los valores están verificados contra
+    `FEParamGetCondicionIvaReceptor`.
+    """
+    assert CondicionIva.INSCRIPTO.value == 1
+    assert CondicionIva.EXENTO.value == 4
+    assert CondicionIva.FINAL.value == 5
+    assert CondicionIva.MONOTRIBUTO.value == 6
 
 
 def test_no_pair_ever_yields_a_credit_note():
@@ -90,8 +113,10 @@ def test_the_letter_follows_the_customer_when_it_changes(client, db, user):
     that bills them from a B into an A; a stored letter would keep saying B until somebody
     noticed, and ARCA would reject the CAE — or accept a legally wrong invoice.
     """
+    # El cliente arranca exento y no monotributista: desde la Ley 27.618 el monotributista ya
+    # recibe A, así que ese par no serviría para mostrar un cambio de letra.
     fiscal_identity = make_fiscal_identity(db, user.id, condicion_iva=CondicionIva.INSCRIPTO)
-    customer = make_customer(db, user.id, condicion_iva=CondicionIva.MONOTRIBUTO)
+    customer = make_customer(db, user.id, condicion_iva=CondicionIva.EXENTO)
     body = make_template_create(fiscal_identity.id, customer.id)
     created = client.post("/invoice-templates", json=body.model_dump(mode="json"))
 

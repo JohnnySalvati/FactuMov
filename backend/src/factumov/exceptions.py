@@ -39,6 +39,25 @@ class DuplicateUserEmailError(DuplicateError):
     """
 
 
+class DuplicateInvoiceNumberError(DuplicateError):
+    """Ya existe una factura con ese número para ese CUIT, punto de venta y letra.
+
+    Solo se llega acá por una carrera que el advisory lock de `crud/invoice.py` no atajó —o
+    porque alguien lo sacó—. Es el backstop de la base: convierte una factura duplicada en un
+    error en vez de en una fila, que es lo único que se puede hacer una vez que ARCA ya
+    autorizó las dos.
+    """
+
+
+class DelegationNotVerifiedError(Exception):
+    """Se quiso emitir con una identidad fiscal cuya delegación nunca se verificó.
+
+    Es un estado del recurso y no un error del request: la respuesta es un 409, y el remedio
+    es entrar a ARCA, otorgar la delegación y apretar "verificar". Sin este chequeo el
+    intento igual fallaría, pero contra WSFE y con un mensaje de ARCA que no dice qué hacer.
+    """
+
+
 class UnknownReferenceError(Exception):
     pass
 

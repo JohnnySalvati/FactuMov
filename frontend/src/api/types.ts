@@ -11,11 +11,16 @@
  * puede desincronizarse. El texto para la pantalla sale de `LABELS`.
  */
 
+/**
+ * Los valores son los códigos de `CondicionIVAReceptorId` de ARCA, verificados contra
+ * `FEParamGetCondicionIvaReceptor` el 2026-08-27. Antes `FINAL` era 6 y `MONOTRIBUTO` 13, los
+ * dos mal: para ARCA el 6 es "Responsable Monotributo" y el 13 es "Monotributista Social".
+ */
 export const CondicionIva = {
   INSCRIPTO: 1,
   EXENTO: 4,
-  FINAL: 6,
-  MONOTRIBUTO: 13,
+  FINAL: 5,
+  MONOTRIBUTO: 6,
 } as const
 export type CondicionIva = (typeof CondicionIva)[keyof typeof CondicionIva]
 
@@ -155,10 +160,14 @@ export function voucherTypeFor(
   customer: CondicionIva,
 ): VoucherType | undefined {
   if (issuer === CondicionIva.FINAL) return undefined
-  // Solo el inscripto puede emitir A o B, y la A solo la recibe otro inscripto. El
-  // monotributista y el exento emiten C contra cualquiera.
+  // Solo el inscripto puede emitir A o B. El monotributista y el exento emiten C contra
+  // cualquiera.
   if (issuer !== CondicionIva.INSCRIPTO) return VoucherType.C
-  return customer === CondicionIva.INSCRIPTO ? VoucherType.A : VoucherType.B
+  // La A la recibe el inscripto **y el monotributista**: desde la Ley 27.618 el inscripto que
+  // le factura a un monotributista emite A. ARCA rechaza la B en ese par con el código 10243.
+  return customer === CondicionIva.INSCRIPTO || customer === CondicionIva.MONOTRIBUTO
+    ? VoucherType.A
+    : VoucherType.B
 }
 
 export const Concepto = {
@@ -245,6 +254,104 @@ export interface InvoiceTemplateCreate {
   pos: number
   concepto: Concepto
   lines: InvoiceTemplateLineCreate[]
+}
+
+/* --- Facturas emitidas -------------------------------------------------------------- */
+
+/**
+ * Una línea de una factura ya emitida. Misma forma que `InvoiceTemplateLine` y sin `Create`:
+ * las líneas de una factura no se escriben desde afuera, salen de copiar las del modelo.
+ */
+export interface InvoiceLine {
+  id: string
+  position: number
+  description: string
+  quantity: string
+  unit_price: string
+  iva_aliquot: IvaAliquot
+}
+
+/**
+ * Una factura emitida. **Nada de esto es editable**: es lo que ARCA autorizó.
+ *
+ * El emisor y el receptor vienen **copiados** y no como ids a resolver. No es redundancia:
+ * es lo que se emitió, aunque el cliente haya cambiado de domicilio al día siguiente. Los
+ * importes vienen guardados por lo mismo — el CAE cubre esos números.
+ */
+export interface Invoice {
+  id: string
+  fiscal_identity_id: string
+  customer_id: string
+  template_id: string | null
+
+  voucher_type: VoucherType
+  pos: number
+  number: number
+  /** `B-00001-00000042`. Lo arma el backend para que la grilla, el PDF y el mail no tengan
+   *  tres versiones del mismo formato. */
+  label: string
+  date: string
+  concepto: Concepto
+  from_date: string | null
+  to_date: string | null
+  due_date: string | null
+
+  cae: string
+  cae_expiry: string
+
+  net_total: string
+  iva_total: string
+  total: string
+
+  issuer_name: string
+  issuer_tax_id: string
+  issuer_condicion_iva: CondicionIva
+  issuer_address: string | null
+  issuer_iibb: string | null
+  issuer_start_date: string | null
+
+  customer_name: string
+  customer_doc_type: DocType
+  customer_doc_number: string
+  customer_condicion_iva: CondicionIva
+  customer_address: string | null
+  customer_email: string | null
+
+  created_at: string
+  updated_at: string
+
+  lines: InvoiceLine[]
+}
+
+/**
+ * Qué comprobante saldría si se emitiera el modelo ahora. **No emite nada.**
+ *
+ * Los importes los calcula el backend con la misma función que después se los manda a ARCA.
+ * El editor sabe hacer esa cuenta y la muestra mientras se tipea, pero en la pantalla de
+ * confirmación el número deja de ser una estimación: es lo que se va a declarar, y tiene que
+ * salir de una sola fuente.
+ */
+export interface InvoicePreview {
+  voucher_type: VoucherType
+  pos: number
+  issuer_name: string
+  issuer_tax_id: string
+  customer_name: string
+  customer_doc_number: string
+  customer_email: string | null
+  net_total: string
+  iva_total: string
+  total: string
+  needs_service_dates: boolean
+  /** `null` cuando se puede emitir. Cuando no, por qué — dicho antes de apretar el botón. */
+  blocked_reason: string | null
+}
+
+/** Lo poco que el usuario decide al emitir. Sin fecha: la del comprobante es la de hoy. */
+export interface EmitRequest {
+  from_date?: string
+  to_date?: string
+  due_date?: string
 }
 
 /* --- Importación de PDF ------------------------------------------------------------- */

@@ -3,12 +3,60 @@ from enum import Enum
 
 
 class VoucherType(Enum):
-    A = "A"
-    B = "B"
-    C = "C"
-    NCA = "NCA"
-    NCB = "NCB"
-    NCC = "NCC"
+    """La letra del comprobante, con el código con el que ARCA la nombra.
+
+    El `arca_code` viaja en `CbteTipo` de WSFE y adentro del QR fiscal. Se agrega como
+    atributo y no como valor —igual que `rate` en `IvaAliquot`, y al revés que ahí— para que
+    `.value` siga siendo la letra: es lo que guarda la columna, lo que serializa Pydantic y
+    lo que espera `types.ts`. Cambiar el valor por el número habría sido una migración y un
+    cambio de contrato de la API a cambio de nada.
+    """
+
+    A = ("A", 1)
+    B = ("B", 6)
+    C = ("C", 11)
+    NCA = ("NCA", 3)
+    NCB = ("NCB", 8)
+    NCC = ("NCC", 13)
+
+    arca_code: int
+
+    def __new__(cls, value: str, arca_code: int) -> "VoucherType":
+        member = object.__new__(cls)
+        member._value_ = value
+        member.arca_code = arca_code
+        return member
+
+    @classmethod
+    def get_by_arca_code(cls, arca_code: int) -> "VoucherType | None":
+        """El tipo que ARCA nombra con ese código, o `None` si no es uno que FactuMov maneje.
+
+        `None` para las notas de débito, los recibos y todo lo demás: mejor sin tipo que con
+        uno incorrecto. Antes esto era una tabla propia en `invoice_parser.py`, escrita al
+        revés; con el código adentro del enum, la inversa se deduce y no hay dos listas que
+        puedan discrepar.
+        """
+        return next((member for member in cls if member.arca_code == arca_code), None)
+
+    @property
+    def discriminates_iva(self) -> bool:
+        """¿El comprobante muestra el IVA en una columna aparte?
+
+        Solo la A. Es lo que decide cómo se lee `unit_price`: en A el precio va **neto** y el
+        IVA se suma; en B y C el precio ya viene con el IVA adentro. Misma convención que usa
+        el parser al leer un PDF — ver CLAUDE.md → *Parser*.
+        """
+        return self in (VoucherType.A, VoucherType.NCA)
+
+    @property
+    def applies_iva(self) -> bool:
+        """¿Hay IVA en juego?
+
+        En la C no: la emite un monotributista o un exento, que no liquidan IVA. Por eso a
+        ARCA se le manda `ImpNeto == ImpTotal`, `ImpIVA = 0` y **sin** array `Iva` — mandarlo
+        con alícuota 0 es un rechazo.
+        """
+        return self in (VoucherType.A, VoucherType.NCA, VoucherType.B, VoucherType.NCB)
 
 
 class IvaAliquot(Enum):
@@ -34,9 +82,30 @@ class IvaAliquot(Enum):
 
 
 class Concepto(Enum):
-    products = "products"
-    services = "services"
-    both = "both"
+    """Qué se factura, con el código que ARCA usa en `Concepto`.
+
+    Mismo truco que `VoucherType`: el valor sigue siendo el string, que es lo que guarda la
+    columna y lo que viaja en el JSON.
+
+    Todo lo que no sea `products` obliga a mandar el período del servicio
+    (`FchServDesde`/`Hasta`) y el vencimiento del pago — ver `services/wsfe.py`.
+    """
+
+    products = ("products", 1)
+    services = ("services", 2)
+    both = ("both", 3)
+
+    arca_code: int
+
+    def __new__(cls, value: str, arca_code: int) -> "Concepto":
+        member = object.__new__(cls)
+        member._value_ = value
+        member.arca_code = arca_code
+        return member
+
+    @property
+    def needs_service_dates(self) -> bool:
+        return self is not Concepto.products
 
 
 class DocType(Enum):
@@ -46,7 +115,28 @@ class DocType(Enum):
 
 
 class CondicionIva(Enum):
+    """Condición frente al IVA, con el código de `CondicionIVAReceptorId` de WSFE.
+
+    **Los valores salen de la tabla de ARCA, verificados contra `FEParamGetCondicionIvaReceptor`
+    el 2026-08-27.** Hasta ese día `FINAL` valía 6 y `MONOTRIBUTO` valía 13, heredados de
+    Balance360, y los dos estaban mal: para ARCA el 6 es "Responsable Monotributo" y el 13 es
+    "Monotributista Social", que es otra categoría. O sea que el nombre y el código decían
+    cosas distintas.
+
+    No era teórico. Con `FINAL = 6`, emitir una factura B a un consumidor final —el caso más
+    común que hay, y la mitad de las facturas B de `tests/samples/`— la rechazaba ARCA con el
+    código 10243, porque "Responsable Monotributo" no es un receptor válido para una B.
+    Corregido a 5, ARCA la autoriza.
+
+    El cambio **no toca la base**: la columna guarda el nombre del miembro (`Enum(CondicionIva)`
+    sin `values_callable`), no su valor. Lo que sí cambia es el número que viaja en el JSON,
+    así que `api/types.ts` va de la mano.
+    """
+
     INSCRIPTO = 1
     EXENTO = 4
-    FINAL = 6
-    MONOTRIBUTO = 13
+    # 5 es "Consumidor Final". El 6 —que estaba acá antes— es "Responsable Monotributo".
+    FINAL = 5
+    # 6 es "Responsable Monotributo". El 13 —que estaba acá antes— es "Monotributista Social",
+    # una categoría distinta y mucho más chica.
+    MONOTRIBUTO = 6

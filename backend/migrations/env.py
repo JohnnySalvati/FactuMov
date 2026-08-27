@@ -9,6 +9,8 @@ from factumov.models import (  # noqa: F401
     customer,
     email_confirmation,
     fiscal_identity,
+    invoice,
+    invoice_line,
     invoice_template,
     invoice_template_line,
     password_reset,

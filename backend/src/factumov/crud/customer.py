@@ -22,6 +22,10 @@ from factumov.schemas.customer import CustomerCreate, CustomerUpdate
 exception_map = {
     "uq_customers_user_id_doc_type_doc_number": DuplicateCustomerError,
     "invoice_templates_customer_id_fkey": CustomerInUseError,
+    # Ídem para el cliente: si se le emitió una factura, la fila se queda. El nombre y el
+    # domicilio que salieron impresos están copiados en la factura, así que lo que se pierde
+    # al no poder borrarlo es solo el orden de la lista de clientes.
+    "invoices_customer_id_fkey": CustomerInUseError,
 }
 
 

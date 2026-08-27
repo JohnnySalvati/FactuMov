@@ -59,18 +59,6 @@ class ParsedInvoice:
     needs_manual_items: bool = False
 
 
-# Código de comprobante de ARCA -> tipo. Solo los que FactuMov emite; cualquier
-# otro (notas de débito, recibos) queda en None a propósito: mejor sin tipo que
-# con uno incorrecto.
-_ARCA_VOUCHER_TYPE: dict[int, str] = {
-    1: "A",
-    3: "NCA",
-    6: "B",
-    8: "NCB",
-    11: "C",
-    13: "NCC",
-}
-
 # Alícuota deducida de la letra, que es lo único disponible en B y C: esos
 # comprobantes no discriminan IVA por línea. En B el precio impreso ya lo trae
 # adentro; quien arme la factura decide cómo interpretarlo, igual que hace
@@ -363,8 +351,9 @@ def parse_invoice_pdf(file_bytes: bytes) -> ParsedInvoice:
 
     cod = _COD.search(text)
     if cod:
-        arca_voucher_type = _ARCA_VOUCHER_TYPE.get(int(cod.group(1)))
-        result.voucher_type = VoucherType(arca_voucher_type) if arca_voucher_type else None
+        # Solo los tipos que FactuMov maneja; una nota de débito o un recibo dan `None` a
+        # propósito, porque es mejor quedarse sin tipo que con uno incorrecto.
+        result.voucher_type = VoucherType.get_by_arca_code(int(cod.group(1)))
 
     pos_number = _POS_NUMBER.search(text)
     if pos_number:

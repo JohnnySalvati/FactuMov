@@ -130,6 +130,22 @@ function TemplateScreen({ id }: { id: string }) {
           error={error}
         />
       )}
+
+      {form !== undefined && (
+        <div className="card stack">
+          {/* Emitir es un link a otra pantalla y no un botón acá, y no es por prolijidad: es
+              lo único que separa "guardar cambios" de un acto irreversible contra ARCA. Dos
+              botones pegados en un celular es un dedo mal apoyado y una factura de verdad.
+              La pantalla de confirmación muestra letra, destinatario e importe. */}
+          <Link className="button-link" to={`/modelos/${id}/emitir`}>
+            Emitir esta factura
+          </Link>
+          <p className="totals-note" style={{ margin: 0 }}>
+            Te muestra qué se va a emitir antes de pedirle el CAE a ARCA. Si cambiaste algo,
+            guardá primero: se emite el modelo tal como está guardado.
+          </p>
+        </div>
+      )}
     </div>
   )
 }

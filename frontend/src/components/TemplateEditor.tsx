@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router'
 
+import { money } from '../format'
 import {
   CONCEPTO_LABELS,
   IVA_ALIQUOT_LABELS,
@@ -12,7 +13,6 @@ import {
 } from '../api/types'
 import {
   lineAmount,
-  money,
   newLine,
   totals,
   type LineForm,

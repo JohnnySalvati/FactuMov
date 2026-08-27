@@ -9,9 +9,12 @@ Sacadas las NC, la intersección de los dos conjuntos **tiene siempre exactament
 
 | Emisor \\ Receptor | Inscripto | Monotributo | Exento | Consumidor final |
 |---|---|---|---|---|
-| Inscripto   | A | B | B | B |
+| Inscripto   | A | A | B | B |
 | Monotributo | C | C | C | C |
 | Exento      | C | C | C | C |
+
+La celda Inscripto → Monotributo decía B hasta el 2026-08-27 y estaba mal: es A, por la Ley
+27.618. Lo verificó ARCA rechazando la B — ver el comentario de `_CUSTOMER_ALLOWED`.
 
 O sea que la letra no es una elección del usuario: es una consecuencia de quién le factura a
 quién. Por eso `voucher_type` dejó de ser una columna de `invoice_templates` y pasó a ser esto.
@@ -32,11 +35,17 @@ _ISSUER_ALLOWED: dict[CondicionIva, frozenset[VoucherType]] = {
     CondicionIva.FINAL: frozenset(),
 }
 
-# Lo que cada condición puede **recibir**. La A solo la recibe un inscripto, porque es la única
-# que discrimina IVA y la única que otro inscripto puede computar como crédito fiscal.
+# Lo que cada condición puede **recibir**, según la tabla que devuelve
+# `FEParamGetCondicionIvaReceptor` — verificada contra ARCA el 2026-08-27, no deducida.
+#
+# **El monotributista recibe A, no B**, y eso corrige lo que este archivo decía antes. Es la
+# Ley 27.618: desde 2021 el responsable inscripto que le factura a un monotributista emite A.
+# No es una interpretación nuestra — ARCA **rechaza** la B con el código 10243 ("El campo
+# Condicion IVA receptor no es valido para la clase de comprobante informado") y autoriza la A.
+# Está probado emitiendo las dos en homologación.
 _CUSTOMER_ALLOWED: dict[CondicionIva, frozenset[VoucherType]] = {
     CondicionIva.INSCRIPTO: frozenset({VoucherType.A, VoucherType.C}),
-    CondicionIva.MONOTRIBUTO: frozenset({VoucherType.B, VoucherType.C}),
+    CondicionIva.MONOTRIBUTO: frozenset({VoucherType.A, VoucherType.C}),
     CondicionIva.EXENTO: frozenset({VoucherType.B, VoucherType.C}),
     CondicionIva.FINAL: frozenset({VoucherType.B, VoucherType.C}),
 }

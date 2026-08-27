@@ -23,6 +23,9 @@ exception_map = {
     "uq_fiscal_identities_user_id_name": DuplicateFiscalIdentityNameError,
     "uq_fiscal_identities_user_id_tax_id": DuplicateFiscalIdentityTaxIdError,
     "invoice_templates_fiscal_identity_id_fkey": FiscalIdentityInUseError,
+    # Una identidad fiscal con facturas emitidas no se borra nunca, ni siquiera borrando
+    # antes sus modelos: las facturas son el respaldo de comprobantes que existen en ARCA.
+    "invoices_fiscal_identity_id_fkey": FiscalIdentityInUseError,
 }
 
 

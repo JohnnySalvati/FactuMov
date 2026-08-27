@@ -1,17 +1,27 @@
-"""Cliente de WSFEv1. Por ahora solo lo que necesita verificar la delegación.
+"""Cliente de WSFEv1: verificación de la delegación y emisión con CAE.
 
-La emisión con CAE (`FECAESolicitar`) es otra unidad; el port de esa parte de Balance360 se
-hace cuando haga falta, no antes.
+`FECAESolicitar` es un port adaptado del de Balance360, con tres diferencias que vienen de
+que acá el certificado es de FactuMov y representa a terceros:
+
+- **El `Auth.Cuit` es el CUIT representado**, no el del certificado. En Balance360 coinciden.
+- **No hay comprobantes asociados ni tributos.** FactuMov no emite notas de crédito —ver
+  CLAUDE.md → *La letra del comprobante se deduce*— y no maneja percepciones. Los dos bloques
+  del request de Balance360 se fueron; volverán con la unidad que los necesite, no antes.
+- **Los importes los calcula `services/invoice_totals.py`** y llegan ya redondeados. Acá no
+  se hace ninguna cuenta: este módulo traduce a SOAP y lee la respuesta, nada más.
 """
 
+import datetime
 from dataclasses import dataclass
 from typing import Any
 
 from requests.exceptions import RequestException
 from zeep.exceptions import Fault
 
+from factumov.enums import Concepto, DocType, VoucherType
 from factumov.exceptions import ArcaError, WsfeError
 from factumov.services import arca
+from factumov.services.invoice_totals import InvoiceTotals
 
 WSDL_URL = {
     "homo": "https://wswhomo.afip.gov.ar/wsfev1/service.asmx?WSDL",
@@ -94,3 +104,202 @@ def check_delegation(tax_id: str) -> DelegationCheck:
     # Cualquier otro código es algo que no sabemos leer. Contestar `granted=False` haría que
     # el usuario reintentara para siempre una delegación que quizás ya otorgó.
     raise WsfeError(f"WSFE contestó un error inesperado: {detail}")
+
+
+# --- Emisión ------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class VoucherRequest:
+    """Todo lo que WSFE necesita saber de un comprobante para autorizarlo.
+
+    Plano y sin ORM a propósito, igual que `LineAmounts`: este módulo no tiene por qué
+    conocer `Invoice` ni `Customer`, y con un dataclass los tests arman un caso en tres
+    líneas en vez de tres filas en la base.
+
+    No lleva número: **el número lo decide ARCA**, o más bien lo decide el último autorizado,
+    y `authorize_invoice` lo averigua justo antes de pedir el CAE.
+    """
+
+    issuer_tax_id: str
+    pos: int
+    voucher_type: VoucherType
+    date: datetime.date
+    concepto: Concepto
+    customer_doc_type: DocType
+    customer_doc_number: str
+    customer_condicion_iva: int
+    totals: InvoiceTotals
+    from_date: datetime.date | None = None
+    to_date: datetime.date | None = None
+    due_date: datetime.date | None = None
+
+
+@dataclass(frozen=True)
+class AuthorizationResult:
+    """Lo que ARCA devolvió y que no se puede reconstruir: el CAE, su vencimiento y el número.
+
+    Que el número esté acá y no lo haya elegido el que llamó es el punto: hasta que ARCA no
+    contesta, la factura no tiene número.
+    """
+
+    cae: str
+    cae_expiry: datetime.date
+    number: int
+
+
+def get_last_voucher_number(tax_id: str, pos: int, voucher_type: VoucherType) -> int:
+    """El último número autorizado para ese punto de venta y esa letra. 0 si no hay ninguno.
+
+    ARCA contesta `CbteNro = 0` para un punto de venta recién dado de alta, así que el
+    `or 0` no es un parche defensivo: es el caso normal de la primera factura.
+    """
+    ticket = arca.get_access_ticket(SERVICE)
+    settings = arca.get_arca_settings()
+
+    try:
+        client = arca.build_client(WSDL_URL[settings.arca_env])
+        response = client.service.FECompUltimoAutorizado(
+            Auth={"Token": ticket.token, "Sign": ticket.sign, "Cuit": tax_id},
+            PtoVta=pos,
+            CbteTipo=voucher_type.arca_code,
+        )
+    except Fault as exc:
+        raise WsfeError(f"WSFE rechazó la consulta del último comprobante: {exc}") from exc
+    except RequestException as exc:
+        raise ArcaError("No se pudo conectar con ARCA, reintentá en unos minutos") from exc
+
+    errors = _errors(response)
+    if errors:
+        raise WsfeError(
+            "WSFE no pudo dar el último comprobante: "
+            + " / ".join(f"{error.Code}: {error.Msg}" for error in errors)
+        )
+    number: int = response.CbteNro or 0
+    return number
+
+
+def _detail_request(request: VoucherRequest, number: int) -> dict[str, Any]:
+    """El `FECAEDetRequest`, que es donde está todo lo que ARCA valida.
+
+    `CbteDesde` y `CbteHasta` son el mismo número: ARCA permite autorizar un rango de
+    comprobantes idénticos de una vez, y FactuMov emite de a uno.
+
+    Los campos en cero —`ImpTotConc`, `ImpOpEx`, `ImpTrib`— van explícitos y no omitidos: son
+    obligatorios en el esquema, y ARCA valida que `ImpTotal` sea exactamente la suma de los
+    cinco. Mandarlos escritos deja esa cuenta a la vista de quien lea esto.
+    """
+    detail: dict[str, Any] = {
+        "Concepto": request.concepto.arca_code,
+        "CondicionIVAReceptorId": request.customer_condicion_iva,
+        "DocTipo": request.customer_doc_type.value,
+        "DocNro": int(request.customer_doc_number),
+        "CbteDesde": number,
+        "CbteHasta": number,
+        "CbteFch": request.date.strftime("%Y%m%d"),
+        "ImpTotal": request.totals.total,
+        "ImpTotConc": 0,
+        "ImpNeto": request.totals.net,
+        "ImpOpEx": 0,
+        "ImpIVA": request.totals.iva,
+        "ImpTrib": 0,
+        # Solo pesos. Facturar en dólares necesita además la cotización del día y una
+        # decisión de producto sobre de dónde sale; no está en el alcance.
+        "MonId": "PES",
+        "MonCotiz": 1,
+    }
+
+    # El array `Iva` va solo cuando la letra aplica IVA. En una C, mandarlo —aunque sea con
+    # alícuota 0— es un rechazo de ARCA, y omitirlo en una A o una B es otro.
+    if request.totals.breakdown:
+        detail["Iva"] = {
+            "AlicIva": [
+                {
+                    "Id": item.aliquot.value,
+                    "BaseImp": item.net,
+                    "Importe": item.iva,
+                }
+                for item in request.totals.breakdown
+            ]
+        }
+
+    if request.concepto.needs_service_dates:
+        # Los tres van juntos o no va ninguno: ARCA los exige como conjunto cuando el
+        # concepto no es "productos". Que sean obligatorios lo garantiza el schema del
+        # endpoint, así que llegar acá con alguno en None sería un bug nuestro.
+        if request.from_date is None or request.to_date is None or request.due_date is None:
+            raise WsfeError(
+                "Un comprobante de servicios necesita período desde, hasta y vencimiento"
+            )
+        detail["FchServDesde"] = request.from_date.strftime("%Y%m%d")
+        detail["FchServHasta"] = request.to_date.strftime("%Y%m%d")
+        detail["FchVtoPago"] = request.due_date.strftime("%Y%m%d")
+
+    return detail
+
+
+def authorize_invoice(request: VoucherRequest) -> AuthorizationResult:
+    """Pide el CAE. **Esto emite una factura de verdad y no se puede deshacer.**
+
+    Contra `ARCA_ENV=prod` el comprobante queda registrado en ARCA con validez legal, y la
+    única forma de dejarlo sin efecto es una nota de crédito — que FactuMov no emite. El
+    llamador tiene que estar seguro antes de llegar acá.
+
+    El número sale de `get_last_voucher_number` + 1, o sea de una segunda llamada a ARCA
+    inmediatamente anterior. Entre las dos hay una ventana en la que otro proceso podría
+    tomar el mismo número; quien serializa eso es el candado de `crud/invoice.py`, y el
+    backstop final es el propio ARCA, que rechaza un número ya usado.
+
+    Dos formas de "no": `Errors` es un problema del request —mal armado, token vencido— y
+    `Resultado != "A"` es un rechazo del comprobante en sí, con el motivo en
+    `Observaciones`. Se leen las dos porque ARCA usa una u otra según qué le haya molestado,
+    y quedarse con una sola deja la mitad de los rechazos como un `AttributeError`.
+    """
+    ticket = arca.get_access_ticket(SERVICE)
+    settings = arca.get_arca_settings()
+    number = get_last_voucher_number(request.issuer_tax_id, request.pos, request.voucher_type) + 1
+
+    try:
+        client = arca.build_client(WSDL_URL[settings.arca_env])
+        response = client.service.FECAESolicitar(
+            Auth={
+                "Token": ticket.token,
+                "Sign": ticket.sign,
+                "Cuit": request.issuer_tax_id,
+            },
+            FeCAEReq={
+                "FeCabReq": {
+                    "CantReg": 1,
+                    "PtoVta": request.pos,
+                    "CbteTipo": request.voucher_type.arca_code,
+                },
+                "FeDetReq": {"FECAEDetRequest": [_detail_request(request, number)]},
+            },
+        )
+    except Fault as exc:
+        raise WsfeError(f"WSFE rechazó la solicitud de CAE: {exc}") from exc
+    except RequestException as exc:
+        raise ArcaError("No se pudo conectar con ARCA, reintentá en unos minutos") from exc
+
+    errors = _errors(response)
+    if errors:
+        raise WsfeError(
+            "WSFE rechazó la solicitud: "
+            + " / ".join(f"{error.Code}: {error.Msg}" for error in errors)
+        )
+
+    detail = response.FeDetResp.FECAEDetResponse[0]
+    if detail.Resultado != "A":
+        observations = getattr(detail, "Observaciones", None)
+        reason = (
+            " / ".join(f"{obs.Code}: {obs.Msg}" for obs in observations.Obs)
+            if observations is not None
+            else "sin detalle"
+        )
+        raise WsfeError(f"ARCA no autorizó el comprobante: {reason}")
+
+    return AuthorizationResult(
+        cae=detail.CAE,
+        cae_expiry=datetime.datetime.strptime(detail.CAEFchVto, "%Y%m%d").date(),
+        number=number,
+    )

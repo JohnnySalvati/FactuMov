@@ -353,7 +353,7 @@ button.icon:hover {
 button.danger {
   background: var(--danger);
   border-color: var(--danger);
-  color: #fff;
+  color: var(--accent-text);
 }
 
 /* --- Pantalla ancha ----------------------------------------------------------------- */
@@ -797,4 +797,130 @@ button.danger {
     align-self: flex-end;
     min-width: 280px;
   }
+}
+
+/* --- Resumen de un comprobante ------------------------------------------------------- */
+/*
+ * La lista de datos de una factura: en la confirmación previa a emitir y en la factura ya
+ * emitida. Es un `<dl>` y no una tabla de dos columnas a propósito — ver CLAUDE.md → *La
+ * grilla de tarjetas*: en 360 px una tabla se vuelve una pila de tarjetas improvisadas, y acá
+ * lo que hace falta es justamente una pila.
+ *
+ * Mobile-first: la etiqueta arriba y el valor abajo, que es lo que entra sin apretarse. En
+ * pantalla ancha pasan a convivir en un renglón.
+ */
+.summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  margin: 0;
+}
+
+.summary > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.summary dt {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.summary dd {
+  margin: 0;
+}
+
+/* El importe es lo que el usuario mira antes de apretar "Emitir". Que sea el elemento más
+   grande de la pantalla no es decoración: es el dato que hay que verificar. */
+.summary dd.amount {
+  font-size: 1.35rem;
+  font-weight: 600;
+}
+
+@media (min-width: 700px) {
+  .summary > div {
+    flex-direction: row;
+    align-items: baseline;
+    gap: 1rem;
+  }
+
+  .summary dt {
+    flex: 0 0 10rem;
+  }
+}
+
+/* --- Lista de registros -------------------------------------------------------------- */
+/*
+ * El listado de facturas emitidas. No es la grilla de tarjetas y no es una tabla: es una pila
+ * de links, que es en lo que la tabla se convertía en angosto, pero sin el `<thead>` escondido
+ * ni el `data-label` en cada celda.
+ *
+ * La diferencia con `.tiles` es lo que hay que reconocer de un vistazo. En modelos, clientes e
+ * identidades alcanza el nombre; acá hacen falta tres datos juntos —qué comprobante, a quién y
+ * por cuánto— y una tarjeta de 150 px con eso adentro se lee peor que un renglón.
+ */
+.record-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.record {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  /* El objetivo táctil de siempre: 44 px es el piso común de Apple y Material. */
+  min-height: var(--touch);
+  padding: 0.7rem 0.9rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  text-decoration: none;
+  color: inherit;
+}
+
+.record-main,
+.record-side {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+/* El importe y la fecha, alineados a la derecha: los importes se comparan por la unidad, y
+   alineados a la izquierda se comparan por la primera cifra, que es la que menos dice. */
+.record-side {
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.record-main .muted {
+  /* El nombre del cliente puede ser largo y no puede empujar al importe fuera de la pantalla. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Un link que se ve y se toca como un botón. Existe para "Emitir": la acción es una
+   navegación —lleva a la pantalla de confirmación— pero visualmente tiene que pesar lo que
+   pesa la acción. Hereda del botón todo lo que importa en el celular: ancho completo y el
+   objetivo táctil de 44 px. */
+.button-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--touch);
+  padding: 0.6rem 1rem;
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+  text-decoration: none;
 }

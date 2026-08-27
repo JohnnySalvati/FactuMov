@@ -121,8 +121,6 @@ const PRICE_INCLUDES_IVA: Record<VoucherType, boolean> = {
   [VoucherType.NCC]: true,
 }
 
-export const money = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' })
-
 /**
  * La letra llega como parámetro y no sale del formulario, porque **ya no es un campo del
  * formulario**: se deduce de las condiciones frente al IVA del emisor y del receptor, que son

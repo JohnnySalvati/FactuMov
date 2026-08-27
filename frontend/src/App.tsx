@@ -7,8 +7,11 @@ import { ConfirmEmailPage } from './pages/ConfirmEmailPage'
 import { CustomerPage } from './pages/CustomerPage'
 import { CustomersPage } from './pages/CustomersPage'
 import { FiscalIdentitiesPage } from './pages/FiscalIdentitiesPage'
+import { EmitPage } from './pages/EmitPage'
 import { FiscalIdentityPage } from './pages/FiscalIdentityPage'
 import { ForgotPasswordPage } from './pages/ForgotPasswordPage'
+import { InvoicePage } from './pages/InvoicePage'
+import { InvoicesPage } from './pages/InvoicesPage'
 import { LoginPage } from './pages/LoginPage'
 import { NewTemplatePage } from './pages/NewTemplatePage'
 import { RegisterPage } from './pages/RegisterPage'
@@ -41,6 +44,14 @@ export function App() {
                   router ordena por especificidad y `nuevo` le gana a `:id` igual. */}
               <Route path="/modelos/nuevo" element={<NewTemplatePage />} />
               <Route path="/modelos/:id" element={<TemplatePage />} />
+              {/* La confirmación de la emisión es su propia ruta y no un diálogo adentro del
+                  modelo. Emitir es irreversible: separarlo en una pantalla es lo que impide
+                  que un dedo mal apoyado al lado de "Guardar" pida un CAE de verdad. */}
+              <Route path="/modelos/:id/emitir" element={<EmitPage />} />
+              {/* Las facturas emitidas solo se leen: no hay ruta de alta ni de edición, y esa
+                  ausencia es la decisión. Se crean emitiendo un modelo y no se corrigen. */}
+              <Route path="/facturas" element={<InvoicesPage />} />
+              <Route path="/facturas/:id" element={<InvoicePage />} />
               {/* Identidades y clientes siguen la misma forma que los modelos: la grilla en
                   la ruta pelada y una pantalla por elemento. Que el id vaya en el path y no
                   como `?editar=` es lo que hace que el "mantener apretado" del editor de

@@ -9,6 +9,7 @@ from factumov.routers import (
     customer,
     fiscal_identity,
     health,
+    invoice,
     invoice_template,
 )
 from factumov.services import email
@@ -53,4 +54,5 @@ app.include_router(auth.router)
 app.include_router(customer.router)
 app.include_router(health.router)
 app.include_router(fiscal_identity.router)
+app.include_router(invoice.router)
 app.include_router(invoice_template.router)

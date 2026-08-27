@@ -27,7 +27,13 @@ export function AppLayout() {
             Modelos
           </NavLink>
           {/* `NavLink` pone la clase `active` sola según la ruta; con `Link` habría que
-              comparar `useLocation` a mano en cada ítem. */}
+              comparar `useLocation` a mano en cada ítem. Las facturas van segundas —después de
+              los modelos y antes de la configuración— porque emitir y después mirar lo emitido
+              es el recorrido de todas las semanas; identidades y clientes se tocan al empezar
+              y después casi nunca. */}
+          <NavLink to="/facturas" className={({ isActive }) => (isActive ? 'active' : '')}>
+            Facturas
+          </NavLink>
           <NavLink to="/identidades" className={({ isActive }) => (isActive ? 'active' : '')}>
             Identidades
           </NavLink>

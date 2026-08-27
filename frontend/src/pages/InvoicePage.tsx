@@ -1,0 +1,127 @@
+import { useCallback } from 'react'
+import { Link, Navigate, useParams } from 'react-router'
+
+import { api } from '../api/client'
+import { CONCEPTO_LABELS, IVA_ALIQUOT_LABELS, type Invoice } from '../api/types'
+import { Notice } from '../components/Notice'
+import { formatDate, money } from '../format'
+import { useResource } from '../hooks/useResource'
+
+/**
+ * Una factura emitida. **Solo lectura, y eso es todo el diseño de la pantalla.**
+ *
+ * No hay ningún campo editable ni botón de guardar, porque no hay nada que se pueda corregir:
+ * lo que está acá es lo que ARCA autorizó. Los datos del emisor y del receptor son los que
+ * vinieron **copiados** en la factura y no los de las fichas actuales — si el cliente cambió
+ * de domicilio el mes pasado, esta pantalla sigue mostrando el que salió impreso, que es lo
+ * correcto.
+ */
+export function InvoicePage() {
+  const { id } = useParams()
+  return id ? <InvoiceScreen key={id} id={id} /> : <Navigate to="/facturas" replace />
+}
+
+function InvoiceScreen({ id }: { id: string }) {
+  const fetcher = useCallback(() => api.get<Invoice>(`/invoices/${id}`), [id])
+  const invoice = useResource(fetcher)
+  const data = invoice.data
+
+  return (
+    <div className="page">
+      <Link className="back" to="/facturas">
+        ← Facturas
+      </Link>
+      <h1 className="mono">{data?.label ?? 'Factura'}</h1>
+
+      <Notice kind="error">{invoice.error}</Notice>
+      {invoice.loading && data === undefined && <p className="muted">Cargando…</p>}
+
+      {data !== undefined && (
+        <>
+          <div className="card">
+            <dl className="summary">
+              <div>
+                <dt>Fecha</dt>
+                <dd>{formatDate(data.date)}</dd>
+              </div>
+              <div>
+                <dt>Emisor</dt>
+                <dd>
+                  {data.issuer_name} <span className="muted">({data.issuer_tax_id})</span>
+                </dd>
+              </div>
+              <div>
+                <dt>Cliente</dt>
+                <dd>
+                  {data.customer_name}{' '}
+                  <span className="muted">({data.customer_doc_number})</span>
+                </dd>
+              </div>
+              <div>
+                <dt>Concepto</dt>
+                <dd>{CONCEPTO_LABELS[data.concepto]}</dd>
+              </div>
+              {data.from_date !== null && data.to_date !== null && (
+                <div>
+                  <dt>Período</dt>
+                  <dd>
+                    {formatDate(data.from_date)} — {formatDate(data.to_date)}
+                  </dd>
+                </div>
+              )}
+              {data.due_date !== null && (
+                <div>
+                  <dt>Vence el pago</dt>
+                  <dd>{formatDate(data.due_date)}</dd>
+                </div>
+              )}
+              <div>
+                <dt>CAE</dt>
+                {/* Monoespaciada: son catorce dígitos que alguien puede tener que comparar a
+                    ojo contra el sitio de ARCA, y en proporcional eso se hace mal. */}
+                <dd className="mono">
+                  {data.cae} <span className="muted">vence {formatDate(data.cae_expiry)}</span>
+                </dd>
+              </div>
+            </dl>
+          </div>
+
+          <div className="card">
+            {data.lines.map((line) => (
+              <div className="line" key={line.id}>
+                <div className="line-head">
+                  <span>{line.description}</span>
+                  <span className="line-amount">
+                    {money.format(Number(line.quantity) * Number(line.unit_price))}
+                  </span>
+                </div>
+                <p className="muted" style={{ margin: 0, fontSize: '0.82rem' }}>
+                  {Number(line.quantity)} × {money.format(Number(line.unit_price))} · IVA{' '}
+                  {IVA_ALIQUOT_LABELS[line.iva_aliquot]}
+                </p>
+              </div>
+            ))}
+
+            <div className="totals">
+              <div>
+                <span>Neto</span>
+                <span>{money.format(Number(data.net_total))}</span>
+              </div>
+              <div>
+                <span>IVA</span>
+                <span>{money.format(Number(data.iva_total))}</span>
+              </div>
+              <div className="totals-total">
+                <strong>Total</strong>
+                <strong>{money.format(Number(data.total))}</strong>
+              </div>
+            </div>
+            {/* A diferencia del editor, acá el total **no** es una cuenta nuestra: es el
+                importe que ARCA autorizó, guardado en la factura. */}
+            <p className="totals-note">Importe autorizado por ARCA con el CAE de arriba.</p>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
