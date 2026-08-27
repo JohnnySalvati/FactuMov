@@ -305,6 +305,7 @@ Emitir = tomar un `InvoiceTemplate`, permitir retoques, y crear una `Invoice` nu
 | `User` | Cuenta: email, hash de contraseña, confirmación, alta/baja |
 | `UserSession` | Sesión abierta: hash del token, vencimiento absoluto, revocación |
 | `EmailConfirmation` | Token de confirmación de email, de un solo uso |
+| `PasswordReset` | Token para elegir contraseña nueva, de un solo uso |
 | `ArcaTicket` | Ticket de acceso de WSAA, por entorno y servicio. La única tabla sin dueño |
 
 ### Decisiones sobre `InvoiceTemplate` (2026-08-15)
@@ -537,10 +538,10 @@ usuario sin confirmar. Los tres son 401 idénticos.
 | `services/security.py` | Hash argon2 (pwdlib), tokens (`secrets`), hash SHA-256 del token |
 | `crud/user.py`, `crud/user_session.py` | Acceso a datos |
 | `dependencies.py` | `SessionDep`, `get_current_session`, `get_current_user` |
-| `crud/email_confirmation.py` | Tokens de confirmación |
+| `crud/email_confirmation.py`, `crud/password_reset.py` | Tokens de confirmación y de reset |
 | `services/email.py`, `services/notifications.py` | Transporte SMTP y textos de los mails |
 | `services/rate_limit.py` | Contador de ventana fija en memoria |
-| `routers/auth.py` | `login`, `logout`, `/me`, `register`, `confirm`, `resend-confirmation` |
+| `routers/auth.py` | `login`, `logout`, `/me`, `register`, `confirm`, `resend-confirmation`, `forgot-password`, `reset-password` |
 
 - **El login recibe JSON, no `OAuth2PasswordRequestForm`.** El form de FastAPI es lo que usa
   casi todo tutorial, pero es `x-www-form-urlencoded` y su campo se llama `username`. El
@@ -652,28 +653,28 @@ usuario sin confirmar. Los tres son 401 idénticos.
   diría al atacante que su intento no llegó ni a compararse.
 
 #### El `commit` explícito antes de mandar el mail
-Los mails van en `BackgroundTasks`, y **en FastAPI 0.141 los background tasks corren antes
-del cierre de las dependencias con `yield`** — o sea antes del `db.commit()` de `get_db`.
-Está medido, no supuesto. Sin un `commit` explícito en el endpoint pasan dos cosas:
-
-1. el mail sale con un token que todavía no está en la base, y si la transacción termina
-   abortando el usuario recibe un link que nunca va a funcionar;
-2. la transacción queda abierta durante toda la conexión SMTP, hasta
-   `SMTP_TIMEOUT_SECONDS`. Diez segundos de transacción abierta por registro es el más caro
-   de los dos problemas.
-
-Por eso el router commitea, contra la convención del proyecto de que eso es trabajo de
-`get_db`. El segundo commit de `get_db` no tiene nada que escribir, y en los tests el
+Sin un `commit` explícito en el endpoint, la transacción queda abierta durante toda la
+conexión SMTP, hasta `SMTP_TIMEOUT_SECONDS`: diez segundos de transacción abierta por
+registro. Por eso el router commitea, contra la convención del proyecto de que eso es trabajo
+de `get_db`. El segundo commit de `get_db` no tiene nada que escribir, y en los tests el
 `join_transaction_mode="create_savepoint"` del fixture `db` hace que este commit cierre un
 savepoint y el rollback siga revirtiendo todo. El test que lo protege mira el **orden** y no
 el resultado, que es lo único que distingue este caso: ningún otro test nota que la línea
 falte.
 
+Hasta el 2026-08-27 había un segundo motivo, hoy histórico: **en FastAPI 0.141 los background
+tasks corren antes del cierre de las dependencias con `yield`** —medido, no supuesto— así que
+el mail salía con un token que todavía no estaba en la base, y una transacción abortada le
+dejaba al usuario un link que no iba a funcionar nunca. Dejó de aplicar cuando el mail de
+confirmación pasó a mandarse adentro del request (ver *El fallo de SMTP se ve*), pero el orden
+que exigía es el mismo: primero se guarda el token, después sale el link que lo nombra. Sigue
+valiendo tal cual para los mails que **sí** quedaron en background.
+
 #### Mail: dónde vive cada cosa
 | Archivo | Rol |
 |---|---|
-| `services/email.py` | Transporte: `EmailSettings`, SMTP, STARTTLS, timeout |
-| `services/notifications.py` | Contenido: asunto y cuerpo de los tres mails |
+| `services/email.py` | Transporte: `EmailSettings`, SMTP, STARTTLS, timeout, `send_email` / `send_email_best_effort` |
+| `services/notifications.py` | Contenido: asunto y cuerpo de los seis mails, y cuál de los dos transportes usa cada uno |
 
 Separados porque cambian por motivos distintos: cambiar de proveedor no toca una palabra de
 los textos, y corregir la redacción de un mail no debería obligar a leer código de sockets.
@@ -733,11 +734,17 @@ self-serve, no que es opcional. `services/rate_limit.py`, aplicado a `login`, `r
   entre ventanas; la deslizante lo evita guardando el timestamp de cada intento en vez de un
   contador. Para lo que se defiende —mail bombing y credential stuffing— esa ráfaga da lo
   mismo, y un contador por clave es lo que mantiene la memoria acotada.
-- **Cuatro limitadores, dos ejes.** Por IP: login 10 cada 15 min, registro y reenvío 5 por
-  hora. Por dirección: 3 por hora, **compartidos entre registro y reenvío**, porque los dos
-  le mandan mail a la misma casilla y presupuestos separados dejarían duplicar el bombardeo
-  alternando endpoints. El login es el más holgado a propósito: el que se equivoca de
-  contraseña de verdad reintenta varias veces seguidas.
+- **Seis limitadores, dos ejes.** Por IP: login 10 cada 15 min; registro, reenvío y
+  "olvidé mi contraseña" 5 por hora; `reset-password` 10 por hora. Por dirección: 3 por hora,
+  **compartidos entre los tres endpoints que mandan mail a la dirección del body**, porque
+  presupuestos separados dejarían triplicar el bombardeo alternando entre ellos. El login es
+  el más holgado a propósito: el que se equivoca de contraseña de verdad reintenta varias
+  veces seguidas.
+- **`reset-password` no comparte el presupuesto de casilla**, porque no manda ningún mail al
+  pedido: su límite existe por otra cosa. Es el único endpoint sin sesión que hashea con
+  argon2, o sea que quema ~100 ms de CPU por request. El 422 por contraseña corta ni siquiera
+  llega al endpoint —lo corta Pydantic antes— así que diez por hora no le estorba a nadie que
+  esté tipeando de verdad.
 - **El contador avanza antes de mirar la base.** Si solo avanzara para direcciones que
   existen, el 429 llegaría antes para las registradas y sería el oráculo de enumeración que
   el 202 se cuida de no ser.
@@ -771,6 +778,136 @@ self-serve, no que es opcional. `services/rate_limit.py`, aplicado a `login`, `r
   de 3 por hora— para que apretarlos hasta que estorben lo diga la suite antes que un
   usuario.
 
+### El fallo de SMTP se ve (2026-08-27)
+Hasta acá, `send_email` se tragaba el `OSError` y dejaba una línea de log, y **todos** los
+mails salían en un `BackgroundTasks`. Las dos decisiones eran defendibles por separado y
+juntas produjeron el peor resultado posible: con el `.env` apuntando al puerto 465 —que el
+transporte no sabe hablar— el registro contestó **202 durante días** y el mail no salió
+nunca. La respuesta afirmaba algo que el sistema no había hecho.
+
+Son dos cambios, y son distintos a propósito: uno avisa temprano, el otro avisa tarde pero
+seguro.
+
+**1. La config que no puede funcionar se rechaza al leerla.** Un `model_validator` en
+`EmailSettings` corta dos combinaciones:
+
+| Config | Por qué no anda | Cómo fallaba antes |
+|---|---|---|
+| `SMTP_PORT=465` | TLS implícito necesita `smtplib.SMTP_SSL`; este transporte abre siempre texto plano | Timeout de 10 s adentro del envío |
+| `SMTP_USER` sin `SMTP_PASSWORD` (o al revés) | `send_email` saltea el login sin decir nada | El relay rechaza el envío al final |
+
+Las dos comparten lo que las hacía caras: fallaban lejos de su causa y ninguna nombraba al
+`.env`, que es lo único que había que tocar. La pregunta "¿esto puede andar?" se contesta sin
+red, así que se contesta antes de intentar nada.
+
+- **El aviso sale al arrancar, en el `lifespan` de `main.py`, y no aborta el arranque.** El
+  mail hace falta en tres endpoints; emitir, editar modelos y consultar el padrón andan sin
+  él. Tirar abajo la app entera por una variable que solo miran esos tres es el mismo error
+  que `EmailSettings` evita al no instanciarse en el import del módulo. Lo que cambia es
+  *cuándo* se entera alguien: antes era un usuario real sin su mail, ahora es un renglón en
+  la consola con el `.env` a mano.
+- El logger no tiene handler propio y no hace falta: uvicorn configura los suyos y no toca el
+  root, así que esto sale por `logging.lastResort`, que imprime a stderr de WARNING para
+  arriba.
+
+**2. El mail que es el producto del request se manda adentro del request.** `send_email`
+levanta `EmailDeliveryError` en vez de tragarse el error, y `_deliver` del router lo convierte
+en **503**. Los cuatro endpoints que existen para mandar un mail —`register`,
+`resend-confirmation`, `forgot-password` y las dos ramas de este último— contestan que no
+salió en vez de un 202 alegre.
+
+- **El costo es latencia y se paga barato.** Hasta `SMTP_TIMEOUT_SECONDS` en el peor caso,
+  ~1-2 s con Gmail en el normal, y solo en operaciones que un usuario hace una vez —no en la
+  pantalla que abre cien veces por semana—. A cambio, la respuesta dice la verdad.
+- **`send_email_best_effort` es para los mails que solo acompañan**: las instrucciones de
+  delegación después de confirmar, el aviso de que la contraseña cambió. Esos salen después
+  de algo que **ya quedó guardado**, así que un 503 mandaría al usuario a reintentar con un
+  token consumido — o sea a un 400 sobre una cuenta que en realidad sí quedó confirmada.
+  Siguen en `BackgroundTasks` y solo loguean. La distinción es de **rol**, no de importancia.
+- **Que las tres ramas del registro manden un mail dejó de ser una simetría linda y pasó a
+  ser estructural.** Si alguna no mandara nada, nunca podría fallar, y un 503 pasaría a
+  significar "tu dirección cae en las otras dos ramas". La propiedad anti-enumeración no la
+  sostiene solo el cuerpo idéntico: la sostiene que las ramas hagan lo mismo. Es el mismo
+  argumento que obliga a `forgot-password` a mandarle algo a una dirección desconocida.
+- **`resend-confirmation` es la excepción, y se acepta.** Ahí una rama no manda nada —para
+  una dirección confirmada o inexistente no hay ningún mail que mandar— así que su 503
+  distingue una rama de la otra. Lo que revela es "esa dirección está registrada **y sin
+  confirmar**", un estado transitorio de horas, y la alternativa sería mandarle mail a
+  direcciones que no pidieron nada, o sea el mail bomb del que hay que defenderse.
+- **Un 503 en el registro llega con la fila del usuario ya commiteada, y está bien.** La
+  cuenta queda sin confirmar, o sea inservible, y el reintento cae en la rama de "dirección
+  sin confirmar" y emite un token nuevo.
+- **El detalle no viaja en la respuesta.** El texto del 503 dice que es un problema nuestro y
+  no de la cuenta, y que se reintente. Nombrar el servidor o la variable que falta contaría
+  cómo está armado nuestro lado y no le sirve a nadie del otro.
+
+### Reset de contraseña (2026-08-27)
+`POST /auth/forgot-password` y `POST /auth/reset-password`, con la tabla `password_resets`
+(migración `7c41ab90d5e2`) y las pantallas `/olvide-password` y `/restablecer-password`.
+
+Era la primera de las unidades pendientes y la pedía el propio registro: **quien se equivocó
+de contraseña al registrarse no tenía ninguna salida.** El segundo registro no pisa la
+contraseña —a propósito, porque pisarla es una toma de cuenta— así que la cuenta quedaba con
+una contraseña que nadie sabe y una dirección que nadie puede volver a usar.
+
+- **`password_resets` es la tercera tabla con la misma forma** que `user_sessions` y
+  `email_confirmations`: token opaco de `secrets` guardado como SHA-256 en `String(64)` con
+  `unique=True`, vencimiento absoluto en la columna, marca de consumo en vez de borrar la
+  fila. Que se repita es la decisión: una tabla genérica de "tokens" con una columna `kind`
+  las obligaría a compartir vencimiento, índices y reglas de limpieza, que es justo lo que no
+  comparten. La columna se llama `used_at` y no `confirmed_at` porque acá no se confirma
+  nada, se consume un permiso.
+- **Vive una hora, no 24.** No es una simetría rota con la confirmación: es que lo que está
+  en juego es distinto. Un token de confirmación vencido cuesta un reenvío; uno de reset vivo
+  es la cuenta entera para cualquiera que llegue a esa casilla. El usuario acaba de pedirlo y
+  lo va a usar en el minuto siguiente.
+- **Funciona sobre una cuenta sin confirmar**, que es el caso que motivó la unidad. Exigir
+  estar confirmado dejaría abierto exactamente el callejón sin salida que vino a cerrar.
+- **Usar el link confirma la dirección.** Haberlo abierto prueba lo mismo que prueba el link
+  de confirmación: que quien lo abrió tiene la casilla. Sin esto la salida sería falsa —el
+  usuario cambia la contraseña y sigue sin poder entrar, con el mismo 401 de siempre y sin
+  nada que se lo explique—. Y como la confirmación es lo que dispara el mail de instrucciones
+  de delegación, ese mail sale acá también la primera vez, para que el invariante
+  "confirmado ⇒ recibió las instrucciones" no dependa de por qué puerta se confirmó.
+- **Cierra todas las sesiones** (`user_session.revoke_all_for_user`). Quien resetea porque
+  sospecha que alguien le entró tiene que quedarse solo adentro; sin esto la sesión ajena
+  sigue viva hasta una semana y el cambio de contraseña no la toca.
+- **Usar un link mata los demás** (`password_reset.invalidate_all_for_user`), y ahí está la
+  diferencia de fondo con la confirmación de email. Dos links de confirmación vivos son
+  inofensivos: los dos hacen lo mismo y lo que hacen ya está hecho. Dos links de reset vivos
+  son dos oportunidades de cambiar la contraseña, y la segunda le queda a quien pidió la
+  primera. Lo que **sí** se conserva de la confirmación es que pedirlo de nuevo no rompe el
+  mail anterior: el que no encuentra el primero pide otro, y castigarlo por buscar mal sería
+  dejarlo con dos links muertos.
+- **No abre sesión**, por lo mismo que la confirmación no la abre: el token vivió en una
+  casilla de mail y convertirlo en cookie dejaría adentro a cualquiera con acceso a ese
+  mensaje.
+- **Una dirección sin cuenta usable también recibe un mail**, y no es una cortesía: es lo que
+  hace que las dos ramas puedan fallar igual. Si esa rama no mandara nada nunca podría dar
+  503, y el 503 pasaría a significar "esa dirección existe" — ver *El fallo de SMTP se ve*.
+  El texto **no dice "no existe"**: una cuenta dada de baja cae en la misma rama, y afirmarlo
+  sería mentirle a su dueño.
+- **El aviso de "tu contraseña cambió" es best effort y sale igual.** Es la única señal que
+  le llega al dueño de la casilla si el reset lo pidió otro, y llega a un lugar al que ese
+  otro ya no puede volver: el link se consumió y las sesiones se cerraron todas.
+- **El hash de argon2 se calcula después de validar el token**, al revés que en el registro.
+  Allá el costo se paga siempre para que el tiempo de respuesta no delate si la dirección
+  existía; acá no hay nada que ocultar —el 200 y el 400 ya dicen si el token servía— y
+  hashear antes le regalaría 100 ms de CPU a cualquiera que postee un token inventado.
+- **Token desconocido, vencido, ya usado y de un usuario dado de baja dan el mismo 400**,
+  mismo criterio que la confirmación: el remedio de los cuatro es pedir uno nuevo, y el CRUD
+  ya los colapsa en un `None` para que el endpoint no pueda distinguirlos por descuido.
+- **`ResetPasswordRequest` lleva el mínimo de largo y `LoginRequest` no.** Acá se *elige* una
+  contraseña, así que la política del alta aplica igual. En el login no se elige nada, y un
+  422 por "muy corta" le diría al atacante que su intento ni llegó a compararse.
+- **La pantalla no postea sola al montar**, a diferencia de `ConfirmEmailPage`: falta un dato
+  que solo puede dar el usuario. Efecto secundario feliz: el token de un solo uso no se quema
+  por abrir el link, así que no hace falta el `useRef` de guarda contra el doble montaje de
+  StrictMode.
+- **El link "Olvidé mi contraseña" va abajo del formulario de login**, no al lado del campo.
+  Quien lo necesita ya falló una vez y mira ahí abajo después del cartel rojo; arriba
+  competiría con el botón de entrar, que es lo que se aprieta el 99% de las veces.
+
 ### Unidades pendientes, en orden
 Cerradas el 2026-08-26: la capa HTTP de autenticación (login, logout, `/me`,
 `dependencies.py` y los tres routers protegidos), el *ownership scoping*, el registro con
@@ -778,12 +915,12 @@ confirmación por email con su rate limiting, la **integración con ARCA** (veri
 delegación + consulta al padrón) y el **frontend**, incluida la grilla de modelos con su
 editor e importación de PDF — ver *ARCA* y *Frontend*.
 
-1. **Reset de contraseña.** Lo pide el registro: quien se equivocó de contraseña en una
-   cuenta sin confirmar no tiene hoy ninguna salida, porque re-registrarse a propósito no
-   la pisa.
-2. **Emisión con CAE** (`FECAESolicitar`). Es la mitad de `wsfe.py` que todavía no se
+Cerradas el 2026-08-27: el **reset de contraseña** y la **visibilidad del fallo de SMTP** —
+ver las dos secciones anteriores.
+
+1. **Emisión con CAE** (`FECAESolicitar`). Es la mitad de `wsfe.py` que todavía no se
    portó, y lo único que separa a la app de emitir de verdad.
-3. **Segundo layout del parser** — ver *Parser → Pendiente: un segundo layout*. Va último
+2. **Segundo layout del parser** — ver *Parser → Pendiente: un segundo layout*. Va último
    porque no bloquea nada: hoy el usuario puede cargar el modelo a mano.
 
 ## ARCA (2026-08-26)
@@ -1081,6 +1218,13 @@ Consecuencias: el cliente pega siempre a rutas relativas y **no hay ninguna vari
 entorno con la URL del backend**. Y el puerto es `strictPort: true`: `APP_BASE_URL` del
 backend apunta al 5173, y si Vite se corriera al 5174 por estar ocupado el puerto, el link de
 confirmación de los mails llegaría roto.
+
+### Las pantallas sin sesión
+Cinco, todas fuera de `RequireAuth`: `/login`, `/registro`, `/confirmar-email`,
+`/olvide-password` y `/restablecer-password`. Las tres últimas aterrizan un link de mail o
+disparan uno, y **sus paths los fija el backend** (`_CONFIRMATION_PATH`,
+`_PASSWORD_RESET_PATH` y `_REGISTER_PATH` de `notifications.py`): cambiarles el nombre acá sin
+cambiarlo allá deja apuntando a la nada los mails ya enviados.
 
 ### Sesión
 - **No se guarda nada del lado del cliente.** La cookie es `httpOnly`, así que el JS no la

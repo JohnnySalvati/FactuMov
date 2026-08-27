@@ -32,6 +32,7 @@ from factumov.models.email_confirmation import EmailConfirmation
 from factumov.models.fiscal_identity import FiscalIdentity
 from factumov.models.invoice_template import InvoiceTemplate
 from factumov.models.invoice_template_line import InvoiceTemplateLine
+from factumov.models.password_reset import PasswordReset
 from factumov.models.user import User
 from factumov.models.user_session import UserSession
 from factumov.schemas.invoice_template import InvoiceTemplateCreate
@@ -210,6 +211,25 @@ def make_email_confirmation(
     db.add(confirmation)
     db.flush()
     return confirmation
+
+
+def make_password_reset(
+    db,
+    user_id=None,
+    raw_token=None,
+    expires_at=None,
+    used_at=None,
+):
+    n = next(_sequence)
+    reset = PasswordReset(
+        user_id=user_id or make_user(db).id,
+        token_hash=hash_opaque_token(f"reset{n}" if raw_token is None else raw_token),
+        expires_at=expires_at or datetime.now(UTC) + timedelta(hours=1),
+        used_at=used_at,
+    )
+    db.add(reset)
+    db.flush()
+    return reset
 
 
 def make_arca_ticket(

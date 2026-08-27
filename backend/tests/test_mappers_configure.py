@@ -5,6 +5,7 @@ from factumov.models import (
     FiscalIdentity,
     InvoiceTemplate,
     InvoiceTemplateLine,
+    PasswordReset,
     User,
     UserSession,
 )
@@ -23,6 +24,7 @@ def test_all_models_are_registered() -> None:
         FiscalIdentity,
         InvoiceTemplate,
         InvoiceTemplateLine,
+        PasswordReset,
         UserSession,
         User,
     ):

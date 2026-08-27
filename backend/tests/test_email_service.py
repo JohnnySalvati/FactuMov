@@ -10,6 +10,7 @@ es justamente lo que este archivo tiene que ejercitar.
 import smtplib
 
 import pytest
+from pydantic import ValidationError
 
 from factumov.services import email as email_module
 from factumov.services.email import EmailSettings, send_email
@@ -90,7 +91,12 @@ def test_starts_tls_by_default(monkeypatch, smtp):
 
 
 def test_skips_starttls_when_disabled(monkeypatch, smtp):
-    """El puerto 465 negocia TLS desde el saludo y `starttls()` ahí es un error."""
+    """Un relay interno puede no ofrecer TLS, y ahí `starttls()` es un error.
+
+    Es el único motivo que le queda al flag: el otro caso que solía justificarlo —el puerto
+    465— ahora se rechaza al construir la config, porque apagar STARTTLS tampoco lo hacía
+    funcionar.
+    """
     configure(monkeypatch, smtp_starttls="false")
 
     send_email(to="ana@cucu.com", subject="Hola", body="Cuerpo")
@@ -113,22 +119,122 @@ def test_logs_in_when_credentials_are_configured(monkeypatch, smtp):
     assert smtp[0].credentials == ("ana", "secreta")
 
 
-def test_a_failing_server_does_not_raise(monkeypatch, caplog):
-    """Corre en un background task, con la respuesta ya enviada: no hay a quién avisarle."""
+def break_the_server(monkeypatch):
+    """Hace que cualquier conexión SMTP falle, como un servidor caído o inalcanzable."""
 
     def explode(host, port, timeout=None):
         raise smtplib.SMTPConnectError(421, "no hay nadie")
 
     monkeypatch.setattr(smtplib, "SMTP", explode)
 
-    send_email(to="ana@cucu.com", subject="Hola", body="Cuerpo")
+
+def test_a_failing_server_raises(monkeypatch):
+    """El fallo sube: el que llama decide si el request muere con él o sigue.
+
+    Hasta el 2026-08-27 esta función se tragaba el error y dejaba una línea de log, porque
+    el envío siempre corría en un background task. Con esa política el registro contestaba
+    202 con el SMTP mal configurado y el mail no salía nunca.
+    """
+    break_the_server(monkeypatch)
+
+    with pytest.raises(email_module.EmailDeliveryError):
+        send_email(to="ana@cucu.com", subject="Hola", body="Cuerpo")
+
+
+def test_an_unusable_config_raises_the_same_error_as_a_dead_server(monkeypatch, smtp):
+    """Un `.env` incompleto no es un 500 con traceback de Pydantic: es un mail que no salió."""
+    monkeypatch.delenv("SMTP_HOST")
+    email_module.get_email_settings.cache_clear()
+
+    with pytest.raises(email_module.EmailDeliveryError):
+        send_email(to="ana@cucu.com", subject="Hola", body="Cuerpo")
+
+
+@pytest.fixture
+def unpatched_transport(monkeypatch):
+    """Devuelve el `send_email` de verdad al módulo.
+
+    El fixture autouse `sent_emails` reemplaza `email.send_email` para que ningún test toque
+    un socket, y `send_email_best_effort` resuelve ese nombre por el módulo en cada llamada
+    —que es justamente la propiedad por la que el parche llega hasta él—. O sea que para
+    probar el best effort en sí hay que deshacer el parche primero. El resto de este archivo
+    no lo necesita porque importa `send_email` por nombre, y ese binding se resuelve al
+    colectar, antes de que corra ningún fixture.
+    """
+    monkeypatch.setattr(email_module, "send_email", send_email)
+
+
+def test_best_effort_swallows_the_failure_and_logs_it(monkeypatch, caplog, unpatched_transport):
+    """Para los mails que acompañan a algo ya guardado. El rastro queda en el log."""
+    break_the_server(monkeypatch)
+
+    email_module.send_email_best_effort(to="ana@cucu.com", subject="Hola", body="Cuerpo")
 
     assert "ana@cucu.com" in caplog.text
 
 
+def test_best_effort_still_sends_when_the_server_answers(smtp, unpatched_transport):
+    email_module.send_email_best_effort(to="ana@cucu.com", subject="Hola", body="Cuerpo")
+
+    assert smtp[0].messages[0]["To"] == "ana@cucu.com"
+
+
+# --- la config que no puede funcionar ------------------------------------------------------
+#
+# Las tres se rechazan al construir `EmailSettings` y no al intentar un envío: la pregunta
+# "¿esto puede andar?" se contesta sin salir a la red. El valor está en *dónde* aparece el
+# error — al arrancar, con el `.env` a mano— y no en que aparezca.
+
+
+def test_the_implicit_tls_port_is_rejected(monkeypatch):
+    """El 465 negocia TLS desde el saludo y este transporte abre siempre texto plano.
+
+    Es el error que costó dos días el 2026-08-26: el `.env` decía 465, la conexión moría por
+    timeout a los diez segundos, y el `except OSError` de entonces lo dejaba solo en el log.
+    """
+    configure(monkeypatch, smtp_port="465")
+
+    with pytest.raises(ValidationError) as caught:
+        EmailSettings()  # type: ignore[call-arg]
+
+    assert "587" in str(caught.value)
+
+
+@pytest.mark.parametrize("present", ["smtp_user", "smtp_password"])
+def test_half_the_credentials_are_rejected(monkeypatch, present):
+    """Con uno solo no se hace login y el relay rechaza el envío recién al final."""
+    configure(monkeypatch, **{present: "algo"})
+
+    with pytest.raises(ValidationError):
+        EmailSettings()  # type: ignore[call-arg]
+
+
+def test_config_problem_is_none_when_the_config_can_work():
+    assert email_module.config_problem() is None
+
+
+def test_config_problem_names_the_missing_variable(monkeypatch):
+    monkeypatch.delenv("SMTP_HOST")
+    email_module.get_email_settings.cache_clear()
+
+    problem = email_module.config_problem()
+
+    assert problem is not None
+    assert "smtp_host" in problem.lower()
+
+
+def test_config_problem_explains_the_unusable_port(monkeypatch):
+    configure(monkeypatch, smtp_port="465")
+
+    problem = email_module.config_problem()
+
+    assert problem is not None
+    assert "465" in problem
+
+
 def test_the_password_is_not_a_plain_string(monkeypatch):
     """`SecretStr` para que no se filtre en un repr, un log o un traceback."""
-    configure(monkeypatch, smtp_password="secreta")
+    configure(monkeypatch, smtp_user="ana", smtp_password="secreta")
 
     settings = EmailSettings()  # type: ignore[call-arg]
 

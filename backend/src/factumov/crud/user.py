@@ -30,6 +30,18 @@ def create(db: Session, email: str, hashed_password: str) -> User:
     return user
 
 
+def set_password(db: Session, user: User, hashed_password: str) -> None:
+    """Reemplaza el hash de la contraseña. Recibe el hash, no la contraseña.
+
+    Hashear es trabajo del router, que es el que decide *cuándo* pagar los ~100 ms de argon2
+    — en el reset, igual que en el registro, ese costo se paga aunque el token no sirva, para
+    que el tiempo de respuesta no cuente qué pasó. Un CRUD que hasheara solo, sin saberlo,
+    dejaría esa decisión escondida acá abajo.
+    """
+    user.hashed_password = hashed_password
+    db.flush()
+
+
 def confirm_email(db: Session, user: User) -> None:
     """Marca la dirección como confirmada, si no lo estaba ya.
 

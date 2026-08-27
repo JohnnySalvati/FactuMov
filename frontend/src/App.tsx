@@ -8,9 +8,11 @@ import { CustomerPage } from './pages/CustomerPage'
 import { CustomersPage } from './pages/CustomersPage'
 import { FiscalIdentitiesPage } from './pages/FiscalIdentitiesPage'
 import { FiscalIdentityPage } from './pages/FiscalIdentityPage'
+import { ForgotPasswordPage } from './pages/ForgotPasswordPage'
 import { LoginPage } from './pages/LoginPage'
 import { NewTemplatePage } from './pages/NewTemplatePage'
 import { RegisterPage } from './pages/RegisterPage'
+import { ResetPasswordPage } from './pages/ResetPasswordPage'
 import { TemplatePage } from './pages/TemplatePage'
 import { TemplatesPage } from './pages/TemplatesPage'
 
@@ -21,9 +23,12 @@ export function App() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/registro" element={<RegisterPage />} />
-          {/* La ruta que nombra el link del mail. Su nombre lo fija `_CONFIRMATION_PATH` del
-              backend: cambiarlo acá rompe los mails que ya se enviaron. */}
+          {/* Las dos rutas que nombran un link de mail. Sus nombres los fijan
+              `_CONFIRMATION_PATH` y `_PASSWORD_RESET_PATH` del backend: cambiarlos acá rompe
+              los mails que ya se enviaron. */}
           <Route path="/confirmar-email" element={<ConfirmEmailPage />} />
+          <Route path="/olvide-password" element={<ForgotPasswordPage />} />
+          <Route path="/restablecer-password" element={<ResetPasswordPage />} />
 
           <Route element={<RequireAuth />}>
             <Route element={<AppLayout />}>

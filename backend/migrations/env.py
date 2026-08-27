@@ -11,6 +11,7 @@ from factumov.models import (  # noqa: F401
     fiscal_identity,
     invoice_template,
     invoice_template_line,
+    password_reset,
     user,
     user_session,
 )

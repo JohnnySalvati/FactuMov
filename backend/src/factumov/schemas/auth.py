@@ -42,6 +42,23 @@ class ResendConfirmationRequest(_EmailIn):
     pass
 
 
+class ForgotPasswordRequest(_EmailIn):
+    """Solo la dirección: no pide la contraseña vieja, que es justamente la que no se sabe."""
+
+
+class ResetPasswordRequest(BaseModel):
+    """El token del mail más la contraseña nueva.
+
+    Lleva el mismo mínimo que `RegisterRequest` y no el "sin mínimo" de `LoginRequest`: acá
+    se está **eligiendo** una contraseña, así que la política aplica igual que en el alta. En
+    el login no aplica porque ahí no se elige nada y un 422 por "muy corta" le diría al
+    atacante que su intento ni llegó a compararse.
+    """
+
+    token: str = Field(min_length=1, max_length=256)
+    password: SecretStr = Field(min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_LENGTH)
+
+
 class ConfirmEmailRequest(BaseModel):
     # El token viaja en el body y no en el path: los tokens en la URL quedan en el historial
     # del browser, en los logs del server y en el `Referer` de cualquier recurso externo que

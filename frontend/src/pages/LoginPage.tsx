@@ -64,6 +64,13 @@ export function LoginPage() {
           {busy ? 'Entrando…' : 'Entrar'}
         </button>
       </form>
+      {/* Debajo del formulario y no al lado del campo de contraseña: quien lo necesita ya
+          falló una vez, y el lugar donde mira después de que el cartel rojo le dice "email o
+          contraseña incorrectos" es acá abajo. Arriba compite con el botón de entrar, que es
+          lo que aprieta el 99% de las veces. */}
+      <p className="muted">
+        <Link to="/olvide-password">Olvidé mi contraseña</Link>
+      </p>
       <p className="muted">
         ¿No tenés cuenta? <Link to="/registro">Creá una</Link>.
       </p>

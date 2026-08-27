@@ -17,13 +17,24 @@ from urllib.parse import quote
 from factumov.services import arca, email
 
 _CONFIRMATION_PATH = "/confirmar-email"
+_PASSWORD_RESET_PATH = "/restablecer-password"
+_REGISTER_PATH = "/registro"
+
+# Cuál de los dos transportes usa cada mail — la decisión está explicada en `email.py`. En
+# una línea: el mail que **es** el producto del request usa `send_email`, que levanta si no
+# se pudo entregar, y el endpoint contesta 503 en vez de un 202 que no cumple. El mail que
+# acompaña a algo ya guardado usa `send_email_best_effort`, porque su fallo no puede
+# deshacer una confirmación ni una contraseña ya cambiada.
 
 
-def _confirmation_url(raw_token: str) -> str:
-    settings = email.get_email_settings()
-    # `quote` y no interpolación pelada: `token_urlsafe` produce `-` y `_`, que son seguros,
-    # pero el día que el token cambie de alfabeto esto no se rompe en silencio.
-    return f"{settings.app_base_url.rstrip('/')}{_CONFIRMATION_PATH}?token={quote(raw_token)}"
+def _url(path: str, raw_token: str | None = None) -> str:
+    """Una URL de la SPA. Los paths los fija `App.tsx`; cambiarlos rompe los mails ya enviados.
+
+    `quote` y no interpolación pelada: `token_urlsafe` produce `-` y `_`, que son seguros,
+    pero el día que el token cambie de alfabeto esto no se rompe en silencio.
+    """
+    base = f"{email.get_email_settings().app_base_url.rstrip('/')}{path}"
+    return base if raw_token is None else f"{base}?token={quote(raw_token)}"
 
 
 def send_confirmation_email(to: str, raw_token: str, valid_for_hours: int) -> None:
@@ -33,7 +44,7 @@ def send_confirmation_email(to: str, raw_token: str, valid_for_hours: int) -> No
         body=(
             "Hola,\n\n"
             "Para terminar de crear tu cuenta en FactuMov, entrá en este link:\n\n"
-            f"{_confirmation_url(raw_token)}\n\n"
+            f"{_url(_CONFIRMATION_PATH, raw_token)}\n\n"
             f"El link vence en {valid_for_hours} horas. Si no fuiste vos, ignorá este "
             "mensaje: sin confirmar, la cuenta no se puede usar.\n"
         ),
@@ -60,14 +71,83 @@ def send_already_registered_email(to: str) -> None:
     )
 
 
+def send_password_reset_email(to: str, raw_token: str, valid_for_minutes: int) -> None:
+    """El link para elegir una contraseña nueva."""
+    email.send_email(
+        to=to,
+        subject="Restablecer tu contraseña de FactuMov",
+        body=(
+            "Hola,\n\n"
+            "Pediste restablecer tu contraseña de FactuMov. Elegí una nueva desde este "
+            "link:\n\n"
+            f"{_url(_PASSWORD_RESET_PATH, raw_token)}\n\n"
+            f"El link vence en {valid_for_minutes} minutos y se puede usar una sola vez.\n\n"
+            "Si no fuiste vos, ignorá este mensaje: tu contraseña sigue siendo la de "
+            "siempre y nadie puede cambiarla sin este link.\n"
+        ),
+    )
+
+
+def send_no_account_email(to: str) -> None:
+    """Aviso para quien pide un reset sobre una dirección sin cuenta utilizable.
+
+    Existe por el mismo motivo que `send_already_registered_email`, y además por uno
+    estructural: `POST /auth/forgot-password` contesta 503 cuando el mail no se puede
+    entregar. Si esta rama no mandara nada, nunca podría fallar — y entonces un 503 pasaría a
+    significar "esa dirección sí existe". Las dos ramas mandan un mail justamente para que
+    las dos puedan fallar igual.
+
+    El texto no dice "no existe": una cuenta dada de baja también cae acá, y afirmar que no
+    existe sería mentirle a su dueño.
+    """
+    email.send_email(
+        to=to,
+        subject="No pudimos restablecer tu contraseña",
+        body=(
+            "Hola,\n\n"
+            "Alguien pidió restablecer la contraseña de esta dirección, pero no hay ninguna "
+            "cuenta de FactuMov que se pueda usar con ella.\n\n"
+            "Si esperabas poder entrar, puede que te hayas registrado con otra dirección. "
+            "También podés crear una cuenta acá:\n\n"
+            f"{_url(_REGISTER_PATH)}\n\n"
+            "Si no fuiste vos, no hace falta que hagas nada.\n"
+        ),
+    )
+
+
+def send_password_changed_email(to: str) -> None:
+    """Aviso de que la contraseña cambió. Best effort: la contraseña ya es la nueva.
+
+    No es una cortesía. Es la única señal que le llega al dueño de la casilla si el reset lo
+    pidió otro, y llega a un lugar al que el atacante ya no puede volver: el link se consumió
+    y las sesiones se cerraron todas.
+    """
+    email.send_email_best_effort(
+        to=to,
+        subject="Tu contraseña de FactuMov cambió",
+        body=(
+            "Hola,\n\n"
+            "Tu contraseña de FactuMov se acaba de cambiar, y cerramos todas las sesiones "
+            "que estaban abiertas.\n\n"
+            "Si fuiste vos, no hace falta que hagas nada.\n\n"
+            "Si no fuiste vos, alguien tiene acceso a esta casilla de mail: cambiá su "
+            "contraseña y después volvé a pedir un restablecimiento en FactuMov.\n"
+        ),
+    )
+
+
 def send_delegation_instructions_email(to: str) -> None:
     """Las instrucciones para delegar WSFE en el CUIT de FactuMov.
 
     Se manda al confirmar la dirección y no al registrarse: antes de confirmar no hay
     ninguna prueba de que la casilla sea de quien dice, y estas instrucciones terminan con
     alguien entrando a ARCA con su Clave Fiscal.
+
+    Best effort: sale después de que la confirmación ya quedó guardada. Fallar el request
+    por este mail mandaría al usuario a reintentar con un token que ya se consumió, o sea a
+    un 400 sobre una cuenta que en realidad quedó confirmada.
     """
-    email.send_email(
+    email.send_email_best_effort(
         to=to,
         subject="Cómo autorizar a FactuMov a emitir tus facturas",
         body=(
