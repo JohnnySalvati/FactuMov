@@ -38,8 +38,10 @@ class EmailSettings(BaseSettings):
     smtp_starttls: bool = True
     email_from: str
     # De dónde cuelga el link de confirmación. Es la SPA, no el backend: el usuario aterriza
-    # en una pantalla que lee el token y lo postea.
-    app_base_url: str = "http://localhost:5173"
+    # en una pantalla que lee el token y lo postea. El default va con https porque el dev
+    # server de Vite habla TLS (la cookie de sesión es Secure): con http el link del mail
+    # llega inservible, y el navegador dice ERR_EMPTY_RESPONSE en vez de nombrar la causa.
+    app_base_url: str = "https://localhost:5173"
 
 
 @lru_cache

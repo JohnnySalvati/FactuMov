@@ -1055,9 +1055,16 @@ a cambio de ahorrarse una advertencia del navegador que se acepta una vez.
 Verificado el 2026-08-26: login por `https://192.168.1.37:5173`, cookie guardada, y el
 request siguiente autenticado.
 
-**Detalle a tener en cuenta:** `APP_BASE_URL` del backend apunta a `http://localhost:5173`,
-así que el link de confirmación que llega por mail **no** sirve para abrir desde el celular.
-Para probar el registro desde el teléfono hay que apuntar esa variable a la URL de LAN.
+**`APP_BASE_URL` va con `https://`, y eso no es un detalle.** De esa variable cuelga el link
+de confirmación que sale en el mail, y el 5173 habla TLS. Con `http://localhost:5173` el
+navegador manda una request en texto plano a un puerto que espera un handshake, el server
+cierra sin contestar, y Chrome muestra **`ERR_EMPTY_RESPONSE`** — que no nombra la causa por
+ningún lado y se lee como "la app está caída". Pasó el 2026-08-26: el mail llegó bien y el
+link estaba muerto desde el repo, no desde la instalación. Por eso el default de
+`EmailSettings` también es `https`.
+
+Para probar el registro **desde el celular** hace falta además cambiar `localhost` por la IP
+de LAN, porque el link se abre en el teléfono y ahí `localhost` es el teléfono.
 
 ### El proxy de Vite en vez de CORS
 `/api` se reenvía a `127.0.0.1:8000` y se le saca el prefijo. El navegador ve **un solo
