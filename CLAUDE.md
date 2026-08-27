@@ -91,9 +91,14 @@ explique el *por qué*, no el *qué* (el diff ya dice qué cambió).
 ```
 FactuMov/
 ├── CLAUDE.md                       # no hay README: este archivo es la documentación
+├── docs/DEPLOYMENT.md              # el procedimiento de deploy — ver *Producción*
 ├── docker-compose.yml              # solo Postgres — ver *Cómo se corre*
+├── docker-compose.prod.yml         # db + app + web, para la VM
+├── .env.example                    # el .env de PRODUCCIÓN (el de dev es backend/.env.example)
 ├── backend/
 │   ├── pyproject.toml
+│   ├── Dockerfile
+│   ├── docker-entrypoint.sh        # alembic upgrade head y después uvicorn
 │   ├── .env.example
 │   ├── src/factumov/
 │   │   ├── main.py
@@ -113,6 +118,8 @@ FactuMov/
 │       └── samples/                # 10 facturas PDF reales (1 A, 4 B, 5 C)
 │           └── unsupported/       # otros layouts, fuera del glob de los tests
 └── frontend/                       # Vite + React 19 + TypeScript
+    ├── Dockerfile                  # build de la SPA + el nginx que la sirve
+    ├── nginx.conf                  # sirve el dist y proxea /api al app
     ├── vite.config.ts              # proxy /api → :8000
     ├── public/                     # ícono, sus PNG, manifest y el logo de InSoft
     ├── scripts/render_icons.py     # los PNG del ícono, derivados de su SVG
@@ -944,7 +951,11 @@ Cerrada el 2026-08-27: la **marca** — el ícono propio, el acento verde, los �
 con su manifest y el logo de InSoft en las pantallas sin sesión.
 
 1. **Producción** — la app corriendo en la VM detrás de `srv-nginx`, con su dominio propio.
-   Es lo que la landing va a linkear, así que va antes que ella.
+   Es lo que la landing va a linkear, así que va antes que ella. **Los artefactos están
+   escritos y probados** —compose, las dos imágenes, el nginx, el `.env.example` y
+   `docs/DEPLOYMENT.md`— y lo que falta son los tres pasos que necesitan accesos que la
+   sesión no tiene: el registro DNS, el server block en srv-nginx y el deploy en la VM. Ver
+   *Producción*.
 2. **FactuMov en la landing de InSoft** — tarjeta en *Nuestros SaaS* y entrada en el
    lanzador de apps, apuntando a la URL del punto anterior. Los assets de la tarjeta ya
    existen: `frontend/public/factumov-icon.svg` y los PNG de al lado.
@@ -2081,71 +2092,131 @@ alcanza para que Android ofrezca "agregar a la pantalla de inicio" y para que el
 correcto; el prompt de instalación de Chrome en escritorio sí pide un service worker. Sumarlo
 es su propia unidad —hay que decidir qué se cachea y cómo se invalida— y no bloquea nada.
 
-#### Lo que quedó abierto
-- **El PDF del comprobante sigue sin ninguna marca** (`templates/invoice.html`). Es lo que ve
-  el cliente del usuario, no el usuario, y el emisor es el contribuyente y no FactuMov, así que
-  es **decisión de Miguel** y no un olvido. Lo razonable es a lo sumo un pie chiquito.
+#### El PDF del comprobante no lleva marca — decidido el 2026-08-27
+Quedaba abierto y lo cerró Miguel: `templates/invoice.html` se queda como está, sin ícono, sin
+nombre y sin pie. El papel lo ve el cliente del usuario y no el usuario, y el emisor es el
+contribuyente y no FactuMov: una marca ahí sería publicidad nuestra en un comprobante fiscal
+ajeno. No hay nada pendiente de este lado.
 
-### Producción
-Balance360 ya está en producción y su `docs/DEPLOYMENT.md` es la plantilla: **VM Ubuntu 24.04
-con todo en `docker-compose.prod.yml`** (servicio `db` sin puerto publicado + servicio `app`
-construido con el `Dockerfile` del repo), y **`srv-nginx` en `192.168.100.9`** terminando el
-HTTPS y proxeando por HTTP al 8000 de la VM. El `.env` de producción vive solo en la VM.
-Balance360 está publicado en `balance360.insoft.net.ar`, así que FactuMov va en
-`factumov.insoft.net.ar`.
+### Producción (2026-08-27)
+Los artefactos están escritos y probados; lo que falta es correrlos en la VM, que necesita
+accesos que no están en esta máquina. `docs/DEPLOYMENT.md` es el procedimiento completo — acá
+abajo van solo las decisiones, que es lo que no se deduce leyendo los archivos.
 
-**Va en la misma VM que Balance360** (decidido el 2026-08-27). Miguel puede armar las que
-hagan falta; la pregunta era si una segunda aporta algo, y aporta poco: Compose ya aísla lo
-que se puede aislar —red propia, Postgres propio, volúmenes propios— así que lo único
-realmente compartido es el kernel, el disco y la RAM. Una VM aparte compra que un deploy de
-FactuMov no pueda tumbar a Balance360, y eso Compose ya lo compra casi entero. Lo que cuesta
-sí es concreto: otro host que parchear, otra copia de los certificados de ARCA en disco, otra
-rutina de backup y un segundo lugar donde mirar cuando algo anda mal.
+| Archivo | Rol |
+|---|---|
+| `docker-compose.prod.yml` | Los tres servicios: `db`, `app` y `web` |
+| `backend/Dockerfile` + `docker-entrypoint.sh` | La imagen del backend; migraciones y después uvicorn |
+| `frontend/Dockerfile` + `nginx.conf` | Build de la SPA en una etapa `node`, y el nginx que junta las dos mitades |
+| `.env.example` (raíz) | Plantilla del `.env` de producción |
+| `.gitattributes` | Que el entrypoint y el `.conf` lleguen a Linux con LF |
 
-- **Balance360 se queda con el 8000**, así que FactuMov publica otro puerto — 8001 — y es el
-  contenedor nginx el que lo publica, no el `app`.
-- **Antes de empezar hay que mirar el espacio y la memoria de la VM** (`df -h`, `free -h`).
-  Son dos Postgres y dos apps Python con WeasyPrint; el modo de falla compartido que queda es
-  justamente el disco lleno, y llenarlo se lleva puesta la contabilidad de Balance360.
-- Se revisa si FactuMov empieza a tener carga propia, o el día que convenga poder reiniciar
-  una sin tocar la otra.
+Sigue valiendo lo decidido antes de escribir nada: va en la **misma VM que Balance360** —
+Compose ya aísla red, Postgres y volúmenes, así que una VM aparte solo compraría que un deploy
+no pueda tumbar al otro, a cambio de otro host que parchear, otra copia de los certificados y
+otra rutina de backup. Balance360 se queda con el 8000 y FactuMov publica el **8001**. Y antes
+de empezar hay que mirar `df -h` y `free -h`: el disco es el único modo de falla que quedó
+compartido, y llenarlo se lleva puesta la contabilidad de Balance360.
 
-Lo que FactuMov necesita y Balance360 no tenía:
+#### Son tres servicios y solo uno publica puerto
+El `app` **no publica el 8000**, a diferencia de Balance360, donde srv-nginx le habla directo.
+Acá el único que le habla es el `web` por la red del compose, y eso no es prolijidad: es lo
+que hace honesto el `--forwarded-allow-ips="*"` de uvicorn. Ese `*` significa "confío en el
+X-Forwarded-For del que se conectó", y solo se puede decir cuando el que se conecta no puede
+ser cualquiera.
 
-- **Hay una SPA que servir, no solo una API.** Balance360 es HTMX, o sea que su contenedor
-  contesta HTML y listo. Acá hay un `dist/` estático y un backend JSON, y **el prefijo `/api`
-  lo inventa el proxy de Vite**: el backend no sabe nada de él (`rewrite` en
-  `vite.config.ts`). En producción eso lo tiene que hacer alguien, y hay dos formas:
-  - **nginx en `srv-nginx` con dos `location`** — `/api/` proxeado a la VM con la barra final
-    que come el prefijo, y `/` sirviendo el `dist`. Es lo que el comentario de
-    `vite.config.ts` dice que imita el proxy, pero obliga a subir el `dist` a `.9` en cada
-    deploy, o sea un segundo camino de publicación al lado del de la VM.
-  - **un contenedor nginx más en el compose de la VM**, que sirve el `dist` y proxea `/api` al
-    `app`. El deploy sigue siendo un solo `git pull` + `up -d --build`, y `srv-nginx` no
-    necesita saber de FactuMov más que "proxeá todo a la VM". **Es la que conviene**, y de
-    paso es donde va el `client_max_body_size`.
-  - El `dist` se puede construir en el mismo Dockerfile con una etapa `node`, así el deploy no
-    depende de que alguien se acuerde de correr `npm run build`.
-- **`client_max_body_size`** cierra el pendiente que dejó anotado el endpoint de importación:
-  el guard de `MAX_UPLOAD_BYTES` acota lo que el proceso parsea, no lo que el server ingiere.
-- **`--proxy-headers` y `--forwarded-allow-ips` en uvicorn.** Sin eso `request.client` es el
-  proxy y **todos los usuarios comparten un solo cubo** en el rate limiter — ver *Rate
-  limiting*, que decidió leer `request.client` justamente porque esa reescritura es
-  responsabilidad de uvicorn.
-- **`limit_req` en nginx**, porque el limitador en memoria es un piso por worker y no un techo.
-- **El `.env` de producción**: `APP_BASE_URL` con el dominio real y `https://` (de ahí cuelgan
-  los links de los mails), `SMTP_*` reales, `OPERATOR_EMAIL` —que hoy es lo único que avisa que
-  alguien está esperando que aceptemos su designación en ARCA— y `ARCA_WSDL_CACHE_PATH` en un
-  volumen, o cada deploy vuelve a bajar los WSDL.
-- **`ARCA_ENV`: la decisión más cara de todas.** En `prod` cada emisión es un comprobante con
-  validez legal y no hay vuelta atrás — ver *Emisión con CAE*. El default es `homo` a
-  propósito. Los certificados de producción del `20182810674` ya existen y son los que usa
-  Balance360; van montados como volumen de solo lectura igual que allá
-  (`./certs:/app/certs:ro`, excluidos de la imagen por el `.dockerignore`). **Se sale con
-  `homo` y el pasaje a `prod` es un paso aparte y deliberado** — confirmado por Miguel el
-  2026-08-27. Estar en producción y estar emitiendo de verdad son dos hitos distintos, y
-  juntarlos hace que la primera prueba contra el server sea también la primera factura
-  irreversible.
+- **Dos Dockerfiles con su propio contexto** (`backend/` y `frontend/`), no uno en la raíz.
+  Un cambio de CSS no tiene por qué invalidar la capa de dependencias de Python.
+- **El `dist` se construye adentro de la imagen**, en una etapa `node`. El deploy no depende de
+  que alguien se acuerde de correr `npm run build`, y como esa etapa corre `tsc -b`, los tipos
+  que no cierran cortan el build en vez de publicar una SPA rota.
+- **`fonts-dejavu-core` no es opcional en la imagen del backend.** `templates/invoice.html`
+  pide "DejaVu Sans" por nombre; sin la fuente el PDF sale igual, con la sustituta que elija
+  fontconfig y las columnas corridas.
+- **Un solo worker de uvicorn.** El rate limiter guarda su estado en memoria del proceso, así
+  que con N workers el límite efectivo es N veces el configurado. Con uno, los números del
+  código son los números reales, y la carga esperada es un puñado de facturas por mes.
+- **El healthcheck del `app` lo hace `urllib` y no `curl`**, que no está en la imagen slim de
+  uv. Va a `/health/` con la barra: sin ella FastAPI contesta un 307.
+
+#### El nginx del compose, que es donde están casi todas las decisiones
+- **Sabe quién es el cliente, y no le cree al cliente.** `set_real_ip_from` (srv-nginx y la red
+  del compose) + `real_ip_recursive`, y después `proxy_set_header X-Forwarded-For $remote_addr`
+  — un solo valor, sobrescrito, no `$proxy_add_x_forwarded_for`. Sin la primera mitad,
+  `request.client` es srv-nginx y **todos los usuarios comparten un solo cubo** del rate
+  limiter; sin la segunda, cualquiera puede mandarse un `X-Forwarded-For` y correrle la cuenta
+  a otro. **Verificado**: un request con `X-Forwarded-For: 6.6.6.6` llega al backend con la IP
+  real y no con la inventada.
+- **La IP del `app` se resuelve por request, con `resolver 127.0.0.11` y la URL detrás de una
+  variable.** Con `proxy_pass http://app:8000` a secas, nginx la resuelve una vez al arrancar y
+  se la guarda: el primer deploy que recree solo el backend —o sea el caso normal— deja esto
+  contestando 502 hasta que alguien reinicie el `web` a mano. El precio es que la barra final
+  de `proxy_pass` ya no puede comer el prefijo, así que `/api` lo saca un `rewrite`.
+- **Dos zonas de `limit_req`, y `/auth/me` queda afuera de la apretada.** Los cinco endpoints
+  que mandan mail o queman argon2 tienen su propio cubo; `/auth/me` lo llama el `AuthProvider`
+  en cada carga de página, así que meterlo ahí castigaría al que recarga. Los dos límites están
+  muy por encima de los de la app a propósito: el que tiene que contestar 429 con un mensaje
+  entendible —y sabiendo limitar por dirección de email— es el backend. Esto solo corta la
+  inundación. Con `limit_req_status 429`, que es el mismo status que usa la app.
+- **`client_max_body_size 12m`, un poco arriba de los 10 MiB de `MAX_UPLOAD_BYTES`.** Cierra el
+  pendiente que dejó anotado el endpoint de importación —el guard de la app acota lo que el
+  proceso copia y parsea, no lo que el server ingiere— pero deliberadamente no lo pisa: el que
+  contesta el caso normal sigue siendo la app, que es la única de las tres capas que trae un
+  mensaje en castellano.
+- **`proxy_read_timeout 180s`.** Emitir es WSAA + `FECompUltimoAutorizado` + `FECAESolicitar`.
+  Con los 60 s de default, un pedido de CAE lento se corta **después** de que ARCA autorizó: la
+  factura existe para el fisco y el usuario ve un 504. Va también en srv-nginx, que tiene el
+  suyo.
+- **`try_files ... /index.html` para la SPA**, y el `index.html` con `no-cache` mientras
+  `/assets/` va con `immutable` a un año. Los nombres de los assets traen el hash del
+  contenido; el que los nombra no puede cachearse ni un minuto, o el navegador pide los assets
+  de la versión anterior y el deploy no llega nunca.
+
+#### El `.env` de producción vive en la raíz, no en `backend/`
+Es un archivo distinto del `backend/.env` de desarrollo, y no por comodidad: incluye además
+las credenciales del contenedor Postgres, que en desarrollo están escritas adentro de
+`docker-compose.yml`. Va en la raíz porque es donde está el compose que lo consume, que es
+también quien interpola `${POSTGRES_USER}` en el healthcheck. El de desarrollo se queda donde
+está: son dos contextos, dos archivos, y `.env.example` de cada lado lo aclara en la primera
+línea.
+
+- **`ARCA_WSDL_CACHE_PATH` apunta al volumen `wsdl_cache`.** Sin volumen, cada deploy vuelve a
+  bajar los WSDL de ARCA y el primer request después de un redeploy paga esa demora.
+- **`ARCA_ENV` sale en `homo`**, y el pasaje a `prod` es un paso aparte y deliberado —
+  confirmado por Miguel el 2026-08-27. Estar en producción y estar emitiendo de verdad son dos
+  hitos distintos: juntarlos hace que la primera prueba contra el server sea también la primera
+  factura irreversible.
+
+#### `.gitattributes`, que no estaba
+`docker-entrypoint.sh` y `nginx.conf` se ejecutan adentro de un contenedor Linux, y en esta
+máquina `core.autocrlf` está en `true`. Con CRLF, `sh` falla con un "not found" que nombra al
+intérprete y no al archivo — un error que no se parece en nada a su causa. Hoy no muerde porque
+el build corre sobre un `git clone` hecho en la VM, pero eso es una propiedad del procedimiento
+y no del repo.
+
+#### Qué se verificó en esta máquina y qué no
+El stack entero se levantó local con `-p factumov-prod` y contestó: las 16 migraciones
+aplicadas, uvicorn arriba, `/api/health/` a través del nginx, la SPA servida, `/modelos/algo`
+cayendo en el index, gzip, los headers de cache, el 401 de `/api/auth/me` sin cookie, el 429
+del `limit_req` después del burst, y el `X-Forwarded-For` falso ignorado.
+
+Lo único que **no** se pudo probar acá es el bind mount de `./certs`: Docker Desktop no tiene
+compartido el disco `E:` y el mount se cuelga sin error. Es un límite de esta máquina —en la VM
+el bind es nativo— pero significa que la primera vez que ese volumen se monta de verdad es en
+producción, así que conviene mirar que `/app/certs` tenga los dos archivos antes de dar por
+buena la verificación de delegación.
+
+#### Lo que falta, y por qué no lo puede hacer esta sesión
+Las tres cosas necesitan accesos que no están acá:
+
+1. **El registro DNS** de `factumov.insoft.net.ar` apuntando a srv-nginx.
+2. **El server block en `srv-nginx`** (`administrator@192.168.100.9`) más el certificado de
+   certbot. El bloque está escrito en `docs/DEPLOYMENT.md` § 3.
+3. **El deploy en la VM**: clonar, completar el `.env`, subir los certificados de homologación
+   y `up -d --build`. Falta el host de la VM — el `DEPLOYMENT.md` de Balance360 lo tiene como
+   `<vm>` y el de FactuMov lo copió igual.
+
+#### Lo que ya estaba decidido y sigue igual
 - **Las dos apps no pueden compartir el certificado de producción, y eso hay que resolverlo
   antes del pasaje a `prod`.** WSAA se niega a emitir un TA nuevo mientras el anterior siga
   vigente —es el "El CEE ya posee un TA valido" que los dos proyectos ya tienen documentado— y
@@ -2166,8 +2237,7 @@ Lo que FactuMov necesita y Balance360 no tenía:
     entera de la salida y conviene verificarla en homologación antes de depender de ella. Si
     resultara que el TA es por CUIT y servicio, las opciones son que las dos apps compartan un
     cache de tickets —acoplarlas, feo— o que FactuMov emita bajo un CUIT propio.
-- **Backups.** Hoy no hay ninguno de FactuMov. La sección 4 del `DEPLOYMENT.md` de Balance360
-  sirve tal cual.
+- **Backups.** Hoy no hay ninguno de FactuMov. El comando está en `docs/DEPLOYMENT.md` § 8.
 - **El barrido de delegaciones no necesita nada especial**: vive en el `lifespan` y con N
   workers barre uno solo, por el `pg_try_advisory_xact_lock`.
 

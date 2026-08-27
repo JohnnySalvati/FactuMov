@@ -1,0 +1,16 @@
+# Entornos y caches locales: no entran a la imagen.
+.venv/
+.git/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+__pycache__/
+**/__pycache__/
+*.pyc
+
+# El .env real nunca se hornea en la imagen: en producción lo inyecta el compose.
+.env
+
+# Los tests corren en dev, no en runtime — y `tests/samples/` son facturas reales de
+# Miguel, que no tienen por qué viajar adentro de una imagen.
+tests/

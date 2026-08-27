@@ -1,0 +1,6 @@
+node_modules/
+# El `dist` se construye adentro de la imagen. Copiar el local sería mandar al server lo
+# que haya quedado de la última corrida de `npm run build` en la máquina de alguien.
+dist/
+.git/
+*.log

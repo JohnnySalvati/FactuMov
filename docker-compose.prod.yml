@@ -1,0 +1,72 @@
+# Stack de producción para la VM, detrás de srv-nginx (192.168.100.9), que termina el HTTPS
+# y proxea por HTTP al puerto 8001 de esta VM.
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Son tres servicios y solo uno publica puerto. `docker-compose.yml` —el de al lado— es el
+# de desarrollo y solo levanta Postgres; los dos no se pisan porque este publica el 8001 y
+# aquél el 5433.
+#
+# El .env de producción vive en la raíz del repo **en la VM**, nunca en git. Es un archivo
+# distinto del `backend/.env` de desarrollo: acá adentro van también las credenciales del
+# contenedor Postgres, que en desarrollo están escritas en `docker-compose.yml`.
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # El 5432 NO se publica: la base solo existe adentro de la red del compose. Balance360
+    # tiene su propio Postgres en esta misma VM, en su propio compose y su propia red.
+
+  app:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      # Los certificados de ARCA no entran a la imagen (los excluye el .dockerignore) ni
+      # viajan por git: llegan a la VM por scp y se montan de solo lectura. Las rutas
+      # ARCA_CERT_PATH / ARCA_PRIVATE_KEY_PATH del .env son las **del contenedor**.
+      - ./certs:/app/certs:ro
+      # El cache de WSDL de zeep. Sin volumen, cada deploy vuelve a bajar los WSDL de ARCA
+      # y el primer request después de un redeploy paga esa demora.
+      - wsdl_cache:/var/cache/factumov
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      # Sin curl en la imagen (es la slim de uv), así que el chequeo lo hace el Python que
+      # ya está. `/health/` con la barra: sin ella FastAPI contesta un 307.
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/', timeout=3)
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    # Sin `ports`: al backend solo le habla el `web` de acá abajo, por la red del compose.
+    # Eso es lo que hace honesto el --forwarded-allow-ips="*" del entrypoint.
+
+  web:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_started
+    ports:
+      # 8001 y no 8000: el 8000 de esta VM ya es de Balance360.
+      - "8001:80"
+
+volumes:
+  postgres_data:
+  wsdl_cache:

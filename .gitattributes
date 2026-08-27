@@ -1,0 +1,11 @@
+* text=auto eol=lf
+*.py text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.html text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+# Los dos que se ejecutan adentro de un contenedor Linux: con CRLF, `sh` falla con
+# un "not found" que nombra al intérprete y no al archivo.
+*.sh text eol=lf
+*.conf text eol=lf
