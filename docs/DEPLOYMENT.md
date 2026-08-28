@@ -153,11 +153,19 @@ diferencia de Balance360, acá no existe una base de desarrollo que sea la fuent
 
 ## 3. El server block de srv-nginx
 
-Va en `192.168.100.9` (`administrator@192.168.100.9`, el mismo server de la landing). Es el
-bloque de Balance360 con otro dominio y otro puerto:
+Va en `192.168.100.9` (`administrator@192.168.100.9`, el mismo server de la landing). La
+convención de ese server es un archivo por dominio en `sites-available/` con su symlink en
+`sites-enabled/`, así que el de FactuMov es `/etc/nginx/sites-available/factumov.insoft.net.ar`.
+
+**Se escribe con `listen 80` y no con `listen 443`**, aunque el objetivo sea el HTTPS. Un
+bloque con `listen 443 ssl` y sin `ssl_certificate` no pasa el `nginx -t`, y el certificado
+todavía no existe. El orden es: bloque en el 80, `certbot` valida el dominio por HTTP-01 —para
+lo cual necesita justamente ese bloque respondiendo en el 80— y después reescribe el archivo
+él mismo, agregando el `listen 443 ssl`, las rutas del certificado y el redirect del 80.
 
 ```nginx
 server {
+    listen 80;
     server_name factumov.insoft.net.ar;
 
     location / {
@@ -172,14 +180,14 @@ server {
         proxy_read_timeout 180s;
         client_max_body_size 12m;
     }
-
-    listen 443 ssl;   # el resto —certificado, redirect del 80— lo escribe certbot
 }
 ```
 
 ```bash
+sudo ln -s /etc/nginx/sites-available/factumov.insoft.net.ar /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
 sudo certbot --nginx -d factumov.insoft.net.ar
+sudo nginx -t && sudo systemctl reload nginx
 ```
 
 **Los `X-Forwarded-*` no son decorativos.** Sin `X-Forwarded-For`, el nginx de la VM no puede
