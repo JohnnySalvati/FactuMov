@@ -74,7 +74,8 @@ importar un PDF, editar el modelo, guardarlo, emitir con CAE y mandarlo.
 Lo que sigue ya no es funcionalidad: es **salir a la cancha**. Las tres se pidieron el
 2026-08-27 y van en ese orden por dependencia, no por importancia. Las dos primeras —la
 **marca** (el ícono propio, el acento verde, los íconos de la PWA con su manifest y el logo de
-InSoft en las pantallas sin sesión) y la **producción**— están cerradas; queda la landing.
+InSoft en las pantallas sin sesión) y la **producción**— están cerradas, y la **landing** está
+escrita y a la espera de que se corra su `scp.ps1`.
 
 1. ~~**Producción**~~ — **hecha el 2026-08-28.** La app corre en
    `factumov.insoft.net.ar`, en la VM detrás de `srv-nginx`: DNS, server block con certbot y
@@ -90,9 +91,12 @@ InSoft en las pantallas sin sesión) y la **producción**— están cerradas; qu
    - **Lo único que separa a la app de emitir de verdad es ese scp.** `ARCA_ENV` ya está en
      `prod` en el `.env` de producción: en cuanto `factumov.crt` esté en la VM, el botón de
      emitir produce comprobantes con validez legal.
-2. **FactuMov en la landing de InSoft** — tarjeta en *Nuestros SaaS* y entrada en el
-   lanzador de apps, apuntando a la URL del punto anterior. Los assets de la tarjeta ya
-   existen: `frontend/public/factumov-icon.svg` y los PNG de al lado.
+2. ~~**FactuMov en la landing de InSoft**~~ — **escrita el 2026-08-28.** Tarjeta en
+   *Nuestros SaaS* con las cuatro funcionalidades core y el link a
+   `factumov.insoft.net.ar`, entrada en el lanzador de apps, y de paso el ícono de producto
+   que a Balance360 le faltaba. Ver *La landing, escrita* en [`marca.md`](marca.md).
+   - **Falta publicarla**: correr `scp.ps1` desde `E:\Capacitacion\InSoft\LandingPage`, que
+     es lo único que toca el server.
 3. **Segundo layout del parser** — ver *Parser → Pendiente: un segundo layout*. No bloquea
    nada: hoy el usuario puede cargar el modelo a mano.
 4. **WhatsApp**, la otra mitad de la funcionalidad #5. Sin empezar y sin decisión tomada

@@ -9,14 +9,15 @@ InSoft, publicarla en la landing y sacarla a producción. Van en ese orden porqu
 insumo de la siguiente: sin ícono no hay tarjeta ni favicon, y sin URL de producción la
 tarjeta no tiene a dónde linkear.
 
-**La marca está hecha** — ver *La marca, hecha*. **Producción** se mudó a su propio archivo
-([`produccion.md`](produccion.md), con el procedimiento en
-[`DEPLOYMENT.md`](DEPLOYMENT.md)). Queda **la landing**, y lo que hay abajo de ella es el
-relevamiento para que la sesión que la implemente no lo tenga que rehacer.
+**Las tres están escritas.** La marca, ver *La marca, hecha*; **producción** se mudó a su
+propio archivo ([`produccion.md`](produccion.md), con el procedimiento en
+[`DEPLOYMENT.md`](DEPLOYMENT.md)); **la landing** se escribió el 2026-08-28 y está lista para
+subir — ver *La landing, escrita*. Lo que sigue abajo es el relevamiento con el que se hizo,
+que se deja porque la landing es la única pieza del proyecto que vive fuera de este repo.
 
 ## Lo que ya existe y hay que reusar
 La landing vive en `E:\Capacitacion\InSoft\LandingPage`, **fuera de este repo y sin git**: un
-solo `insoft-v3-seo.html` (~570 líneas, CSS y JS inline), las imágenes sueltas al lado y
+solo `insoft-v3-seo.html` (~620 líneas, CSS y JS inline), las imágenes sueltas al lado y
 `scp.ps1`, que lo publica.
 
 | Cosa | Dónde |
@@ -152,7 +153,78 @@ contribuyente y no FactuMov: una marca ahí sería publicidad nuestra en un comp
 ajeno. No hay nada pendiente de este lado.
 
 
-## La landing
+## La landing, escrita (2026-08-28)
+El pedido original está más abajo, en *El pedido*. Se hicieron las dos entradas —la tarjeta en
+`#productos` y el `app-tile` del lanzador— y, de yapa, el ícono de producto que a Balance360 le
+faltaba. **Está escrito y verificado en el navegador, pero todavía no publicado**: falta correr
+`scp.ps1`, que es lo único que toca el server.
+
+### La tarjeta describe con una lista y no con capturas
+Balance360 muestra un carrusel de capturas reales y Gastin un mock de teléfono. FactuMov usa
+una `<ul class="feat">` con las cuatro funcionalidades core en una línea cada una.
+
+- **`.feat` ya estaba en el CSS y no la usaba nadie** — quedó de una versión anterior de la
+  página. Sus viñetas son la pastilla de InSoft con el circulito blanco, o sea el interruptor
+  encendido en miniatura, cuatro veces. Es el elemento que mejor ata la tarjeta a la marca de
+  la casa, y estaba ahí sin costo.
+- **Las capturas hubieran sido PNG nuevos** que hay que nombrar uno por uno en el `scp.ps1`,
+  mantener sincronizados con una app que sigue cambiando y sacar de una cuenta con datos
+  presentables. La lista dice lo mismo y no envejece.
+- Que las tres tarjetas se cuenten distinto no es incoherencia: son tres etapas distintas de
+  producto y cada una muestra lo que tiene.
+
+**El texto se acortó después de verlo renderizado.** Con las viñetas largas la tarjeta quedaba
+un tercio más alta que la de Balance360, y como el `.go` va con `margin-top:auto`, esa
+diferencia se convierte en un hueco vacío en la tarjeta de al lado. Las viñetas de una línea lo
+cierran casi entero.
+
+### El ícono de la tarjeta es una copia del SVG, no un `<img>`
+En la SPA la regla es al revés —`BrandMark` usa un `<img>` al SVG de `public/` justamente para
+no tener dos versiones del dibujo—. Acá no se puede: la landing vive en otra carpeta, sin
+repo, y se publica como un HTML suelto. El SVG está inline en la tarjeta, o sea que **hay una
+segunda copia del ícono y su fuente sigue siendo
+[`frontend/public/factumov-icon.svg`](../frontend/public/factumov-icon.svg)**: si el dibujo
+cambia, hay que traerlo a mano.
+
+### Balance360 tenía nombre pero no ícono (2026-08-28)
+No existía en ningún lado —ni en su repo, que solo tiene el `favicon.ico` y el logo de
+InSoft—, así que hubo que dibujarlo, con la misma receta que la G y la F: `viewBox 0 0 120
+120`, fondo `#0F172A` con `rx="23"`, trazo de 14 con puntas redondas y el gradiente vertical de
+la pastilla, y el punto blanco `r="6"`.
+
+- **La B no tiene punta libre.** La G termina en su barra interna y la F en el travesaño del
+  medio; la B es una letra cerrada — se dibuja como asta más dos panzas y el trazo vuelve
+  siempre sobre sí mismo. Así que el punto no puede ir "al final del trazo".
+- **Lo que se conserva es la coordenada.** En los tres íconos el punto cae en `(66, 60)`: a la
+  altura de la cintura de la letra y a la derecha de su eje. Puestos uno al lado del otro, los
+  tres puntos están alineados. La familia es dónde cae el punto, no la topología del trazo que
+  lo trae hasta ahí.
+- Son dos subpaths (`M38 87 V33 H66 A… H38` y `M38 60 H66 A… H38`) con el mismo truco que la F:
+  el segundo arranca **sobre** el asta y su punta redonda queda escondida adentro.
+
+### El panel del lanzador pasó de 430 a 520 px
+`.apps-row` scrollea horizontal a propósito, con `scroll-snap`, para aguantar la app número
+seis. Pero con tres `app-tile` de 150 px la tercera quedaba cortada al medio justo al abrir el
+panel, que se lee como un bug y no como "hay más para el costado". A 520 px entran las tres
+enteras y el scroll sigue estando para cuando haga falta. Abajo de 560 px no cambia nada: la
+media query que ya estaba lo pisa con `position:fixed` y `width:auto`.
+
+**El `app-tile` de FactuMov usa la pastilla genérica de `.app-ic`, igual que los otros dos.**
+El ícono de producto va en la tarjeta, que es donde se lo presenta; en el lanzador lo que
+importa es que las filas se lean como una lista pareja.
+
+### Publicarla
+`scp.ps1` **no necesitó archivos nuevos** —no se subieron capturas—, solo se le sumó el conteo
+de menciones de FactuMov al paso 3, que es la única verificación de que nginx está sirviendo lo
+que uno cree.
+
+Antes de tocar el HTML se hizo una copia local `insoft-v3-seo.html.bak-<fecha>`, además del
+`index.html.bak` que el propio `scp.ps1` deja **del lado del server**. La landing no tiene git:
+esas dos copias son toda la red que hay.
+
+## El pedido
+Esto es lo que se relevó antes de escribirla, y quedó cumplido:
+
 La tarjeta de FactuMov va en `#productos`, al lado de Balance360 y Gastin, y **la entrada en el
 lanzador de apps del header** (`.apps-panel`), que es donde el usuario que ya la conoce va a
 buscarla. Las dos con el mismo criterio que ya usa la página: un `chip` de estado ("En
@@ -165,4 +237,3 @@ producción" / "Beta") y un `.go` con el link.
   archivos a subir uno por uno y no sube lo que no esté nombrado.
 - La landing no tiene git. Antes de tocarla, copia de respaldo — el `scp.ps1` ya guarda un
   `index.html.bak` **del lado del server**, que es la única red que hay.
-
