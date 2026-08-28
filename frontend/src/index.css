@@ -535,6 +535,11 @@ button.danger {
      una pantalla ancha entran seis, sin ningún breakpoint que mantener. */
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: 0.75rem;
+  /* El halo de la tarjeta tocada vive en un `z-index: -1`, o sea **detrás del fondo de su
+     propia tarjeta**. Sin este `isolation`, ese -1 lo manda detrás del fondo de la página y no
+     se ve nada. Acá abre un contexto de apilado que le pone piso: detrás de las tarjetas, pero
+     delante de la página. */
+  isolation: isolate;
 }
 
 .tile {
@@ -560,6 +565,117 @@ button.danger {
   /* Saca el retardo de ~300 ms que el navegador se toma por si el toque era un doble tap.
      `manipulation` lo desactiva sin tocar el desplazamiento ni el pellizco para agrandar. */
   touch-action: manipulation;
+  /* Las dos luces son pseudo-elementos absolutos y se ubican contra la tarjeta. */
+  position: relative;
+  /* El relieve: una línea blanca arriba —como si la luz cayera desde el techo— y una sombra
+     corta proyectada hacia abajo. Es lo que hace que la tarjeta se lea despegada de la página;
+     la aurora de más abajo sola da color pero no volumen. */
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 1px 2px rgba(28, 36, 48, 0.06),
+    0 10px 22px -12px rgba(28, 36, 48, 0.26);
+  transition:
+    transform 0.16s ease,
+    box-shadow 0.22s ease;
+}
+
+/*
+ * La luz de las tarjetas: en reposo están levantadas, al tocarlas flotan.
+ *
+ * En reposo, tres manchas de color difusas apoyadas en el borde de abajo — el efecto del
+ * instalador de Chrome, con el verde de InSoft en lugar de su naranja. Sin eso la grilla es una
+ * fila de rectángulos blancos sobre un fondo casi blanco.
+ *
+ * Al tocarla, la aurora de adentro **se apaga** y aparece el mismo color por detrás,
+ * desenfocado, asomando por los bordes. Es un cambio de estado y no un agregado: las dos luces
+ * prendidas a la vez se leen como una tarjeta sucia, no como una tarjeta encendida.
+ *
+ * Los dos son `radial-gradient` en pseudo-elementos: ni imágenes ni JS, así que esto no toca
+ * `TileGrid.tsx` ni se mete con el gesto de mantener apretado.
+ */
+
+/* La aurora de adentro. `border-radius: inherit` la recorta contra la esquina redondeada sin
+   necesidad de `overflow: hidden`, que además le cortaría las patas al halo de abajo. */
+.tile::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0.9;
+  transition: opacity 0.22s ease;
+  background:
+    radial-gradient(110% 46% at 0% 106%, rgba(46, 189, 89, 0.38), transparent 70%),
+    radial-gradient(110% 40% at 45% 116%, rgba(20, 184, 166, 0.22), transparent 72%),
+    radial-gradient(110% 46% at 100% 106%, rgba(56, 132, 255, 0.24), transparent 70%);
+}
+
+/* El halo de atrás, apagado hasta que se toca la tarjeta. Los colores van casi opacos porque el
+   `blur` los diluye: al 40 % de alfa, después del desenfoque no queda nada. */
+.tile::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  left: -9%;
+  right: -9%;
+  bottom: -16px;
+  height: 62%;
+  border-radius: 999px;
+  filter: blur(17px);
+  opacity: 0;
+  transition: opacity 0.22s ease;
+  background:
+    radial-gradient(46% 100% at 14% 55%, rgba(46, 189, 89, 1), transparent 70%),
+    radial-gradient(46% 100% at 50% 62%, rgba(20, 184, 166, 0.8), transparent 70%),
+    radial-gradient(46% 100% at 86% 55%, rgba(56, 132, 255, 0.9), transparent 70%);
+}
+
+/* `:active` es lo que llega en el celular, que es el caso principal: el dedo apoyado. */
+.tile:active::after {
+  opacity: 0;
+}
+
+.tile:active::before {
+  opacity: 0.9;
+}
+
+.tile:active {
+  transform: scale(0.975);
+}
+
+/* `:hover` va aparte y detrás de `(hover: hover)` a propósito. En una pantalla táctil el
+   navegador simula un hover que **queda pegado** después de tocar, hasta que se toca otra cosa:
+   sin esta media query, volver a la grilla desde un modelo dejaría una tarjeta iluminada sin que
+   nadie la esté tocando. */
+@media (hover: hover) {
+  .tile:hover::after {
+    opacity: 0;
+  }
+
+  .tile:hover::before {
+    opacity: 0.9;
+  }
+
+  .tile:hover {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.9),
+      0 2px 4px rgba(28, 36, 48, 0.05),
+      0 14px 26px -14px rgba(28, 36, 48, 0.2);
+  }
+}
+
+/* Lo único que se mueve acá es el hundido al apretar; el resto son opacidades. Para quien pidió
+   menos movimiento, se apaga eso y las luces quedan igual. */
+@media (prefers-reduced-motion: reduce) {
+  .tile,
+  .tile::before,
+  .tile::after {
+    transition: none;
+  }
+
+  .tile:active {
+    transform: none;
+  }
 }
 
 .tile-name {
@@ -592,9 +708,18 @@ button.danger {
   color: var(--accent);
 }
 
+/* La tarjeta armada para borrar se queda sin luz —ni aurora ni halo— y sin relieve. Ahí el
+   color tiene que significar "peligro", y una tarjeta roja con un halo verde asomando por abajo
+   dice las dos cosas a la vez. */
+.tile.armed::before,
+.tile.armed::after {
+  content: none;
+}
+
 .tile.armed {
   border-color: var(--danger);
   background: var(--danger-bg);
+  box-shadow: none;
   /* Con los dos botones adentro ya no entra en un cuadrado; como es un ítem de grilla, igual
      se estira a la altura de la fila que fijan sus hermanas. */
   aspect-ratio: auto;

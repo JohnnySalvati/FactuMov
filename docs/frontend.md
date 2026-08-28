@@ -159,6 +159,43 @@ lleva a `/modelos/nuevo`, `/identidades/nueva`, `/clientes/nuevo`.
   encontrado", "No se puede eliminar un cliente con modelos asociados") y tener la pantalla
   diciendo una cosa y el error otra es peor que cualquiera de las dos.
 
+## La luz de las tarjetas (2026-08-28)
+**Las tarjetas de la grilla dejaron de ser rectángulos planos.** En reposo están *levantadas*, y
+al tocarlas *flotan*. Salió de un pedido de Miguel con una captura del instalador de Chrome: ese
+panel blanco con manchas de color difusas apoyadas en las esquinas de abajo. Se le mostraron seis
+variantes en el navegador antes de elegir; la elegida es la aurora con el verde de InSoft en
+reposo, cambiando al halo desenfocado al tocar.
+
+Todo vive en `index.css`, en dos pseudo-elementos de `.tile`. **No hay una sola línea de JS**, así
+que `TileGrid.tsx` no se enteró del cambio y el gesto de mantener apretado siguió igual.
+
+- **En reposo, dos cosas distintas que se confunden fácil.** La *aurora* (`::after`, tres
+  `radial-gradient` apoyados en el borde de abajo) pone color; el *relieve* —la línea blanca
+  `inset` arriba y la sombra proyectada del `box-shadow`— pone volumen. Probadas por separado,
+  la aurora sola sigue leyéndose plana: la sensación de "levantada" la da la sombra, no el color.
+- **Al tocar, la aurora se apaga y el halo se prende. No se suman.** Las dos luces al mismo
+  tiempo se leen como una tarjeta sucia, no como una tarjeta encendida. Es un cambio de estado.
+- **El halo va casi opaco (`alpha` cerca de 1) porque el `blur(17px)` lo diluye.** Al 40 % de
+  alfa —que es lo que se ve razonable escrito— después del desenfoque no queda nada, y el efecto
+  se lee como si la tarjeta *se apagara* al tocarla, que es lo contrario de lo que se busca.
+- **`isolation: isolate` en `.tiles` no es decorativo.** El halo se pinta en `z-index: -1`, o sea
+  detrás del fondo de su propia tarjeta. Sin un contexto de apilado que le ponga piso, ese `-1`
+  lo manda detrás del fondo de la página y no se ve nada — que es exactamente lo que pasó en el
+  primer intento.
+- **La aurora se recorta con `border-radius: inherit`, no con `overflow: hidden`.** El
+  `overflow` sería lo obvio, pero recorta también el halo, que justamente tiene que asomar por
+  fuera de la tarjeta.
+- **`:hover` va detrás de `@media (hover: hover)` y `:active` va suelto.** En una pantalla táctil
+  el navegador simula un hover que **queda pegado** después de tocar, hasta que se toca otra
+  cosa: sin la media query, volver a la grilla desde un modelo dejaría una tarjeta iluminada sin
+  que nadie la esté tocando. `:active` es lo que efectivamente llega en el celular —el dedo
+  apoyado—, y es el que hace que el efecto exista en el caso principal.
+- **La tarjeta armada para borrar se queda sin luz y sin relieve** (`.tile.armed::before/::after
+  { content: none }`). Ahí el color tiene que significar "peligro"; una tarjeta roja con un halo
+  verde asomando por abajo dice las dos cosas a la vez.
+- **Lo único que se mueve es el hundido de `:active`**, y se apaga con
+  `prefers-reduced-motion`. El resto son transiciones de opacidad, que quedan igual.
+
 ## El PDF que llega de la nube (2026-08-26)
 Importar una factura elegida **desde Google Drive** en el selector de Android fallaba con «No se
 pudo conectar con el servidor», que es el mensaje de `ApiError(0, …)` — el que el cliente HTTP
