@@ -532,6 +532,13 @@ docker compose -f docker-compose.prod.yml start app
   falló. El nginx de la VM resuelve la IP del `app` por request contra el DNS de Docker
   (`resolver 127.0.0.11`), así que un contenedor recreado **no** es la causa — eso es lo que
   pasaba resolviéndola una sola vez al arrancar.
+- **Deployaste y en la app no cambió nada** —ni error, ni 502, ni nada raro en los logs—.
+  Casi siempre es un `up -d` **sin `--build`**. El `git pull` trae el código, pero el `dist` de
+  la SPA se construye adentro de la imagen: sin `--build`, Docker reusa la que ya tenía y sirve
+  el build anterior. La pista está en la salida del `up`: si los contenedores dicen `Running` en
+  lugar de `Recreated`, no se reconstruyó nada. Pasó el 2026-08-28 con el efecto de luz de las
+  tarjetas. La § 5 es `up -d --build`, y el `--build` es la mitad del comando, no un opcional.
+
 - **404 al recargar adentro de la app** (`/modelos/algo`): se rompió el `try_files` del
   fallback en `frontend/nginx.conf`.
 - **413 al importar un PDF grande.** Hay tres techos y corta el más bajo: el
