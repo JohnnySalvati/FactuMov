@@ -12,12 +12,12 @@ Son tres procesos, cada uno en su terminal. Los comandos son de PowerShell, que 
 docker compose up -d
 
 # terminal 2 — el backend
-cd E:\Capacitacion\InSoft\FactuMovackend
+cd E:\Capacitacion\InSoft\FactuMov\backend
 uv run alembic upgrade head          # solo si hay migraciones nuevas
 uv run uvicorn factumov.main:app --reload --port 8000
 
 # terminal 3 — el frontend
-cd E:\Capacitacion\InSoft\FactuMovrontend
+cd E:\Capacitacion\InSoft\FactuMov\frontend
 npm run dev
 ```
 
@@ -81,6 +81,52 @@ link estaba muerto desde el repo, no desde la instalación. Por eso el default d
 
 Para probar el registro **desde el celular** hace falta además cambiar `localhost` por la IP
 de LAN, porque el link se abre en el teléfono y ahí `localhost` es el teléfono.
+
+### Un certificado propio para el iPad (2026-08-28)
+**Síntoma:** en el iPad, la URL de LAN da "no se puede abrir la página". La misma URL, al mismo
+tiempo, anda en la computadora y en Android aceptando el cartel del certificado.
+
+**Causa:** el certificado que genera `basic-ssl` sale con `CN=example.org` y con `localhost`,
+`[::1]`, `127.0.0.1` y `fe80::1` como únicos SAN. Entrando por `https://192.168.1.37:5173` el
+nombre **no coincide con ninguno**. Chrome muestra el cartel rojo y deja seguir; Safari en iOS
+no ofrece ese bypass cuando el nombre no coincide *y* además el emisor no es de confianza:
+corta la conexión, y el mensaje que muestra no nombra al certificado por ningún lado.
+
+Y aunque lo ofreciera no alcanzaría: **el micrófono, el service worker y las notificaciones
+piden un contexto seguro de verdad**, y en un origen con el certificado en falta los
+navegadores los apagan. O sea que esto no es un cartel molesto que se puede saltear — es lo que
+bloquea probar el dictado por voz desde cualquier dispositivo de la red.
+
+**La solución** es un certificado firmado por una CA local, con la IP adentro. `vite.config.ts`
+usa `frontend/certs/dev/key.pem` y `cert.pem` si están, y si no sigue con `basic-ssl` como
+siempre: nadie tiene que instalar una herramienta para levantar el proyecto.
+
+```powershell
+winget install FiloSottile.mkcert
+mkcert -install                      # crea la CA local y la marca de confianza en Windows
+cd E:\Capacitacion\InSoft\FactuMov\frontend
+mkdir certs\dev
+mkcert -key-file certs\dev\key.pem -cert-file certs\dev\cert.pem `
+  localhost 127.0.0.1 ::1 192.168.1.37
+```
+
+La IP es la de la línea *Network* que imprime Vite, y la asigna el DHCP del router: si cambia
+hay que volver a generar el certificado. Conviene reservarla en el router y olvidarse.
+
+En el iPad (y en el iPhone) son dos pasos, y **el segundo es el que todo el mundo se saltea**:
+
+1. Pasarle el `rootCA.pem` —`mkcert -CAROOT` dice dónde está— por mail o AirDrop, abrirlo, y
+   **Ajustes → Perfil descargado → Instalar**.
+2. **Ajustes → General → Información → Ajustes de confianza de certificados**, y activar la
+   confianza total para la CA de mkcert. Sin este paso el certificado queda instalado y sigue
+   sin ser de confianza, y el síntoma es idéntico al de no haber hecho nada.
+
+`certs/` ya está en el `.gitignore` de la raíz —el mismo patrón que cubre los certificados de
+ARCA—, así que la clave privada no viaja por git. Cada uno genera la suya con las IP de su red.
+
+**La alternativa sin instalar nada es probar contra producción**, que tiene certificado de
+verdad. Para el caso de la PWA instalada desde la pantalla de inicio es incluso el mejor test,
+porque ese caso solo existe en un dominio real; lo que pide a cambio es deployar.
 
 ## El proxy de Vite en vez de CORS
 `/api` se reenvía a `127.0.0.1:8000` y se le saca el prefijo. El navegador ve **un solo

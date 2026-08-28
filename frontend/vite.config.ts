@@ -1,6 +1,42 @@
+import { existsSync, readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+
 import basicSsl from '@vitejs/plugin-basic-ssl'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
+
+/**
+ * El certificado de desarrollo propio, si está puesto. `undefined` es lo normal.
+ *
+ * **Existe por el iPad.** El que genera `basic-ssl` sale con `CN=example.org` y con
+ * `localhost` / `127.0.0.1` como únicos SAN, así que entrando desde otro dispositivo por
+ * `https://192.168.0.x:5173` el nombre no coincide con nada. Chrome —en la computadora y en
+ * Android— muestra el cartel rojo y deja seguir; **Safari en iOS no ofrece ese bypass** y
+ * contesta "no se puede abrir la página", que no se parece en nada a su causa. Y el celular
+ * es el caso principal: probar desde el iPhone o el iPad no puede depender de que el
+ * navegador sea indulgente.
+ *
+ * Además, un certificado aceptado a la fuerza no alcanza para todo: el micrófono, las
+ * notificaciones y el service worker piden un contexto seguro *de verdad*, y en un origen con
+ * el certificado en falta los navegadores los apagan. O sea que sin esto no se puede probar
+ * el dictado por voz desde un dispositivo de la red.
+ *
+ * Los archivos se generan con `mkcert` (ver *Un certificado propio para el iPad* en
+ * `docs/desarrollo.md`) y **no viajan por git**: `certs/` está en el `.gitignore` de la raíz,
+ * que es el mismo patrón que cubre los certificados de ARCA. Cada uno genera el suyo con las
+ * IP de su red.
+ *
+ * Si no están, se sigue usando `basic-ssl` como hasta ahora: alcanza para la computadora, que
+ * es donde se trabaja el 90% del tiempo, y no obliga a nadie a instalar una herramienta para
+ * levantar el proyecto.
+ */
+const devCert = (() => {
+  const dir = fileURLToPath(new URL('./certs/dev/', import.meta.url))
+  const key = `${dir}key.pem`
+  const cert = `${dir}cert.pem`
+  if (!existsSync(key) || !existsSync(cert)) return undefined
+  return { key: readFileSync(key), cert: readFileSync(cert) }
+})()
 
 // El backend se sirve bajo `/api` a través del proxy del dev server, y no directo contra
 // `http://localhost:8000`.
@@ -29,9 +65,14 @@ export default defineConfig({
     // La alternativa era hacer configurable el `secure=True` de la cookie y apagarlo en
     // desarrollo. Se descartó: sería un flag capaz de viajar a producción y dejar la sesión
     // viajando en claro, a cambio de ahorrarse una advertencia del navegador.
-    basicSsl(),
+    //
+    // Solo cuando no hay uno propio: `basic-ssl` pisa `server.https` en su `configResolved`,
+    // así que tenerlo puesto igual dejaría sin efecto al de abajo.
+    ...(devCert === undefined ? [basicSsl()] : []),
   ],
   server: {
+    // `undefined` cuando no hay certificado propio: ahí lo pone `basic-ssl`.
+    https: devCert,
     // `true` escucha en todas las interfaces, no solo en loopback: es lo que hace que el
     // celular llegue. Vite imprime la URL de LAN al arrancar.
     host: true,

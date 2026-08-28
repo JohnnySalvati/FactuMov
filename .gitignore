@@ -21,5 +21,7 @@ backend/tests/samples/
 
 # Config local de Claude Code (permisos de esta máquina, no del proyecto)
 .claude/settings.local.json
-# Certificados de ARCA en producción: llegan a la VM por scp, nunca por git.
+# Certificados: los de ARCA en producción llegan a la VM por scp, nunca por git, y los de
+# desarrollo (frontend/certs/dev, para que Safari abra la app desde la LAN) los genera cada uno
+# con las IP de su red. El patrón sin barra al principio cubre las dos carpetas.
 certs/
