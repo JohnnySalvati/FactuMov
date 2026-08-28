@@ -103,20 +103,31 @@ siempre: nadie tiene que instalar una herramienta para levantar el proyecto.
 
 ```powershell
 winget install FiloSottile.mkcert
-mkcert -install                      # crea la CA local y la marca de confianza en Windows
+
+# mkcert es un paquete "portable" de winget: instala el .exe pero puede no dejar el acceso
+# directo en el PATH, y entonces `mkcert` a secas contesta CommandNotFoundException aunque
+# `winget list` lo muestre instalado. Llamarlo por su ruta evita la discusión.
+$mkcert = "$env:LOCALAPPDATA\Microsoft\WinGet\Packages\FiloSottile.mkcert_Microsoft.Winget.Source_8wekyb3d8bbwe\mkcert.exe"
+
+& $mkcert -install                   # crea la CA local y la marca de confianza en Windows
 cd E:\Capacitacion\InSoft\FactuMov\frontend
 mkdir certs\dev
-mkcert -key-file certs\dev\key.pem -cert-file certs\dev\cert.pem `
+& $mkcert -key-file certs\dev\key.pem -cert-file certs\dev\cert.pem `
   localhost 127.0.0.1 ::1 192.168.1.37
 ```
+
+`-install` abre un cartel de Windows pidiendo permiso para instalar el certificado raíz: hay
+que decirle que sí, que es justamente lo que hace que los navegadores de la máquina confíen en
+los certificados que se generen después.
 
 La IP es la de la línea *Network* que imprime Vite, y la asigna el DHCP del router: si cambia
 hay que volver a generar el certificado. Conviene reservarla en el router y olvidarse.
 
 En el iPad (y en el iPhone) son dos pasos, y **el segundo es el que todo el mundo se saltea**:
 
-1. Pasarle el `rootCA.pem` —`mkcert -CAROOT` dice dónde está— por mail o AirDrop, abrirlo, y
-   **Ajustes → Perfil descargado → Instalar**.
+1. Pasarle el `rootCA.pem` —`& $mkcert -CAROOT` dice dónde está; en esta máquina,
+   `C:\Users\Johnny\AppData\Local\mkcert`— por mail o AirDrop, abrirlo, y **Ajustes → Perfil
+   descargado → Instalar**.
 2. **Ajustes → General → Información → Ajustes de confianza de certificados**, y activar la
    confianza total para la CA de mkcert. Sin este paso el certificado queda instalado y sigue
    sin ser de confianza, y el síntoma es idéntico al de no haber hecho nada.
