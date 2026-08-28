@@ -602,7 +602,7 @@ button.danger {
   inset: 0;
   border-radius: inherit;
   pointer-events: none;
-  opacity: 0.9;
+  opacity: 0.6;
   transition: opacity 0.22s ease;
   background:
     radial-gradient(110% 46% at 0% 106%, rgba(46, 189, 89, 0.38), transparent 70%),
