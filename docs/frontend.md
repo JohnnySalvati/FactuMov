@@ -291,6 +291,67 @@ Dos detalles que van con esto:
   vacío siguen siendo del backend y siguen significando lo que significaban; esto es una tercera
   cosa —el archivo no se pudo leer— y se contesta antes de salir a la red.
 
+## Dictar la fecha por voz (2026-08-28) — spike
+Un micrófono al lado de cada campo de fecha de `/modelos/:id/emitir`. **Es un spike, no una
+funcionalidad terminada**: existe para averiguar si el reconocimiento de voz del navegador
+anda en el celular —y sobre todo en iOS con la app instalada desde la pantalla de inicio, que
+es el caso principal— antes de construirle nada encima. Son tres archivos:
+`hooks/useSpeechInput.ts` (abrir el micrófono), `speech.ts` (interpretar lo que se escuchó) y
+`components/DictateDate.tsx` (el campo con el botón y el estado).
+
+- **Web Speech API y no un servicio de transcripción propio.** La alternativa era grabar con
+  `MediaRecorder`, subir el audio y transcribirlo en el backend: anda parejo en todos lados,
+  pero cuesta por minuto, agrega un endpoint y suma latencia. El API del navegador es gratis,
+  no toca el servidor y ya está instalado; lo que se paga es que el soporte no es parejo, y
+  eso es justamente lo que el spike va a medir. **El audio sale del dispositivo** —lo
+  transcriben los servidores de Google y de Apple—, igual que dictándole al teclado del
+  sistema, pero conviene tenerlo escrito antes de que alguien dicte el nombre de un cliente.
+- **Empieza por las fechas y no por un comando hablado** ("emitir igual que el mes pasado")
+  porque las fechas son el único campo editable de esa pantalla —el total sale del `preview`
+  del backend— y porque cargar una fecha en el selector nativo de un celular es lo que más
+  molesta. El comando hablado es el paso siguiente, y necesita que este ande primero.
+- **Una gramática cerrada y no un LLM.** El vocabulario de una fecha entra en un archivo:
+  "hoy", "ayer", "el 15", "quince de agosto", "fin de mes", "15/8/26". Un modelo entendería
+  que le hablen suelto, pero cuesta por request, agrega un segundo y puede devolver una fecha
+  que nadie dijo, sobre un campo que termina impreso en un comprobante fiscal.
+- **El micrófono llena el campo y nada más: no emite.** Emitir le pide el CAE a ARCA y no se
+  puede deshacer, así que lo que la voz hace es dejar el formulario listo con lo que entendió
+  escrito en pantalla; el botón lo aprieta el dedo. Con eso, entender mal es una molestia y no
+  una factura equivocada. De ahí también el `type="button"` del micrófono: el default de un
+  `<button>` adentro de un `<form>` es `submit`, y ese `submit` emite.
+- **No entender es una respuesta, y se muestra.** `parseSpokenDate` devuelve `undefined` y el
+  campo dice qué se escuchó y que no salió una fecha. El peor final posible es que el botón no
+  haga nada visible: el usuario no sabe si el micrófono no escuchó, si entendió otra cosa o si
+  la app se colgó. Por el mismo motivo los códigos de error del navegador se traducen uno por
+  uno — "no se escuchó nada" se arregla hablando de nuevo y "no diste permiso" se arregla en
+  la configuración.
+- **`parseSpokenDate` es puro y recibe `today` por parámetro.** El micrófono solo se puede
+  probar hablándole a un celular; si la interpretación viviera adentro del componente, también
+  habría que hablarle al celular para saber si "treinta y uno de agosto" cae en el día
+  correcto. Separadas, lo único que se prueba a mano es que el micrófono abra. El `today`
+  inyectado es lo que hace que "ayer" no dependa del día en que se corra la prueba.
+- **Rechaza el 31 de febrero.** `new Date(2026, 1, 31)` no falla: devuelve el 3 de marzo en
+  silencio. Sin la verificación, dictar una fecha imposible cargaría una plausible y
+  equivocada, que es peor que no entender nada.
+- **El año que no se dijo es el que deja la fecha más cerca de hoy.** Se nota una vez por año
+  y es justo cuando importa: "31 de diciembre" dictado el 2 de enero es del año pasado. Mismo
+  criterio sobre el mes cuando solo se dijo el día.
+- **Los números hablados se pasan a dígitos antes de buscar la fecha**, porque los motores no
+  coinciden: Chrome en Android devuelve "15 de agosto" y Safari en iOS "quince de agosto".
+  Normalizando primero hay una sola forma de fecha que reconocer en vez de dos.
+- **Sin banco de pruebas en el frontend.** Los casos de `parseSpokenDate` se corrieron con
+  `esbuild` + `node` desde el scratchpad (25 casos, todos en verde) en vez de sumar `vitest`:
+  es la misma decisión que TanStack Query y Tailwind. Revisar cuando haya una segunda función
+  pura que valga la pena fijar.
+- **Pendiente de la prueba en el celular**, que es para lo que existe todo esto: si el
+  `webkitSpeechRecognition` de iOS no abre en la PWA instalada, el camino es (c) —grabar y
+  transcribir en el backend— o directamente el dictado del teclado del sistema, que ya
+  funciona hoy sin escribir una línea.
+- **Rugosidad conocida:** en pantalla ancha, "Período desde" y "Hasta" comparten un `.row` con
+  `align-items: flex-end`, así que si se dicta en uno de los dos el mensaje de estado lo
+  desalinea del otro mientras está visible. En el celular no pasa, porque van uno abajo del
+  otro.
+
 ## Sin TanStack Query y sin Tailwind
 Las dos por el mismo motivo: resuelven problemas que esta app todavía no tiene.
 

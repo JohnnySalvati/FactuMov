@@ -3,6 +3,7 @@ import { Link, Navigate, useNavigate, useParams } from 'react-router'
 
 import { ApiError, api } from '../api/client'
 import type { EmitRequest, Invoice, InvoicePreview } from '../api/types'
+import { DictateDate } from '../components/DictateDate'
 import { Notice } from '../components/Notice'
 import { formatDate, isoDate, money } from '../format'
 import { useResource } from '../hooks/useResource'
@@ -85,7 +86,6 @@ function EmitScreen({ id }: { id: string }) {
   }
 
   const data = preview.data
-  const emissionDate = chosenDate ?? data?.date
 
   return (
     <div className="page">
@@ -124,25 +124,27 @@ function EmitScreen({ id }: { id: string }) {
             </div>
           </dl>
 
-          <div>
-            <label htmlFor="date">Fecha del comprobante</label>
-            <input
-              id="date"
-              type="date"
-              required
-              value={emissionDate}
-              min={data.min_date}
-              max={data.max_date}
-              onChange={(e) => setChosenDate(e.target.value)}
-            />
-            {/* `min`/`max` los pone el navegador, pero el usuario puede tipear igual y el
-                selector nativo del celular no siempre los respeta: el 422 del backend es el
-                que manda. Decir cuál es la ventana evita descubrirla a fuerza de rechazos. */}
-            <p className="muted" style={{ margin: '0.35rem 0 0', fontSize: '0.82rem' }}>
-              ARCA la acepta entre el {formatDate(data.min_date)} y el {formatDate(data.max_date)},
-              y nunca anterior a la del último comprobante de esta serie.
-            </p>
-          </div>
+          <DictateDate
+            id="date"
+            label="Fecha del comprobante"
+            value={chosenDate ?? data.date}
+            min={data.min_date}
+            max={data.max_date}
+            onChange={setChosenDate}
+            hint={
+              /* `min`/`max` los pone el navegador, pero el usuario puede tipear igual y el
+                 selector nativo del celular no siempre los respeta: el 422 del backend es el
+                 que manda. Decir cuál es la ventana evita descubrirla a fuerza de rechazos.
+
+                 El dictado no la respeta tampoco, y a propósito: si se entendió una fecha
+                 fuera de la ventana hay que verla escrita para saber que hay que corregirla. */
+              <p className="muted" style={{ margin: '0.35rem 0 0', fontSize: '0.82rem' }}>
+                ARCA la acepta entre el {formatDate(data.min_date)} y el{' '}
+                {formatDate(data.max_date)}, y nunca anterior a la del último comprobante de esta
+                serie.
+              </p>
+            }
+          />
 
           {data.needs_service_dates && (
             <>
@@ -150,37 +152,25 @@ function EmitScreen({ id }: { id: string }) {
                   pago, y los rechaza si falta alguno. Vienen con el mes en curso puesto,
                   que es lo que se factura el 99% de las veces. */}
               <div className="row">
-                <div>
-                  <label htmlFor="from_date">Período desde</label>
-                  <input
-                    id="from_date"
-                    type="date"
-                    required
-                    value={period.from_date}
-                    onChange={(e) => setPeriod({ ...period, from_date: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label htmlFor="to_date">Hasta</label>
-                  <input
-                    id="to_date"
-                    type="date"
-                    required
-                    value={period.to_date}
-                    onChange={(e) => setPeriod({ ...period, to_date: e.target.value })}
-                  />
-                </div>
-              </div>
-              <div>
-                <label htmlFor="due_date">Vencimiento del pago</label>
-                <input
-                  id="due_date"
-                  type="date"
-                  required
-                  value={period.due_date}
-                  onChange={(e) => setPeriod({ ...period, due_date: e.target.value })}
+                <DictateDate
+                  id="from_date"
+                  label="Período desde"
+                  value={period.from_date}
+                  onChange={(from_date) => setPeriod({ ...period, from_date })}
+                />
+                <DictateDate
+                  id="to_date"
+                  label="Hasta"
+                  value={period.to_date}
+                  onChange={(to_date) => setPeriod({ ...period, to_date })}
                 />
               </div>
+              <DictateDate
+                id="due_date"
+                label="Vencimiento del pago"
+                value={period.due_date}
+                onChange={(due_date) => setPeriod({ ...period, due_date })}
+              />
             </>
           )}
 

@@ -488,6 +488,61 @@ button.danger {
   color: var(--accent-text);
 }
 
+/* --- Dictado por voz ---------------------------------------------------------------- */
+
+.with-mic {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.with-mic input {
+  flex: 1;
+  /* Un ítem de flex no se achica por debajo de su ancho intrínseco salvo que se lo diga, y el
+     `<input type="date">` trae uno grande —el selector nativo con su ícono—. Sin esto, en
+     360 px el campo empuja al micrófono fuera de la tarjeta. */
+  min-width: 0;
+}
+
+/* El micrófono es cuadrado y del tamaño táctil mínimo: los botones de esta app ocupan el
+   ancho, y acá el que tiene que ocuparlo es el campo. */
+button.mic {
+  width: var(--touch);
+  min-width: var(--touch);
+  height: var(--touch);
+  padding: 0;
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--text);
+  font-size: 1.15rem;
+  line-height: 1;
+}
+
+/* Escuchando. Es el único aviso de que el micrófono está abierto, así que se ve o no se ve:
+   sin él, la única pista sería que el botón cambió de ícono. */
+button.mic[aria-pressed='true'] {
+  background: var(--ok-bg);
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+.mic-status {
+  margin: 0.35rem 0 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+/* Sin dictar todavía el párrafo está vacío, pero existe: un `aria-live` tiene que estar en el
+   DOM *antes* de que cambie su contenido, o el lector de pantalla no anuncia nada. Lo que se
+   saca es el espacio que ocuparía, no el elemento. */
+.mic-status:empty {
+  display: none;
+}
+
+.mic-error {
+  color: var(--danger);
+}
+
 /* --- Pantalla ancha ----------------------------------------------------------------- */
 /*
  * 700px: el ancho a partir del cual dos campos conviven en un renglón sin quedar apretados.
