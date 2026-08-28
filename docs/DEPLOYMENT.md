@@ -4,7 +4,8 @@ Producción corre en la **misma VM Ubuntu 24.04 que Balance360** (`192.168.100.1
 de **srv-nginx** (`192.168.100.9`), que termina el HTTPS y proxea por HTTP a la VM. Son dos
 máquinas distintas y es fácil confundirlas: el certificado y el server block van en la `.9`;
 el compose, el `.env` y los certificados de ARCA van en la `.16`. Todo vive en
-`docker-compose.prod.yml`, que levanta tres servicios:
+`docker-compose.prod.yml`, que levanta tres servicios. **Está en el aire desde el
+2026-08-28**, así que el procedimiento habitual es la § 5 y no la § 2:
 
 | Servicio | Qué es | Puerto |
 |---|---|---|
@@ -69,6 +70,11 @@ entrypoint: el único que puede mandarle un `X-Forwarded-For` es un contenedor n
 ---
 
 ## 2. Primer arranque en la VM
+
+> **Ya está hecho** (2026-08-28): la app corre en `factumov.insoft.net.ar`. Esta sección y la
+> § 3 quedan como referencia, para cuando haya que rearmar la VM desde cero. **El camino
+> normal de todos los días es la § 5**: `git pull` + `up -d --build`. No vuelvas a clonar
+> sobre una instalación que anda.
 
 ```bash
 ssh johnny@192.168.100.16

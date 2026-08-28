@@ -72,27 +72,24 @@ Cerradas el 2026-08-27: el **reset de contraseña**, la **visibilidad del fallo 
 importar un PDF, editar el modelo, guardarlo, emitir con CAE y mandarlo.
 
 Lo que sigue ya no es funcionalidad: es **salir a la cancha**. Las tres se pidieron el
-2026-08-27 y van en ese orden por dependencia, no por importancia — ver *Marca, landing y
-producción*. La primera está cerrada; quedan las otras dos.
+2026-08-27 y van en ese orden por dependencia, no por importancia. Las dos primeras —la
+**marca** (el ícono propio, el acento verde, los íconos de la PWA con su manifest y el logo de
+InSoft en las pantallas sin sesión) y la **producción**— están cerradas; queda la landing.
 
-Cerrada el 2026-08-27: la **marca** — el ícono propio, el acento verde, los íconos de la PWA
-con su manifest y el logo de InSoft en las pantallas sin sesión.
-
-1. **Producción** — la app corriendo en la VM detrás de `srv-nginx`, con su dominio propio.
-   Es lo que la landing va a linkear, así que va antes que ella. **Los artefactos están
-   escritos y probados** —compose, las dos imágenes, el nginx, el `.env.example` y
-   [`DEPLOYMENT.md`](DEPLOYMENT.md)— y lo que falta son los tres pasos que necesitan accesos
-   que la sesión no tiene: el registro DNS, el server block en srv-nginx y el deploy en la VM.
-   Ver [`produccion.md`](produccion.md).
+1. ~~**Producción**~~ — **hecha el 2026-08-28.** La app corre en
+   `factumov.insoft.net.ar`, en la VM detrás de `srv-nginx`: DNS, server block con certbot y
+   el primer deploy, los tres. Ver [`produccion.md`](produccion.md).
+   - **Queda subir los certificados de ARCA a la VM**, que no viajan por git
+     ([`DEPLOYMENT.md`](DEPLOYMENT.md) § 7.2). Hasta que estén, la app anda entera y solo
+     contesta 502 lo que sale a ARCA.
    - **El certificado propio de ARCA ya no es un pendiente** (2026-08-28). Los dos `.crt`
      —prod y homo— están emitidos y en `certs/`, el de homologación probado contra ARCA de
      punta a punta, y quedó verificado que dos certificados del mismo CUIT obtienen cada uno
      su propio TA, o sea que FactuMov no puede dejar a Balance360 afuera de ARCA. Ver
      *Los certificados, emitidos* en [`produccion.md`](produccion.md).
-   - **Lo que separa a la app de emitir de verdad es, ahora, el deploy.** `ARCA_ENV` está en
-     `prod` en el `.env` de producción y el certificado existe: en cuanto los tres pasos de
-     arriba estén hechos y `factumov.crt` esté copiado en la VM, el botón de emitir produce
-     comprobantes con validez legal.
+   - **Lo único que separa a la app de emitir de verdad es ese scp.** `ARCA_ENV` ya está en
+     `prod` en el `.env` de producción: en cuanto `factumov.crt` esté en la VM, el botón de
+     emitir produce comprobantes con validez legal.
 2. **FactuMov en la landing de InSoft** — tarjeta en *Nuestros SaaS* y entrada en el
    lanzador de apps, apuntando a la URL del punto anterior. Los assets de la tarjeta ya
    existen: `frontend/public/factumov-icon.svg` y los PNG de al lado.

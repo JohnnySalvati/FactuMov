@@ -4,9 +4,9 @@
 > [`docs/README.md`](README.md); las reglas de trabajo, en
 > [`CLAUDE.md`](../CLAUDE.md).
 
-Los artefactos están escritos y probados; lo que falta es correrlos en la VM, que necesita
-accesos que no están en esta máquina. [`DEPLOYMENT.md`](DEPLOYMENT.md) es el procedimiento
-completo — acá abajo van solo las decisiones, que es lo que no se deduce leyendo los archivos.
+**La app está corriendo en producción** desde el 2026-08-28, en `factumov.insoft.net.ar`.
+[`DEPLOYMENT.md`](DEPLOYMENT.md) es el procedimiento completo — acá abajo van solo las
+decisiones, que es lo que no se deduce leyendo los archivos.
 
 | Archivo | Rol |
 |---|---|
@@ -199,14 +199,22 @@ el bind es nativo— pero significa que la primera vez que ese volumen se monta 
 producción, así que conviene mirar que `/app/certs` tenga los dos archivos antes de dar por
 buena la verificación de delegación.
 
-## Lo que falta, y por qué no lo puede hacer esta sesión
-Las tres cosas necesitan accesos que no están acá:
+## La salida, hecha (2026-08-28)
+Los tres pasos que durante semanas figuraron acá como pendientes —y que ninguna sesión de Code
+podía dar, porque necesitan accesos que no tiene— están hechos:
 
-1. **El registro DNS** de `factumov.insoft.net.ar` apuntando a srv-nginx.
-2. **El server block en `srv-nginx`** (`administrator@192.168.100.9`) más el certificado de
+1. **El registro DNS** de `factumov.insoft.net.ar`, que resuelve al mismo IP que
+   `insoft.net.ar` (`190.111.232.77`, o sea srv-nginx).
+2. **El server block en `srv-nginx`** (`administrator@192.168.100.9`) con su certificado de
    certbot. El bloque está escrito en [`DEPLOYMENT.md`](DEPLOYMENT.md) § 3.
-3. **El deploy en la VM** (`192.168.100.16`): clonar, completar el `.env`, subir los
-   certificados de homologación y `up -d --build`.
+3. **El primer deploy en la VM** (`192.168.100.16`), con la app levantada y sirviendo.
+
+O sea que [`DEPLOYMENT.md`](DEPLOYMENT.md) § 2 y § 3 pasaron a ser referencia —lo que se hace
+cuando hay que rearmar todo— y el camino normal ahora es § 5: `git pull`, `up -d --build`.
+
+**Lo único que quedó afuera del primer deploy son los certificados de ARCA**, que no viajan por
+git y hay que subir por scp (§ 7.2). Hasta que estén, la app anda entera y solo contesta 502 lo
+que sale a ARCA — que es el guardarraíl funcionando, no un bug.
 
 **Son dos máquinas y se confunden fácil.** srv-nginx es la `192.168.100.9` —ahí van el server
 block y el certificado— y la VM es la `192.168.100.16`, donde viven el compose, el `.env` y los
