@@ -146,13 +146,15 @@ lleva a `/modelos/nuevo`, `/identidades/nueva`, `/clientes/nuevo`.
   falte elegir emisor o cliente no hay letra y se asume IVA incluido, que es lo que vale en tres
   de las cuatro combinaciones. Está escrito abajo del total que es una cuenta nuestra y que el
   importe que vale es el que autorice ARCA.
-- **La importación resuelve las dos partes que le faltan contra el padrón, sin salir de la
-  pantalla.** El draft trae al emisor y al receptor por CUIT pero sin id cuando no están
+- **La importación resuelve las dos partes que le faltan contra el padrón, sola y sin salir de
+  la pantalla.** El draft trae al emisor y al receptor por CUIT pero sin id cuando no están
   cargados, y el editor pide ids: sin una salida ahí, importar la factura de un cliente nuevo es
-  un callejón. Los dos carteles viven en `components/MissingParty.tsx` y hacen lo mismo —buscar
-  en ARCA, mostrar lo que contestó, crear recién cuando el usuario acepta— con el detalle de por
-  qué en el propio archivo. El alta sigue siendo explícita —un botón, no un efecto de la
-  importación—, que es la misma regla que hace que `/import` no escriba nada.
+  un callejón. Las dos tarjetas viven en `components/MissingParty.tsx` y **consultan ARCA al
+  montarse**, sin botón "Buscar": hacerle apretar un botón al usuario para averiguar algo que la
+  app puede averiguar sola es ponerlo de intermediario. Lo que difiere es qué se hace con la
+  respuesta —el cliente se da de alta solo y se avisa; la identidad fiscal espera un toque— y el
+  porqué de esa asimetría está en el archivo. Sigue valiendo que `/import` no escribe nada: el
+  alta es un `POST` aparte que manda el cliente.
 - **"Empezar en blanco" no es un extra.** Hay un segundo layout de factura que el parser
   todavía no sabe leer, y un PDF escaneado contesta 200 con el modelo vacío a propósito. Con
   una sola puerta, cualquiera de esos dos casos queda sin salida.

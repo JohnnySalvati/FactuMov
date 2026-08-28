@@ -99,20 +99,23 @@ export function NewTemplatePage() {
    *
    * El `reload` no es opcional: sin él el picker no conoce al cliente nuevo y el campo se ve
    * vacío aunque el id ya esté puesto, porque el nombre en pantalla sale de la lista de
-   * opciones. Y el `draft` se actualiza para que el cartel que ofreció el alta desaparezca:
-   * es lo único que lo mantiene en pantalla.
+   * opciones.
+   *
+   * **El draft no se toca a propósito.** Es lo que decide si la tarjeta sigue en pantalla, y
+   * la tarjeta tiene algo que decir *después* de crear: qué cliente se dio de alta y con los
+   * datos de quién. Actualizarlo acá haría desaparecer el aviso en el mismo instante en que
+   * pasa a ser útil — el alta se volvería invisible, que es justo lo que no puede ser cuando
+   * la hace la app sola.
    */
   function customerCreated(created: Customer) {
     setForm((current) => (current ? { ...current, customer_id: created.id } : current))
     customers.reload()
-    setDraft((current) => (current ? { ...current, customer_id: created.id } : current))
   }
 
   /** Lo mismo para la identidad fiscal que se creó desde el CUIT que emitió el PDF. */
   function issuerCreated(created: FiscalIdentity) {
     setForm((current) => (current ? { ...current, fiscal_identity_id: created.id } : current))
     identities.reload()
-    setDraft((current) => (current ? { ...current, fiscal_identity_id: created.id } : current))
   }
 
   async function save() {
