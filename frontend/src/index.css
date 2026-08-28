@@ -144,6 +144,52 @@ a {
   border-bottom-color: var(--accent);
 }
 
+/*
+ * El contenedor de la pantalla activa. Existe por el gesto de deslizar (`hooks/useSwipeNav.ts`):
+ * es el elemento del que cuelgan los handlers, y el que anima la entrada de la sección nueva.
+ *
+ * La animación es un desplazamiento **corto** —un 6 %— y no una pantalla entera que entra
+ * desde el borde. Lo segundo pide que la pantalla vieja salga al mismo tiempo, o sea las dos
+ * rutas montadas a la vez y un carrusel de verdad; con una sola, un `translateX(100%)` deja
+ * medio segundo de página en blanco. El 6 % con el fundido alcanza para decir de qué lado
+ * vino, que es todo lo que el gesto necesita contar.
+ */
+.app-main {
+  /* La pantalla que entra arranca corrida, y sin esto asoma y estira el ancho de la página. */
+  overflow-x: clip;
+}
+
+.app-main-forward {
+  animation: section-from-right 0.2s ease-out;
+}
+
+.app-main-back {
+  animation: section-from-left 0.2s ease-out;
+}
+
+@keyframes section-from-right {
+  from {
+    transform: translateX(6%);
+    opacity: 0.35;
+  }
+}
+
+@keyframes section-from-left {
+  from {
+    transform: translateX(-6%);
+    opacity: 0.35;
+  }
+}
+
+/* Acá el movimiento es el efecto entero, así que no se atenúa: se saca. Cambiar de sección
+   sigue funcionando igual, que es lo que importa. */
+@media (prefers-reduced-motion: reduce) {
+  .app-main-forward,
+  .app-main-back {
+    animation: none;
+  }
+}
+
 .app-user {
   color: var(--muted);
   font-size: 0.85rem;

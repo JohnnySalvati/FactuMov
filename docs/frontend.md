@@ -196,6 +196,51 @@ que `TileGrid.tsx` no se enteró del cambio y el gesto de mantener apretado sigu
 - **Lo único que se mueve es el hundido de `:active`**, y se apaga con
   `prefers-reduced-motion`. El resto son transiciones de opacidad, que quedan igual.
 
+## Cambiar de sección deslizando el dedo (2026-08-28)
+**En el celular se pasa de una sección a otra deslizando horizontalmente**, en el orden de la
+barra: Modelos → Facturas → Identidades → Clientes. Pedido de Miguel. Vive en
+`hooks/useSwipeNav.ts` y se cuelga una sola vez, del contenedor del `<Outlet />` en `AppLayout`,
+que es el único lugar por el que pasan las cuatro pantallas.
+
+- **Solo con el dedo** (`pointerType === 'touch'`). Con un mouse, arrastrar sobre la página es
+  seleccionar texto: el gesto rompería eso para resolver un problema que en una pantalla grande
+  no existe, porque ahí las pestañas están siempre a la vista y a un click.
+- **Es un atajo y no la única puerta.** La barra sigue arriba, visible y sticky. Es la misma
+  regla que el `contextmenu` del "mantener apretado": un gesto invisible no puede ser el único
+  camino a nada, porque el que no lo descubre se queda sin la función. Y de paso la barra es lo
+  que dice en qué sección estás, que el gesto por sí solo no cuenta.
+- **Los tres filtros del gesto son los tres que hacen que no moleste.** 60 px de recorrido, el
+  trazo 1,5 veces más horizontal que vertical, y 700 ms de techo. El del medio es el que más
+  trabaja: nadie desplaza una lista en una recta vertical perfecta, y sin esa proporción un
+  scroll en diagonal cambia de sección a mitad de camino. El techo de tiempo es el que lo separa
+  del "mantener apretado", que son 500 ms con el dedo quieto.
+- **`pointercancel` no es un caso de borde: es el caso normal.** En cuanto el navegador decide
+  que el gesto era un desplazamiento vertical, se queda con el puntero y el `pointerup` no llega
+  nunca. Sin limpiar el origen ahí, el próximo toque en cualquier lado se mide contra un punto
+  de partida viejo y dispara un swipe fantasma.
+- **Un swipe que arranca arriba de una tarjeta terminaba entrando a la tarjeta.** Al soltar, el
+  navegador manda igual el `click`. Se corta con un `onClickCapture` en el contenedor —captura,
+  así baja antes de llegar al `onClick` de la tarjeta—, que es exactamente lo que ya hacía
+  `useLongPress` para su propio caso.
+- **El gesto no hace nada fuera de las cuatro grillas.** Adentro de un modelo, de un cliente o
+  de la pantalla de emitir hay formularios a medio llenar, y salirse de uno con un dedo mal
+  apoyado pierde lo escrito. Se resuelve solo: `paths.indexOf(pathname)` da -1 y no hay a dónde ir.
+- **Sin vuelta al principio.** Desde Clientes, seguir deslizando no hace nada. Con `wrap`, un
+  swipe de más te manda al otro extremo de la app y el borde deja de sentirse como un borde —
+  que es lo mismo que decidieron las pestañas de Android.
+- **La animación es un 6 % y no una pantalla entera.** Lo segundo pide las dos rutas montadas a
+  la vez, o sea un carrusel de verdad; con una sola, un `translateX(100%)` deja medio segundo de
+  página en blanco. El 6 % con el fundido alcanza para decir de qué lado vino.
+- **El `key` del contenedor lleva un `nonce` y no el `pathname`.** Con el pathname, el
+  contenedor se remontaría también en las navegaciones que salen de las pestañas, que no tienen
+  por qué animar; y dos swipes seguidos en la misma dirección no volverían a animar, porque la
+  clase no cambia y sin remontar la animación no se repite.
+
+**Todavía no se probó en un celular de verdad** (2026-08-28): lint y build pasan, pero un gesto
+táctil no se verifica con un mouse ni con el emulador. Lo que hay que mirar ahí es que
+desplazar la lista verticalmente no cambie de sección, y que el long press siga armando la
+tarjeta.
+
 ## El PDF que llega de la nube (2026-08-26)
 Importar una factura elegida **desde Google Drive** en el selector de Android fallaba con «No se
 pudo conectar con el servidor», que es el mensaje de `ApiError(0, …)` — el que el cliente HTTP

@@ -2,6 +2,14 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router'
 
 import { BrandMark } from './BrandMark'
 import { useAuth } from '../auth/useAuth'
+import { useSwipeNav } from '../hooks/useSwipeNav'
+
+/**
+ * Las cuatro secciones, **en el orden en que están en la barra de arriba**, que es el orden en
+ * el que las recorre el gesto de deslizar. Si se agrega una pestaña hay que sumarla en los dos
+ * lados: acá y en el `<nav>` de más abajo, que están en este mismo archivo justamente por eso.
+ */
+const SECTION_PATHS = ['/', '/facturas', '/identidades', '/clientes']
 
 /** El marco de las pantallas con sesión: barra arriba y `<Outlet />` para la ruta activa. */
 export function AppLayout() {
@@ -18,6 +26,8 @@ export function AppLayout() {
   // `isActive` de `NavLink` no alcanza: con `end` se apagaría adentro de un modelo, y sin
   // `end` la raíz haría match con todas las rutas y la pestaña quedaría prendida siempre.
   const inTemplates = pathname === '/' || pathname.startsWith('/modelos')
+
+  const { swipeProps, enterKey, enterClass } = useSwipeNav(SECTION_PATHS)
 
   return (
     <>
@@ -51,7 +61,12 @@ export function AppLayout() {
           </button>
         </div>
       </header>
-      <Outlet />
+      {/* El `<Outlet />` va adentro de un contenedor propio y no suelto: el gesto necesita un
+          elemento del que colgarse que cubra la pantalla entera y que no sea la barra —
+          deslizar sobre las pestañas tiene que seguir siendo tocar una pestaña. */}
+      <div className={`app-main ${enterClass}`} key={enterKey} {...swipeProps}>
+        <Outlet />
+      </div>
     </>
   )
 }
