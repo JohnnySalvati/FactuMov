@@ -116,8 +116,23 @@ scp E:\Capacitacion\InSoft\Balance360\Balance360\certs\homo.crt `
 ```
 
 Los de homologación son los de Balance360, que son de este mismo CUIT (`20182810674`). Las
-rutas del `.env` son **las del contenedor**, así que si los archivos se llaman distinto hay
-que ajustar `ARCA_CERT_PATH` y `ARCA_PRIVATE_KEY_PATH`.
+rutas del `.env` son **las del contenedor**, y los nombres que trae el `.env.example` son los
+de estos dos archivos; si los subís con otro nombre hay que ajustar `ARCA_CERT_PATH` y
+`ARCA_PRIVATE_KEY_PATH`.
+
+**La clave privada quizás ya esté en la VM**, porque es la misma para homologación y para
+producción: mirá `ls ~/Balance360/certs/`. El `.crt` no va a estar — allá subieron solo el de
+producción — así que el `homo.crt` va por scp sí o sí.
+
+Los certificados se pueden agregar con el stack ya levantado: el mount es de la carpeta
+entera, así que un archivo nuevo aparece adentro del contenedor sin reiniciar nada. Lo que sí
+necesita un `up -d` es tocar el `.env`.
+
+**Si el archivo falta o el nombre no coincide, el síntoma no lo dice.** `_load_certificate`
+levanta `ArcaError` y el endpoint contesta **502**, que en la pantalla se ve igual que un ARCA
+caído — el cartel de "no se pudo preguntar", no uno que hable del certificado. Por eso conviene
+comparar `exec app ls -la /app/certs` contra `grep ARCA_ .env` antes de apretar el botón de
+verificar la delegación.
 
 ### 2.3 Levantar
 
