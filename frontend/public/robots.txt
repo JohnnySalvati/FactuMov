@@ -1,0 +1,5 @@
+# FactuMov está entera detrás del login: no hay una sola página que valga la pena indexar.
+# Sin este archivo, el `try_files ... /index.html` del nginx le contesta el HTML de la SPA a
+# quien pida /robots.txt, y un crawler termina interpretando como reglas lo que es una página.
+User-agent: *
+Disallow: /
