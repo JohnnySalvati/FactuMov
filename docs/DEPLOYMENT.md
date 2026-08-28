@@ -116,13 +116,17 @@ scp E:\Capacitacion\InSoft\FactuMov\certs\factumov.crt `
     johnny@192.168.100.16:~/FactuMov/certs/
 ```
 
-Son el certificado y la clave **propios de FactuMov**, del CUIT `20182810674`. La clave ya
-existe; **el `.crt` todavía no**, y sacarlo es la sección 7 — un prerrequisito y no un
-detalle, porque usar los de Balance360 acá es lo que deja a una de las dos apps sin ARCA por
-doce horas. Las rutas del
-`.env` son **las del contenedor**, y los nombres que trae el `.env.example` son los de estos
-dos archivos; si los subís con otro nombre hay que ajustar `ARCA_CERT_PATH` y
-`ARCA_PRIVATE_KEY_PATH`.
+Son el certificado y la clave **propios de FactuMov**, del CUIT `20182810674`, y desde el
+2026-08-28 los dos existen (sección 7). Que sean los propios y no los de Balance360 es un
+prerrequisito y no un detalle: compartirlos es lo que deja a una de las dos apps sin ARCA por
+doce horas. Las rutas del `.env` son **las del contenedor**, y los nombres que trae el
+`.env.example` son los de estos dos archivos; si los subís con otro nombre hay que ajustar
+`ARCA_CERT_PATH` y `ARCA_PRIVATE_KEY_PATH`.
+
+**Ojo con cuál de los dos subís**: `factumov.crt` es el de producción y `factumov-homo.crt` el
+de homologación, y se parecen. Subir el de homo con `ARCA_ENV=prod` da 502; subir el de prod a
+un entorno de prueba **emite facturas de verdad**. Se distinguen por el emisor
+(`openssl x509 -noout -issuer`): `CN=Computadores` es producción, `CN=Computadores Test` no.
 
 **El primer arranque no los necesita.** Sin ellos la app levanta igual y solo contesta 502 lo
 que sale a ARCA, así que se puede verificar todo el resto —la SPA, el login, el registro, los
@@ -300,8 +304,9 @@ backup.
 Desde el 2026-08-28 el `.env.example` de la raíz —el de producción— trae `ARCA_ENV=prod`; el
 de `backend/`, que es el de desarrollo, se queda en `homo` — una máquina de desarrollo no
 tiene por qué poder emitir de verdad. Con `prod`, cuando el endpoint de emisión contesta 201
-hay un comprobante con **validez legal a nombre de un CUIT real** y no hay camino de vuelta: se deja sin efecto con una nota de crédito, que FactuMov no emite. Es lo
-único irreversible hacia afuera que hace la app.
+hay un comprobante con **validez legal a nombre de un CUIT real** y no hay camino de vuelta: se
+deja sin efecto con una nota de crédito, que FactuMov no emite. Es lo único irreversible hacia
+afuera que hace la app.
 
 **Y `prod` exige un certificado propio de FactuMov, no el de Balance360.** WSAA se niega a
 emitir un TA nuevo mientras el anterior siga vigente, y cada app cachea el suyo en **su
@@ -311,11 +316,18 @@ sea que compartirlo pone en riesgo la facturación de Balance360, que ya está e
 Mientras FactuMov apuntaba a homologación no pasaba, porque eran certificados distintos; el
 cambio de esta variable es exactamente lo que lo destapa.
 
-Por eso `ARCA_CERT_PATH` y `ARCA_PRIVATE_KEY_PATH` apuntan a `factumov.crt` / `factumov.key`,
-que **todavía no existen**. Hasta que existan, todo lo que salga a ARCA —verificar la
-delegación, consultar el padrón, emitir— contesta **502** con un `ArcaError` que nombra al
-certificado. Eso es deliberado: es lo que impide que el pasaje a `prod` empiece a emitir con
-el certificado de Balance360 sin que nadie lo note. El resto de la app anda igual.
+Por eso `ARCA_CERT_PATH` y `ARCA_PRIVATE_KEY_PATH` apuntan a `factumov.crt` / `factumov.key`.
+Si esos archivos no están, todo lo que salga a ARCA —verificar la delegación, consultar el
+padrón, emitir— contesta **502** con un `ArcaError` que nombra al certificado, y el resto de la
+app anda igual. Eso es deliberado: es lo que impide que el pasaje a `prod` empiece a emitir con
+el certificado de Balance360 sin que nadie lo note. Y sigue haciendo de freno aunque los
+certificados ya existan, porque `certs/` no viaja por git: en la VM hay que copiarlos a mano
+(§ 7.2).
+
+**Que dos certificados del mismo CUIT obtienen cada uno su propio TA está verificado**
+(2026-08-28), que era la premisa entera de todo esto: con FactuMov teniendo su TA de `wsfe` de
+homologación vigente, WSAA le emitió otro distinto y simultáneo a Balance360 con su `homo.crt`.
+El TA es por certificado, no por CUIT.
 
 ### 7.1 Sacar el certificado propio
 
@@ -323,13 +335,21 @@ Es del **mismo CUIT `20182810674`**. La delegación es al CUIT, así que las que
 otorgaron siguen valiendo: lo que hay que hacer es habilitarle los servicios al certificado
 nuevo.
 
-**Los pasos 1 y 2 ya están hechos** (2026-08-28). En `certs/` —que está en `.gitignore`, así
-que estas claves no viajan por git— hay **dos pares**, uno por entorno:
+**Este trámite ya está hecho** (2026-08-28) — lo que sigue es la receta, por si hay que
+rehacerlo o renovarlo. En `certs/` —que está en `.gitignore`, así que estas claves no viajan
+por git— hay **dos pares completos**, uno por entorno:
 
-| Entorno | Clave | Pedido | Certificado |
-|---|---|---|---|
-| Producción | `factumov.key` | `factumov.csr` | `factumov.crt` — **falta** |
-| Homologación | `factumov-homo.key` | `factumov-homo.csr` | `factumov-homo.crt` — **falta** |
+| Entorno | Clave | Pedido | Certificado | Emisor | Vence |
+|---|---|---|---|---|---|
+| Producción | `factumov.key` | `factumov.csr` | `factumov.crt` | `CN=Computadores` | 2028-08-27 |
+| Homologación | `factumov-homo.key` | `factumov-homo.csr` | `factumov-homo.crt` | `CN=Computadores Test` | 2028-08-27 |
+
+**Los dos archivos se parecen y solo uno emite de verdad.** Se distinguen por el emisor, no por
+el nombre —que lo elegimos nosotros—, así que antes de copiar uno a la VM conviene mirarlo:
+
+```bash
+openssl x509 -in certs/factumov.crt -noout -subject -issuer -dates
+```
 
 Son **dos claves distintas y no la misma en los dos entornos**, por el mismo motivo por el
 que no se comparte con Balance360: el certificado es lo que WSAA mira para decidir si ya
@@ -359,7 +379,7 @@ la cabeza porque el segundo es el que se olvida:
   "Computador no autorizado a acceder al servicio", que no nombra al servicio que falta.
 
 **Primero homologación y después producción**, y no por prolijidad: es el único orden en el
-que la verificación pendiente —la de más abajo— se puede hacer antes de depender de ella. En
+que la verificación de convivencia —la de más abajo— se puede hacer antes de depender de ella. En
 homo el trámite es gratis, instantáneo y se puede rehacer; en prod hay que pedir el servicio
 por Clave Fiscal y esperar.
 
@@ -420,12 +440,34 @@ falla con "Computador no autorizado", lo que falta es la habilitación y no el c
 Después, el circuito completo se prueba desde la app, verificando la delegación de una
 identidad fiscal.
 
-**La verificación pendiente se hace con el par de homologación**, y es la premisa entera de
-esta salida: con `factumov-homo.crt` puesto, pedir un TA desde FactuMov mientras Balance360
-tiene el suyo vigente contra `homo.crt`, y ver que los dos conviven. El error de WSAA nombra
-al CEE —o sea al certificado— así que todo apunta a que sí, pero hoy sigue sin confirmar. Si
-resultara que el TA es por CUIT y servicio, las opciones son compartir el cache de tickets
-entre las dos apps —acoplarlas, feo— o que FactuMov emita bajo un CUIT propio.
+**Hecho el 2026-08-28**: devolvió `20182810674` y el padrón contestó INSCRIPTO.
+
+##### La convivencia con Balance360, verificada
+
+Era la premisa entera de esta salida y se hizo el 2026-08-28, con el par de homologación: con
+FactuMov teniendo su TA de `wsfe` vigente —obtenido con `factumov-homo.crt`— se le pidió otro a
+WSAA con el `homo.crt` de Balance360, y **lo emitió: distinto y simultáneo**. O sea que el TA es
+por certificado y no por CUIT, que es lo que deja a las dos apps convivir bajo el mismo
+`20182810674` sin arrebatarse el ticket.
+
+Vale la pena rehacerlo si algún día se cambia de certificado. Se hace en homologación, donde no
+hay nada que romper, comparando los dos tokens:
+
+```powershell
+uv run python -c @'
+import os
+from factumov.services import arca
+a = arca.request_ticket("wsfe")                          # con el cert que tenga el .env
+os.environ["ARCA_CERT_PATH"] = "E:/Capacitacion/InSoft/Balance360/Balance360/certs/homo.crt"
+os.environ["ARCA_PRIVATE_KEY_PATH"] = "E:/Capacitacion/InSoft/Balance360/Balance360/certs/balance360.key"
+arca.get_arca_settings.cache_clear()
+b = arca.request_ticket("wsfe")                          # con el de Balance360
+print("dos TA distintos y simultaneos" if a.token != b.token else "MISMO TA: se pisan")
+'@
+```
+
+Si diera "MISMO TA", las opciones son compartir el cache de tickets entre las dos apps
+—acoplarlas, feo— o que FactuMov emita bajo un CUIT propio.
 
 ### 7.2 Ponerlo en la VM
 
