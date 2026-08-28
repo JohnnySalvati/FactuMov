@@ -100,7 +100,8 @@ Lo que no puede quedar como está:
   mails con links muertos y no tiene ningún síntoma en el arranque.
 - `OPERATOR_EMAIL`. Hoy es lo único que avisa que un usuario está esperando que aceptemos su
   designación en ARCA — ese click no lo expone ningún web service.
-- `ARCA_ENV` queda en **`homo`**. Ver la sección 7.
+- `ARCA_ENV` va en **`prod`**, y con eso el certificado propio pasa a ser un prerrequisito
+  y no una prolijidad. Ver la sección 7.
 
 ### 2.2 Los certificados de ARCA
 
@@ -110,23 +111,25 @@ lectura en `/app/certs`.
 ```powershell
 # desde la máquina de desarrollo
 ssh johnny@192.168.100.16 "mkdir -p ~/FactuMov/certs"
-scp E:\Capacitacion\InSoft\Balance360\Balance360\certs\homo.crt `
-    E:\Capacitacion\InSoft\Balance360\Balance360\certs\balance360.key `
+scp E:\Capacitacion\InSoft\FactuMov\certs\factumov.crt `
+    E:\Capacitacion\InSoft\FactuMov\certs\factumov.key `
     johnny@192.168.100.16:~/FactuMov/certs/
 ```
 
-Los de homologación son los de Balance360, que son de este mismo CUIT (`20182810674`). Las
-rutas del `.env` son **las del contenedor**, y los nombres que trae el `.env.example` son los
-de estos dos archivos; si los subís con otro nombre hay que ajustar `ARCA_CERT_PATH` y
+Son el certificado y la clave **propios de FactuMov**, del CUIT `20182810674`. La clave ya
+existe; **el `.crt` todavía no**, y sacarlo es la sección 7 — un prerrequisito y no un
+detalle, porque usar los de Balance360 acá es lo que deja a una de las dos apps sin ARCA por
+doce horas. Las rutas del
+`.env` son **las del contenedor**, y los nombres que trae el `.env.example` son los de estos
+dos archivos; si los subís con otro nombre hay que ajustar `ARCA_CERT_PATH` y
 `ARCA_PRIVATE_KEY_PATH`.
 
-**La clave privada quizás ya esté en la VM**, porque es la misma para homologación y para
-producción: mirá `ls ~/Balance360/certs/`. El `.crt` no va a estar — allá subieron solo el de
-producción — así que el `homo.crt` va por scp sí o sí.
+**El primer arranque no los necesita.** Sin ellos la app levanta igual y solo contesta 502 lo
+que sale a ARCA, así que se puede verificar todo el resto —la SPA, el login, el registro, los
+mails— y sumar los certificados después: el mount es de la carpeta entera, así que un archivo
+nuevo aparece adentro del contenedor sin reiniciar nada.
 
-Los certificados se pueden agregar con el stack ya levantado: el mount es de la carpeta
-entera, así que un archivo nuevo aparece adentro del contenedor sin reiniciar nada. Lo que sí
-necesita un `up -d` es tocar el `.env`.
+Lo que sí necesita un `up -d` es tocar el `.env`.
 
 **Si el archivo falta o el nombre no coincide, el síntoma no lo dice.** `_load_certificate`
 levanta `ArcaError` y el endpoint contesta **502**, que en la pantalla se ve igual que un ARCA
@@ -292,32 +295,97 @@ backup.
 
 ---
 
-## 7. ARCA: se sale con `homo`, y el pasaje a `prod` es otro día
+## 7. ARCA está en `prod`, y el certificado propio es el prerrequisito
 
-Estar en producción y estar emitiendo de verdad son **dos hitos distintos**, y juntarlos haría
-que la primera prueba contra el server sea también la primera factura irreversible. Con
-`ARCA_ENV=prod`, cuando el endpoint de emisión contesta 201 hay un comprobante con validez
-legal a nombre de un CUIT real y no hay camino de vuelta: se deja sin efecto con una nota de
-crédito, que FactuMov no emite.
+Desde el 2026-08-28 el `.env.example` de la raíz —el de producción— trae `ARCA_ENV=prod`; el
+de `backend/`, que es el de desarrollo, se queda en `homo` — una máquina de desarrollo no
+tiene por qué poder emitir de verdad. Con `prod`, cuando el endpoint de emisión contesta 201
+hay un comprobante con **validez legal a nombre de un CUIT real** y no hay camino de vuelta: se deja sin efecto con una nota de crédito, que FactuMov no emite. Es lo
+único irreversible hacia afuera que hace la app.
 
-**Antes de tocar esa variable hay que resolver la colisión del certificado con Balance360.**
-WSAA se niega a emitir un TA nuevo mientras el anterior siga vigente, y cada app cachea el
-suyo en **su propia** tabla `arca_tickets`, en **su propia** base. Dos apps pidiendo un TA de
-`wsfe` con el mismo certificado se lo arrebatan, y la que pierde queda afuera de ARCA hasta
-doce horas. Hoy no pasa porque FactuMov apunta a homologación y Balance360 a producción: son
-certificados distintos. La colisión aparece justo el día del cambio, que es lo que la vuelve
-fácil de no ver venir.
+**Y `prod` exige un certificado propio de FactuMov, no el de Balance360.** WSAA se niega a
+emitir un TA nuevo mientras el anterior siga vigente, y cada app cachea el suyo en **su
+propia** tabla `arca_tickets`, en **su propia** base. Dos apps pidiendo un TA de `wsfe` con el
+mismo certificado se lo arrebatan, y la que pierde queda afuera de ARCA hasta doce horas — o
+sea que compartirlo pone en riesgo la facturación de Balance360, que ya está en producción.
+Mientras FactuMov apuntaba a homologación no pasaba, porque eran certificados distintos; el
+cambio de esta variable es exactamente lo que lo destapa.
 
-La salida esperada es un **certificado propio de FactuMov**, del mismo CUIT `20182810674`. La
-delegación es al CUIT, así que las que ya nos otorgaron siguen valiendo; lo que hay que hacer
-es habilitarle a ese certificado nuevo los servicios (WSFE y `ws_sr_constancia_inscripcion`).
-Falta verificar en homologación que un certificado distinto obtiene su propio TA — el error
-nombra al CEE, o sea al certificado, así que todo apunta a que sí, pero es la premisa entera
-de la salida.
+Por eso `ARCA_CERT_PATH` y `ARCA_PRIVATE_KEY_PATH` apuntan a `factumov.crt` / `factumov.key`,
+que **todavía no existen**. Hasta que existan, todo lo que salga a ARCA —verificar la
+delegación, consultar el padrón, emitir— contesta **502** con un `ArcaError` que nombra al
+certificado. Eso es deliberado: es lo que impide que el pasaje a `prod` empiece a emitir con
+el certificado de Balance360 sin que nadie lo note. El resto de la app anda igual.
 
-El pasaje, cuando llegue, es: subir los certificados de producción, cambiar `ARCA_ENV`,
-`ARCA_CERT_PATH` y `ARCA_PRIVATE_KEY_PATH` en el `.env`, y `up -d` — sin `--build`, porque no
-cambió ninguna imagen.
+### 7.1 Sacar el certificado propio
+
+Es del **mismo CUIT `20182810674`**. La delegación es al CUIT, así que las que ya nos
+otorgaron siguen valiendo: lo que hay que hacer es habilitarle los servicios al certificado
+nuevo.
+
+**Los pasos 1 y 2 ya están hechos** (2026-08-28). En `certs/` —que está en `.gitignore`, así
+que estas claves no viajan por git— hay **dos pares**, uno por entorno:
+
+| Entorno | Clave | Pedido | Certificado |
+|---|---|---|---|
+| Producción | `factumov.key` | `factumov.csr` | `factumov.crt` — **falta** |
+| Homologación | `factumov-homo.key` | `factumov-homo.csr` | `factumov-homo.crt` — **falta** |
+
+Son **dos claves distintas y no la misma en los dos entornos**, por el mismo motivo por el
+que no se comparte con Balance360: el certificado es lo que WSAA mira para decidir si ya
+emitió un TA. Y el de homologación existe porque es lo único que deja ensayar el trámite
+completo —y la verificación de más abajo— sin tocar producción.
+
+La receta, por si hay que rehacerlo. `MSYS_NO_PATHCONV=1` es solo para Git Bash, que si no
+convierte el `-subj` a una ruta de Windows y el CSR sale con el subject equivocado; en
+PowerShell no hace falta:
+
+```bash
+# 1. Clave privada propia. Que no sea la de Balance360 es la mitad del punto.
+openssl genrsa -out factumov.key 2048
+
+# 2. El pedido (CSR). El serialNumber lleva el CUIT y el CN es el alias del certificado.
+MSYS_NO_PATHCONV=1 openssl req -new -key factumov.key -out factumov.csr \
+  -subj "/C=AR/O=Miguel Salvati/CN=factumov/serialNumber=CUIT 20182810674"
+```
+
+**Lo que falta son los dos pasos del portal**, que necesitan Clave Fiscal y no se pueden
+automatizar:
+
+3. En el portal de ARCA con Clave Fiscal del `20182810674`, en el servicio de
+   **administración de certificados digitales**, dar de alta un alias nuevo (`factumov`),
+   subir el `.csr` y descargar el `.crt` que devuelve, con ese nombre y en `certs/`. En
+   homologación el equivalente es **WSASS**, con el alias `factumov-homo`.
+4. En **Administrador de Relaciones**, asociar ese alias nuevo a los dos servicios que la app
+   usa: **WSFE** (`wsfe`) y **constancia de inscripción** (`ws_sr_constancia_inscripcion`).
+   Sin el segundo, el que falla no es la consulta al padrón sino WSAA, con "Computador no
+   autorizado a acceder al servicio".
+
+**La verificación pendiente se hace con el par de homologación**, y es la premisa entera de
+esta salida: con `factumov-homo.crt` puesto, pedir un TA desde FactuMov mientras Balance360
+tiene el suyo vigente contra `homo.crt`, y ver que los dos conviven. El error de WSAA nombra
+al CEE —o sea al certificado— así que todo apunta a que sí, pero hoy sigue sin confirmar. Si
+resultara que el TA es por CUIT y servicio, las opciones son compartir el cache de tickets
+entre las dos apps —acoplarlas, feo— o que FactuMov emita bajo un CUIT propio.
+
+### 7.2 Ponerlo en la VM
+
+```powershell
+scp E:\Capacitacion\InSoft\FactuMov\certs\factumov.crt `
+    E:\Capacitacion\InSoft\FactuMov\certs\factumov.key `
+    johnny@192.168.100.16:~/FactuMov/certs/
+```
+
+El mount es de la carpeta entera, así que los archivos aparecen adentro del contenedor sin
+reiniciar nada. Si además hubiera que tocar el `.env`, ahí sí va un `up -d` — sin `--build`,
+porque no cambió ninguna imagen.
+
+Después, la prueba: verificar la delegación de una identidad fiscal desde la app. Si contesta
+502, comparar `docker compose -f docker-compose.prod.yml exec app ls -la /app/certs` contra
+`grep ARCA_ .env` antes de buscar por otro lado.
+
+**La primera emisión real conviene hacerla a conciencia**, con un comprobante que de todos
+modos había que emitir: es la primera vez que el botón produce algo que no se puede deshacer.
 
 ---
 
@@ -371,4 +439,8 @@ docker compose -f docker-compose.prod.yml start app
   Si el registro anda y el aviso de delegación no llega, mirar el log del `app`.
 - **"El CEE ya posee un TA válido".** Hay un ticket vivo emitido con el mismo certificado
   desde otro lado: típicamente la máquina de desarrollo apuntando al mismo `ARCA_ENV`, o
-  Balance360 el día que compartan el de producción. Hay que esperar a que venza.
+  Balance360 si alguien puso acá su certificado de producción en lugar del propio de
+  FactuMov (sección 7). Hay que esperar a que venza, y son hasta doce horas.
+- **502 en todo lo que toca ARCA, y en nada más.** Es el estado esperado mientras
+  `factumov.crt` y `factumov.key` no existan: la app quedó en `prod` antes que el certificado
+  propio, a propósito. El log del `app` trae el `ArcaError` con el path que no pudo leer.

@@ -956,6 +956,12 @@ con su manifest y el logo de InSoft en las pantallas sin sesión.
    `docs/DEPLOYMENT.md`— y lo que falta son los tres pasos que necesitan accesos que la
    sesión no tiene: el registro DNS, el server block en srv-nginx y el deploy en la VM. Ver
    *Producción*.
+   - **Y el certificado propio de ARCA**, que desde el 2026-08-28 es lo único que separa a la
+     app de emitir de verdad: `ARCA_ENV` ya está en `prod` y las rutas apuntan a un
+     `factumov.crt` que todavía no existe. **La clave y el CSR ya están generados** —los dos
+     pares, prod y homo, en `certs/`— así que lo que falta es el paso del portal, que se hace
+     con Clave Fiscal del `20182810674` y no lo puede dar ninguna sesión de Code. El trámite
+     completo está en `docs/DEPLOYMENT.md` § 7.1.
 2. **FactuMov en la landing de InSoft** — tarjeta en *Nuestros SaaS* y entrada en el
    lanzador de apps, apuntando a la URL del punto anterior. Los assets de la tarjeta ya
    existen: `frontend/public/factumov-icon.svg` y los PNG de al lado.
@@ -2182,10 +2188,68 @@ línea.
 
 - **`ARCA_WSDL_CACHE_PATH` apunta al volumen `wsdl_cache`.** Sin volumen, cada deploy vuelve a
   bajar los WSDL de ARCA y el primer request después de un redeploy paga esa demora.
-- **`ARCA_ENV` sale en `homo`**, y el pasaje a `prod` es un paso aparte y deliberado —
-  confirmado por Miguel el 2026-08-27. Estar en producción y estar emitiendo de verdad son dos
-  hitos distintos: juntarlos hace que la primera prueba contra el server sea también la primera
-  factura irreversible.
+- **`ARCA_ENV` está en `prod` desde el 2026-08-28** — ver *El pasaje a `prod`*. Es este
+  archivo y no el de `backend/`, que es el de desarrollo y se quedó en `homo`. Hasta ese día
+  salía en `homo`, con el argumento de que estar en producción y estar emitiendo de verdad son
+  dos hitos distintos. Lo que reemplaza a esa separación es el certificado: la app quedó en
+  `prod` apuntando a un certificado propio que todavía no existe, así que lo irreversible sigue
+  sin poder ocurrir por accidente, pero ahora la puerta la abre sacar el certificado y no
+  acordarse de cambiar una variable.
+
+#### El pasaje a `prod` (2026-08-28)
+Pedido por Miguel. `ARCA_ENV=prod` en el `.env.example` de la raíz —el de producción— con
+`docs/DEPLOYMENT.md` § 7 reescrito: dejó de decir "se sale con `homo`" y ahora cuenta cómo se
+saca el certificado propio. **El código no cambió** — WSAA, WSFE y el padrón ya tenían sus dos
+URLs por entorno, así que el pasaje es enteramente de configuración.
+
+El mismo día, y a pedido de Miguel, la máquina de desarrollo **volvió a `homo`** y se
+generaron las claves — ver *Las claves propias, y el desarrollo de vuelta en homo*.
+
+- **El guardarraíl dejó de ser la variable y pasó a ser el certificado**, y esa es la decisión
+  de fondo. `ARCA_CERT_PATH` apunta a `factumov.crt`, que **todavía no existe**: hasta que
+  exista, todo lo que sale a ARCA contesta 502 con un `ArcaError` que nombra el path, y el
+  resto de la app anda igual. Es un freno mejor que el anterior porque falla ruidoso y en el
+  lugar correcto, en vez de depender de que alguien recuerde no tocar una línea del `.env`.
+- **El certificado propio no es prolijidad: es lo que protege a Balance360.** Compartir el de
+  producción hace que las dos apps se arrebaten el TA —WSAA no emite uno nuevo mientras el
+  anterior siga vigente, y cada app lo cachea en su propia tabla— y la que pierde queda afuera
+  de ARCA hasta doce horas. Del otro lado de esa falla está la facturación real de Balance360,
+  que ya está en producción. Miguel eligió explícitamente sacar el certificado propio primero,
+  y esta configuración es la que hace imposible saltearse ese paso.
+- **Sigue sin confirmarse que un certificado distinto obtiene su propio TA.** El error nombra
+  al CEE —el certificado— y no al CUIT, así que todo apunta a que sí, pero es la premisa entera
+  de la salida. Verificarlo es pedir los dos TA de homologación a la vez, uno con el
+  `homo.crt` de Balance360 y otro con el `factumov-homo.crt` — que es exactamente para lo que
+  existe el par de homo del punto siguiente. Si resultara que el TA es por CUIT y servicio, las
+  opciones son compartir un cache de tickets entre las dos apps —acoplarlas, feo— o que
+  FactuMov emita bajo un CUIT propio.
+- **El `.env` de desarrollo quedó en `prod` por unas horas, y se revirtió el mismo día.** El
+  argumento del pasaje era sobre la instalación de producción; arrastrar con él a la máquina de
+  desarrollo le sacaba la red de contención a todas las pruebas locales sin que nadie ganara
+  nada. Ver el punto que sigue.
+
+#### Las claves propias, y el desarrollo de vuelta en homo (2026-08-28)
+`certs/` —que ya estaba en `.gitignore`— tiene ahora **dos pares** de clave y CSR:
+`factumov.key`/`.csr` para producción y `factumov-homo.key`/`.csr` para homologación. Los
+`.crt` los emite el portal de ARCA (WSASS en homo) y todavía no están: ese es el único paso
+que falta, y necesita Clave Fiscal. El trámite completo, en `docs/DEPLOYMENT.md` § 7.1.
+
+- **Son dos claves y no una en dos entornos**, por el mismo motivo por el que no se comparte
+  con Balance360: lo que WSAA mira para decidir si ya emitió un TA es el certificado. Con una
+  sola clave para los dos entornos, probar en homo desde el escritorio podría dejar sin ticket
+  a la instalación de producción.
+- **El par de homologación es además el instrumento de la verificación pendiente**: es el
+  segundo certificado que hace falta para comprobar que dos certificados del mismo CUIT
+  obtienen cada uno su propio TA.
+- **La máquina de desarrollo vuelve a `homo`**, y con ella el `backend/.env.example`, que es su
+  plantilla. Que el template de desarrollo trajera `prod` significaba que un equipo nuevo
+  montado desde ahí arrancaba pudiendo emitir de verdad — el `.env.example` de la raíz, que es
+  el de producción, se queda en `prod`.
+- **Apunta al `factumov-homo.crt` que todavía no existe**, no a los certificados de homo de
+  Balance360. O sea que hoy lo que sale a ARCA desde acá contesta 502, igual que en producción
+  y por el mismo motivo, que es lo que hace que el estado de desarrollo se parezca al real. Los
+  de Balance360 quedan escritos como comentario al lado, a una línea de distancia, para el que
+  necesite probar contra ARCA antes de tener el certificado.
 
 #### `.gitattributes`, que no estaba
 `docker-entrypoint.sh` y `nginx.conf` se ejecutan adentro de un contenedor Linux, y en esta
@@ -2224,26 +2288,6 @@ Ninguna de las dos se alcanza desde la máquina de desarrollo sin la VPN levanta
 `192.168.100.x` y la LAN de casa es `192.168.1.x`.
 
 #### Lo que ya estaba decidido y sigue igual
-- **Las dos apps no pueden compartir el certificado de producción, y eso hay que resolverlo
-  antes del pasaje a `prod`.** WSAA se niega a emitir un TA nuevo mientras el anterior siga
-  vigente —es el "El CEE ya posee un TA valido" que los dos proyectos ya tienen documentado— y
-  cada app cachea el suyo en **su propia** tabla `arca_tickets`, en **su propia** base. O sea
-  que Balance360 y FactuMov pidiendo un TA de `wsfe` con el mismo certificado se lo van a
-  arrebatar mutuamente, y el que pierde queda afuera de ARCA hasta doce horas. No es teórico:
-  es exactamente la falla contra la que FactuMov puso el advisory lock, solo que el candado
-  vive adentro de una app y estas son dos.
-  - **Hoy no pasa** porque FactuMov va a `homo` y Balance360 está en `prod`: son sistemas
-    separados, con certificados separados. La colisión aparece el día del cambio, que es lo
-    que la vuelve fácil de no ver venir.
-  - **La salida esperada es un certificado propio para FactuMov**, del mismo CUIT
-    `20182810674`. La delegación es al CUIT, así que las que ya nos otorgaron siguen valiendo;
-    lo que hay que hacer es habilitarle a ese certificado nuevo los servicios (WSFE y
-    `ws_sr_constancia_inscripcion`), que es el mismo trámite que ya está documentado en *ARCA*.
-  - **Falta confirmar que un certificado distinto obtiene su propio TA.** El nombre del error
-    dice CEE —el certificado— y no el CUIT, así que todo apunta a que sí, pero es la premisa
-    entera de la salida y conviene verificarla en homologación antes de depender de ella. Si
-    resultara que el TA es por CUIT y servicio, las opciones son que las dos apps compartan un
-    cache de tickets —acoplarlas, feo— o que FactuMov emita bajo un CUIT propio.
 - **Backups.** Hoy no hay ninguno de FactuMov. El comando está en `docs/DEPLOYMENT.md` § 8.
 - **El barrido de delegaciones no necesita nada especial**: vive en el `lifespan` y con N
   workers barre uno solo, por el `pg_try_advisory_xact_lock`.
