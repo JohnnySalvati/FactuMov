@@ -7,6 +7,7 @@ import {
   CondicionIva,
   DOC_TYPE_LABELS,
   DocType,
+  isCuit,
   type Customer,
   type TaxpayerLookup,
 } from '../api/types'
@@ -161,8 +162,7 @@ function CustomerForm({
     }
   }
 
-  // El padrón se consulta por CUIT y solo devuelve CUIT: con un DNI no hay nada que traer.
-  const canLookup = docType === DocType.CUIT && docNumber.replace(/\D/g, '').length === 11
+  const canLookup = isCuit(docType, docNumber.replace(/\D/g, ''))
 
   return (
     <form className="card stack" onSubmit={onSubmit}>

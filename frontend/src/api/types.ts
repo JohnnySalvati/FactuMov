@@ -31,6 +31,21 @@ export const CONDICION_IVA_LABELS: Record<CondicionIva, string> = {
   [CondicionIva.MONOTRIBUTO]: 'Monotributo',
 }
 
+/**
+ * Las condiciones que puede tener quien **emite**.
+ *
+ * Consumidor final no está: no puede emitir y `FiscalIdentityCreate` la rechaza con un 422, así
+ * que no se ofrece una opción que siempre falla. Vive acá y no en una pantalla porque hay dos
+ * lugares que dan de alta una identidad fiscal —`FiscalIdentityPage` y el cartel del emisor
+ * faltante de la importación—, y con una copia en cada uno alcanzaba con tocar una para que
+ * dejaran de coincidir.
+ */
+export const EMISOR_CONDICIONES = [
+  CondicionIva.INSCRIPTO,
+  CondicionIva.MONOTRIBUTO,
+  CondicionIva.EXENTO,
+] as const
+
 export const DocType = {
   CUIT: 80,
   CUIL: 86,
@@ -42,6 +57,21 @@ export const DOC_TYPE_LABELS: Record<DocType, string> = {
   [DocType.CUIT]: 'CUIT',
   [DocType.CUIL]: 'CUIL',
   [DocType.DNI]: 'DNI',
+}
+
+/**
+ * ¿Se le puede preguntar al padrón por este documento?
+ *
+ * **El padrón se consulta por CUIT y solo devuelve CUIT.** Con un DNI no hay nada que traer, y
+ * el CUIL —que también son once dígitos— queda afuera porque `TaxpayerLookup` contesta siempre
+ * `doc_type: CUIT`: aceptarlo daría de alta un cliente con el tipo de documento cambiado.
+ *
+ * Es la regla de tres pantallas —el alta de un cliente, y los dos carteles de la importación—,
+ * así que vive con los tipos de la API y no adentro de una de ellas. Espera los dígitos
+ * pelados: los guiones se limpian antes, donde el usuario tipea.
+ */
+export function isCuit(docType: DocType | null, docNumber: string | null): docNumber is string {
+  return docType === DocType.CUIT && docNumber !== null && /^\d{11}$/.test(docNumber)
 }
 
 /**

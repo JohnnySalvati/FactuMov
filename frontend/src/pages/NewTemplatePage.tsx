@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router'
 
 import { ApiError, api } from '../api/client'
 import {
+  isCuit,
   IvaAliquot,
   type Customer,
   type CustomerCreate,
@@ -10,6 +11,7 @@ import {
   type InvoiceTemplate,
   type InvoiceTemplateDraft,
 } from '../api/types'
+import { MissingCustomer, MissingIssuer } from '../components/MissingParty'
 import { Notice } from '../components/Notice'
 import { TemplateEditor } from '../components/TemplateEditor'
 import {
@@ -92,22 +94,25 @@ export function NewTemplatePage() {
     }
   }
 
-  /** Da de alta el cliente que salió del PDF y lo deja elegido en el formulario. */
-  async function createCustomerFromDraft(parsed: CustomerCreate) {
-    setBusy(true)
-    setError(undefined)
-    try {
-      const created = await api.post<Customer>('/customers', parsed)
-      setForm((current) => (current ? { ...current, customer_id: created.id } : current))
-      // Sin esto el picker no conoce al cliente recién creado y el campo se ve vacío aunque el
-      // id ya esté puesto: la lista de opciones es la que pone el nombre en pantalla.
-      customers.reload()
-      setDraft((current) => (current ? { ...current, customer_id: created.id } : current))
-    } catch (caught) {
-      setError(caught instanceof ApiError ? caught.detail : 'No se pudo dar de alta el cliente.')
-    } finally {
-      setBusy(false)
-    }
+  /**
+   * Deja elegido en el formulario el cliente recién dado de alta.
+   *
+   * El `reload` no es opcional: sin él el picker no conoce al cliente nuevo y el campo se ve
+   * vacío aunque el id ya esté puesto, porque el nombre en pantalla sale de la lista de
+   * opciones. Y el `draft` se actualiza para que el cartel que ofreció el alta desaparezca:
+   * es lo único que lo mantiene en pantalla.
+   */
+  function customerCreated(created: Customer) {
+    setForm((current) => (current ? { ...current, customer_id: created.id } : current))
+    customers.reload()
+    setDraft((current) => (current ? { ...current, customer_id: created.id } : current))
+  }
+
+  /** Lo mismo para la identidad fiscal que se creó desde el CUIT que emitió el PDF. */
+  function issuerCreated(created: FiscalIdentity) {
+    setForm((current) => (current ? { ...current, fiscal_identity_id: created.id } : current))
+    identities.reload()
+    setDraft((current) => (current ? { ...current, fiscal_identity_id: created.id } : current))
   }
 
   async function save() {
@@ -138,6 +143,10 @@ export function NewTemplatePage() {
    * Se arma como objeto y no como un booleano `canCreateCustomer` porque un booleano no le
    * dice nada a TypeScript sobre los cuatro campos que acaba de chequear: la rama del ternario
    * sí los estrecha, y de paso queda un solo lugar donde se decide qué se manda.
+   *
+   * Desde que el alta pasa por el padrón esto **ya no es el camino principal sino el de
+   * respaldo**: es con lo que se da de alta un cliente con DNI, que no está en el padrón, o uno
+   * con CUIT cuando ARCA no contesta.
    */
   const pendingCustomer: CustomerCreate | undefined =
     draft !== undefined &&
@@ -155,6 +164,18 @@ export function NewTemplatePage() {
           email: null,
         }
       : undefined
+
+  /**
+   * ¿Hay un receptor en el PDF que la cartera no tiene y que se pueda resolver desde acá?
+   *
+   * Con un CUIT siempre se puede: aunque el parser haya leído mal el nombre, el padrón lo trae.
+   * Sin CUIT hace falta que el PDF haya traído el alta completa. Si no se da ninguna de las dos,
+   * el cartel no aparece: no tendría ningún botón abajo.
+   */
+  const missingCustomer =
+    draft !== undefined &&
+    draft.customer_id === null &&
+    (pendingCustomer !== undefined || isCuit(draft.customer.doc_type, draft.customer.doc_number))
 
   return (
     <div className="page">
@@ -209,26 +230,15 @@ export function NewTemplatePage() {
           {draft !== undefined &&
             draft.fiscal_identity_id === null &&
             draft.issuer_tax_id !== null && (
-              <Notice kind="warn">
-                El PDF lo emitió el CUIT <strong className="mono">{draft.issuer_tax_id}</strong>,
-                que no está entre tus identidades fiscales.{' '}
-                <Link to="/identidades/nueva">Cargalo</Link> o elegí otro más abajo.
-              </Notice>
+              <MissingIssuer taxId={draft.issuer_tax_id} onCreated={issuerCreated} />
             )}
 
-          {pendingCustomer !== undefined && (
-            <Notice kind="warn">
-              El cliente <strong>{pendingCustomer.name}</strong> (
-              <span className="mono">{pendingCustomer.doc_number}</span>) todavía no está en tu
-              cartera.{' '}
-              <button
-                className="link"
-                onClick={() => createCustomerFromDraft(pendingCustomer)}
-                disabled={busy}
-              >
-                Darlo de alta con estos datos
-              </button>
-            </Notice>
+          {missingCustomer && draft !== undefined && (
+            <MissingCustomer
+              draft={draft.customer}
+              fallback={pendingCustomer}
+              onCreated={customerCreated}
+            />
           )}
 
           {draft !== undefined && (

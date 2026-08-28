@@ -5,19 +5,12 @@ import { ApiError, api } from '../api/client'
 import {
   CONDICION_IVA_LABELS,
   CondicionIva,
+  EMISOR_CONDICIONES,
   type DelegationStatus,
   type FiscalIdentity,
   type FiscalIdentityLookup,
 } from '../api/types'
 import { Notice } from '../components/Notice'
-
-/** Consumidor final no puede emitir, y el backend lo rechaza con un 422. Se saca de la lista
- *  para no ofrecer una opción que siempre falla. */
-const EMISOR_CONDICIONES = [
-  CondicionIva.INSCRIPTO,
-  CondicionIva.MONOTRIBUTO,
-  CondicionIva.EXENTO,
-] as const
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString('es-AR', {

@@ -196,6 +196,34 @@ IVA los trae el padrón de ARCA. Es el mismo servicio que ya usaba el alta de un
   que cambiaron desde que se cargó la identidad — que es la única forma que hay de enterarse,
   porque ARCA no avisa.
 
+### La importación también pregunta al padrón (2026-08-28)
+Pedido por Miguel. Cuando el PDF importado nombra un CUIT emisor que no está entre las
+identidades del usuario, o un receptor que no está en la cartera, la pantalla ya no manda a
+cargarlo a otro lado: consulta el padrón desde ahí mismo con los dos endpoints de `lookup` que
+ya existían, muestra lo que ARCA contestó y crea recién cuando el usuario acepta. El detalle de
+la pantalla está en *Frontend*; lo que importa acá es lo que le pasa a la cuota de ARCA.
+
+- **El emisor ya no se resuelve saliendo de la pantalla.** El link a `/identidades/nueva`
+  descartaba el modelo a medio importar: el draft vive en el estado del componente, no en la URL
+  ni en el server. Ahora el alta ocurre sin navegar, y el link queda como último recurso —cuando
+  el padrón falló— avisando lo que cuesta.
+- **El receptor deja de darse de alta con lo que dice el PDF.** Ese texto sale de una factura
+  ajena: la razón social viene cortada por el ancho de la columna y la condición frente al IVA
+  es un rótulo impreso que puede estar viejo. El padrón es la fuente buena de las dos cosas, y de
+  la condición depende la letra de todo lo que se emita después. Los datos del PDF siguen siendo
+  el alta cuando no hay padrón que consultar —un DNI— o cuando ARCA no contesta.
+- **La búsqueda es un botón y no un efecto de importar.** Un PDF puede gastar hasta dos consultas
+  y el presupuesto es de treinta por hora **para toda la app** (la cuota la fija ARCA contra el
+  certificado, que es uno solo). Dispararlas solas al abrir el modelo importado gastaría la cuota
+  de todos por un cliente que el usuario quizás no va a dar de alta.
+- **El 404 y el 502 no dejan sin salida**, misma regla que en las otras dos pantallas: abajo del
+  error quedan las puertas que sirven —elegir otra identidad, dar de alta con lo del PDF— y el
+  botón de cargar a mano aparece recién cuando el padrón falló.
+- **Comparar contra el PDF es parte de la respuesta.** Lo que trajo el padrón se muestra con lo
+  que decía el PDF abajo **solo cuando difieren**: si coinciden es ruido, y si no coinciden es
+  justo lo que el usuario necesita ver para saber si está mirando al mismo contribuyente antes
+  de aceptar.
+
 ### Tests de ARCA
 - **Nada sale a la red.** El SOAP se mockea en `arca.build_client`, que es el nivel más bajo
   con sentido: así se ejercita de verdad la lectura de la respuesta, que es donde están las
