@@ -45,8 +45,26 @@ entrypoint: el único que puede mandarle un `X-Forwarded-For` es un contenedor n
   free -h              # memoria
   docker system df     # cuánto de eso es basura de builds viejos
   ```
+  Medido el 2026-08-27, antes del primer deploy: **17,3 GB de disco con 11 GB libres**, **4 GB
+  de RAM** (3,0 GiB disponibles) y **2 vCPU**. Alcanza: lo más pesado del deploy es el `npm run
+  build`, que en esta SPA pica por los 500-700 MB.
+  - **No hay espacio para reclamar por el lado de LVM**: `vgs` da `VFree 0`, o sea que el LV ya
+    ocupa el volume group entero. Agrandarlo es agrandar el VHDX, y como el disco está colgado
+    del controlador SCSI, Hyper-V lo hace **con la VM prendida** — o sea sin bajar Balance360.
+    Después, adentro: `growpart /dev/sda 3`, `pvresize /dev/sda3`, `lvextend -l +100%FREE` y
+    `resize2fs`. No es urgente; lo que lo va a volver urgente es el cache de BuildKit de `uv` y
+    `npm`, que crece con cada deploy.
+  - **La VM no tenía swap** (`Swap: 0B`), y se le agregó un swapfile de 2 GB. No es que la
+    cuenta no cierre: es que sin swap el kernel no tiene margen, y cuando un build pica alto el
+    OOM killer elige a quién matar entre todo lo que hay prendido — que incluye al Postgres de
+    Balance360.
 - **El 8000 es de Balance360.** FactuMov publica el 8001. Si alguna vez hay que cambiarlo, se
   cambia en `docker-compose.prod.yml` y en el `proxy_pass` de srv-nginx.
+- **En el gateway no hay que abrir el 8001.** Ese puerto no sale nunca de la LAN: es el salto
+  de srv-nginx a la VM. La puerta desde internet es el 443 de la `.9`, que ya está reenviado
+  desde antes. Y abrirlo apuntando a la `.16` sería peor que inútil: pondría la app sin TLS, y
+  con la cookie de sesión `Secure` el síntoma es que el login parece andar y después todo
+  contesta 401 — el mismo error con disfraz que ya costó una tarde probando desde el celular.
 
 ---
 
