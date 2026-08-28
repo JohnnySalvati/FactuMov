@@ -11,9 +11,14 @@ const DISTANCE_PX = 60
  *  sección a mitad de scroll. */
 const RATIO = 1.5
 
-/** Más lento que esto no es un swipe: es un dedo apoyado que se fue moviendo. Ese caso tiene
- *  que quedar afuera porque compite con el "mantener apretado" de las tarjetas. */
-const MAX_MS = 700
+/*
+ * **No hay techo de tiempo, y es a propósito.** El primer intento medía el gesto entero contra
+ * 700 ms para separarlo del "mantener apretado", y el efecto era que había que deslizar de un
+ * saque: apoyar el dedo y recién después arrancar ya se comía el presupuesto. La separación con
+ * el long press no la da el reloj sino la distancia — `useLongPress` se cancela solo a los 10 px
+ * de movimiento, y acá recién a los 60 px hay swipe—, así que el techo no estaba distinguiendo
+ * nada. Solo le ponía un límite de velocidad a un gesto que la gente hace despacio.
+ */
 
 type Direction = 'forward' | 'back'
 
@@ -40,7 +45,7 @@ export function useSwipeNav(paths: readonly string[]) {
   const { pathname } = useLocation()
 
   // Refs y no estado: solo se leen desde los handlers, y ninguna tiene que provocar un render.
-  const start = useRef<{ x: number; y: number; t: number } | undefined>(undefined)
+  const start = useRef<{ x: number; y: number } | undefined>(undefined)
   const swiped = useRef(false)
 
   // Esto sí es estado, porque es lo que dispara la animación. El `nonce` existe para que dos
@@ -68,7 +73,7 @@ export function useSwipeNav(paths: readonly string[]) {
     onPointerDown(event: PointerEvent) {
       if (event.pointerType !== 'touch') return
       swiped.current = false
-      start.current = { x: event.clientX, y: event.clientY, t: event.timeStamp }
+      start.current = { x: event.clientX, y: event.clientY }
     },
 
     onPointerUp(event: PointerEvent) {
@@ -78,7 +83,6 @@ export function useSwipeNav(paths: readonly string[]) {
 
       const dx = event.clientX - origin.x
       const dy = event.clientY - origin.y
-      if (event.timeStamp - origin.t > MAX_MS) return
       if (Math.abs(dx) < DISTANCE_PX) return
       if (Math.abs(dx) < Math.abs(dy) * RATIO) return
 

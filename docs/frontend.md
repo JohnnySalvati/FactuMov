@@ -209,11 +209,27 @@ que es el único lugar por el que pasan las cuatro pantallas.
   regla que el `contextmenu` del "mantener apretado": un gesto invisible no puede ser el único
   camino a nada, porque el que no lo descubre se queda sin la función. Y de paso la barra es lo
   que dice en qué sección estás, que el gesto por sí solo no cuenta.
-- **Los tres filtros del gesto son los tres que hacen que no moleste.** 60 px de recorrido, el
-  trazo 1,5 veces más horizontal que vertical, y 700 ms de techo. El del medio es el que más
-  trabaja: nadie desplaza una lista en una recta vertical perfecta, y sin esa proporción un
-  scroll en diagonal cambia de sección a mitad de camino. El techo de tiempo es el que lo separa
-  del "mantener apretado", que son 500 ms con el dedo quieto.
+- **Los filtros del gesto son dos, no tres.** 60 px de recorrido y el trazo 1,5 veces más
+  horizontal que vertical. El segundo es el que más trabaja: nadie desplaza una lista en una
+  recta vertical perfecta, y sin esa proporción un scroll en diagonal cambia de sección a mitad
+  de camino.
+- **Había un tercero —700 ms de techo— y hubo que sacarlo.** Estaba para separar el swipe del
+  "mantener apretado", pero medía el gesto **entero**, desde que el dedo se apoya. El síntoma que
+  reportó Miguel fue exacto: *"si funciona, pero hay que hacerlo muy rápido; si apoyo y deslizo
+  no se mueve"* — apoyar el dedo y recién después arrancar ya se comía el presupuesto. Y la
+  separación con el long press nunca la dio el reloj sino la distancia: `useLongPress` se cancela
+  solo a los 10 px de movimiento y acá recién a los 60 px hay swipe, así que el techo no estaba
+  distinguiendo nada. Era un límite de velocidad para un gesto que la gente hace despacio.
+- **`touch-action: pan-y` en el contenedor, o el gesto directamente no existe.** El navegador
+  decide en los primeros píxeles si el desplazamiento es suyo, y con el `auto` de fábrica
+  cualquier componente vertical del trazo le alcanza para quedarse con el puntero: dispara
+  `pointercancel` y el `pointerup` que mide el swipe no llega nunca. `pan-y` reparte los ejes —el
+  vertical sigue siendo del navegador y la lista se desplaza igual—. Vale también para las
+  tarjetas, que declaran `manipulation`: el valor que cuenta es la intersección de toda la
+  cadena, y `manipulation ∩ pan-y` es `pan-y`.
+- **`.app-main` lleva `min-height`.** Con dos o tres tarjetas el contenido ocupa un cuarto de la
+  pantalla y el resto es fondo: sin altura mínima, deslizar en la mitad de abajo no toca el
+  elemento que escucha, justo en las pantallas más vacías que son las que más se recorren.
 - **`pointercancel` no es un caso de borde: es el caso normal.** En cuanto el navegador decide
   que el gesto era un desplazamiento vertical, se queda con el puntero y el `pointerup` no llega
   nunca. Sin limpiar el origen ahí, el próximo toque en cualquier lado se mide contra un punto
@@ -236,10 +252,11 @@ que es el único lugar por el que pasan las cuatro pantallas.
   por qué animar; y dos swipes seguidos en la misma dirección no volverían a animar, porque la
   clase no cambia y sin remontar la animación no se repite.
 
-**Todavía no se probó en un celular de verdad** (2026-08-28): lint y build pasan, pero un gesto
-táctil no se verifica con un mouse ni con el emulador. Lo que hay que mirar ahí es que
-desplazar la lista verticalmente no cambie de sección, y que el long press siga armando la
-tarjeta.
+**Probado en el celular el 2026-08-28**, y de ahí salieron las dos correcciones de arriba: el
+`touch-action` y el techo de tiempo. Ninguna de las dos se ve con un mouse ni con el emulador —
+la primera porque el navegador de escritorio no compite por el puntero, la segunda porque con un
+mouse el gesto sale siempre rápido. Es el ejemplo de por qué un gesto táctil no se da por
+terminado hasta tocarlo con un dedo.
 
 ## El PDF que llega de la nube (2026-08-26)
 Importar una factura elegida **desde Google Drive** en el selector de Android fallaba con «No se

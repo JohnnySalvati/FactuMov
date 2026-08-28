@@ -157,6 +157,24 @@ a {
 .app-main {
   /* La pantalla que entra arranca corrida, y sin esto asoma y estira el ancho de la página. */
   overflow-x: clip;
+  /*
+   * **Sin esto el gesto no existe.** El navegador decide en los primeros píxeles si el
+   * desplazamiento es suyo, y con el `auto` de fábrica cualquier componente vertical del trazo
+   * —y siempre hay, nadie mueve el dedo en una recta— le alcanza para quedarse con el puntero:
+   * dispara `pointercancel` y el `pointerup` que mide el swipe nunca llega.
+   *
+   * `pan-y` reparte los ejes: el vertical sigue siendo del navegador —la lista se desplaza
+   * igual— y el horizontal queda para nosotros. Vale también para las tarjetas de adentro, que
+   * declaran `manipulation`: el valor que cuenta es la intersección de toda la cadena, y
+   * `manipulation ∩ pan-y` es `pan-y`.
+   */
+  touch-action: pan-y;
+  /*
+   * Con dos o tres tarjetas el contenido ocupa un cuarto de la pantalla y el resto es fondo.
+   * Sin una altura mínima, deslizar en la mitad de abajo no toca este elemento y el gesto no
+   * llega a existir — justo en las pantallas más vacías, que son las que más se recorren.
+   */
+  min-height: 70vh;
 }
 
 .app-main-forward {
