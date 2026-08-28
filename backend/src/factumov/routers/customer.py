@@ -27,7 +27,6 @@ from factumov.schemas.customer import (
     TaxpayerLookup,
 )
 from factumov.services import padron
-from factumov.services.rate_limit import RateLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -56,15 +55,6 @@ def get_customer_or_404(customer_id: uuid.UUID, db: SessionDep, user: CurrentUse
 
 CustomerDep = Annotated[Customer, Depends(get_customer_or_404)]
 
-# La cuota del padrón la fija ARCA contra **el certificado**, que es uno solo para toda la
-# app: un usuario tecleando CUITs en un loop se la gasta para todos los demás. Por eso el
-# límite va por usuario y no por IP —el endpoint está autenticado, así que hay una clave
-# mejor que la dirección— y por eso existe aunque acá no haya nada que enumerar.
-#
-# Treinta por hora es holgado para cargar clientes a mano y corto para un script.
-_PADRON_LIMITER = RateLimiter(limit=30, window_seconds=60 * 60)
-
-
 @router.get("", response_model=list[CustomerRead])
 def list_customers(db: SessionDep, user: CurrentUserDep) -> list[Customer]:
     return customer_crud.get_all(db, user.id)
@@ -90,7 +80,10 @@ def lookup_taxpayer(tax_id: str, user: CurrentUserDep) -> TaxpayerLookup:
     La ruta lleva el CUIT en el path y no en un query param sobre `/customers/lookup` a
     secas, que colisionaría con `GET /{customer_id}` y daría un 422 por UUID inválido.
     """
-    enforce_rate_limit(_PADRON_LIMITER, str(user.id))
+    # El limitador vive en `services/padron.py` y es **el mismo** que usa el alta de una
+    # identidad fiscal: la cuota es del certificado, así que un presupuesto por router dejaría
+    # gastar el doble alternando entre las dos pantallas.
+    enforce_rate_limit(padron.LIMITER, str(user.id))
 
     try:
         taxpayer = padron.get_taxpayer(tax_id)

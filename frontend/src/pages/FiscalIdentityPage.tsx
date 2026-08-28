@@ -7,6 +7,7 @@ import {
   CondicionIva,
   type DelegationStatus,
   type FiscalIdentity,
+  type FiscalIdentityLookup,
 } from '../api/types'
 import { Notice } from '../components/Notice'
 
@@ -24,6 +25,27 @@ function formatDate(iso: string) {
     month: '2-digit',
     year: 'numeric',
   })
+}
+
+function digitsOf(value: string) {
+  return value.replace(/\D/g, '')
+}
+
+/**
+ * Los datos con los que arranca el formulario.
+ *
+ * Existe porque el alta ya no empieza vacía: empieza con lo que ARCA contestó sobre el CUIT.
+ * En la edición sale de la fila guardada, y en el alta a mano sale del CUIT que el usuario
+ * tipeó y nada más.
+ */
+interface Seed {
+  tax_id: string
+  name: string
+  /** `null` = todavía no se sabe, y el desplegable obliga a elegir. Ver `FiscalIdentityForm`. */
+  condicion_iva: CondicionIva | null
+  address: string
+  /** Lo que haya que avisar sobre lo que trajo el padrón: CUIT inactivo, condición vacía. */
+  note?: string
 }
 
 /**
@@ -54,6 +76,9 @@ function FiscalIdentityScreen({ id }: { id?: string }) {
   const [identity, setIdentity] = useState<FiscalIdentity | null>(null)
   const [loading, setLoading] = useState(id !== undefined)
   const [loadError, setLoadError] = useState<string>()
+  // Solo el alta: `undefined` mientras estamos en el paso del CUIT. La edición no lo usa — su
+  // semilla sale de la fila.
+  const [seed, setSeed] = useState<Seed>()
 
   useEffect(() => {
     if (id === undefined) return
@@ -77,6 +102,17 @@ function FiscalIdentityScreen({ id }: { id?: string }) {
     }
   }, [id])
 
+  const editingSeed: Seed | undefined =
+    identity === null
+      ? undefined
+      : {
+          tax_id: identity.tax_id,
+          name: identity.name,
+          condicion_iva: identity.condicion_iva,
+          address: identity.address ?? '',
+        }
+  const current = editingSeed ?? seed
+
   return (
     <div className="page">
       <Link className="back" to="/identidades">
@@ -89,11 +125,16 @@ function FiscalIdentityScreen({ id }: { id?: string }) {
 
       {!loading && loadError === undefined && (
         <>
-          <FiscalIdentityForm
-            editing={identity ?? undefined}
-            onCreated={() => navigate('/identidades')}
-            onUpdated={setIdentity}
-          />
+          {current === undefined ? (
+            <TaxIdStep onReady={setSeed} />
+          ) : (
+            <FiscalIdentityForm
+              editing={identity ?? undefined}
+              initial={current}
+              onCreated={() => navigate('/identidades')}
+              onUpdated={setIdentity}
+            />
+          )}
           {/* La verificación solo tiene sentido sobre una fila que ya existe: la llamada a ARCA
               va contra el CUIT guardado. */}
           {identity !== null && <DelegationCard identity={identity} onChanged={setIdentity} />}
@@ -103,33 +144,145 @@ function FiscalIdentityScreen({ id }: { id?: string }) {
   )
 }
 
+/** El aviso que corresponda sobre lo que contestó el padrón, o nada si no hay ninguno. */
+function noteFor(found: FiscalIdentityLookup): string | undefined {
+  if (!found.active) {
+    return 'Ojo: en el padrón este CUIT figura con la clave inactiva. No va a poder emitir.'
+  }
+  if (found.condicion_iva === null) {
+    return (
+      'En el padrón este CUIT no figura inscripto en IVA, ni exento, ni monotributista. ' +
+      'Elegí la condición a mano y revisala: de ella depende la letra de todo lo que emitas.'
+    )
+  }
+  return undefined
+}
+
+/**
+ * El primer paso del alta: se pide el CUIT y el resto lo trae ARCA.
+ *
+ * **El CUIT es lo único que el usuario sabe de memoria.** La razón social exacta, el domicilio
+ * fiscal tal como está registrado y —sobre todo— la condición frente al IVA son datos que se
+ * cargan mal, y de la condición depende la letra de cada comprobante: anotarse como
+ * monotributista cuando ARCA lo tiene como inscripto es emitir C donde iba A.
+ *
+ * **Y no puede ser la única puerta.** El padrón contesta 502 cuando ARCA no está —hoy mismo,
+ * mientras falte el certificado propio— y un CUIT recién inscripto puede no figurar todavía.
+ * Por eso el fallo no bloquea: dice qué pasó y ofrece cargarla a mano con el CUIT ya tipeado.
+ * Es la misma regla que hace que la importación de un PDF ilegible tenga un "empezar en
+ * blanco".
+ */
+function TaxIdStep({ onReady }: { onReady: (seed: Seed) => void }) {
+  const [taxId, setTaxId] = useState('')
+  const [error, setError] = useState<string>()
+  const [busy, setBusy] = useState(false)
+
+  const digits = digitsOf(taxId)
+
+  async function onSubmit(event: FormEvent) {
+    event.preventDefault()
+    // El `disabled` del botón cubre el click y no el Enter en el campo — mismo motivo que en
+    // la pantalla de emisión, con la diferencia de que acá lo que se duplica es una llamada a
+    // ARCA y no una factura.
+    if (busy || digits.length !== 11) return
+    setBusy(true)
+    setError(undefined)
+    try {
+      const found = await api.get<FiscalIdentityLookup>(`/fiscal-identities/lookup/${digits}`)
+      onReady({
+        tax_id: found.tax_id,
+        name: found.name,
+        condicion_iva: found.condicion_iva,
+        address: found.address ?? '',
+        note: noteFor(found),
+      })
+    } catch (caught) {
+      // 404 es "ARCA no tiene ese CUIT" y 502 es "no se pudo preguntar". Ninguno de los dos
+      // impide cargar la identidad, así que son avisos con una salida al lado.
+      setError(caught instanceof ApiError ? caught.detail : 'No se pudo consultar el padrón.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function byHand() {
+    onReady({ tax_id: digits, name: '', condicion_iva: null, address: '' })
+  }
+
+  return (
+    <form className="card stack" onSubmit={onSubmit}>
+      <div>
+        <label htmlFor="fi-lookup">CUIT</label>
+        {/* Los guiones se limpian al mandar: la columna guarda once dígitos, y hacer que el
+            usuario los tipee sin guiones es pedirle que se adapte al esquema. */}
+        <input
+          id="fi-lookup"
+          required
+          inputMode="numeric"
+          placeholder="20-12345678-9"
+          value={taxId}
+          onChange={(event) => {
+            setError(undefined)
+            setTaxId(event.target.value)
+          }}
+        />
+        <p className="muted">
+          Buscamos en el padrón de ARCA la razón social, el domicilio y la condición frente al
+          IVA. Después podés corregir lo que haga falta.
+        </p>
+      </div>
+
+      <Notice kind="error">{error}</Notice>
+
+      <button type="submit" disabled={digits.length !== 11 || busy}>
+        {busy ? 'Consultando ARCA…' : 'Buscar en ARCA'}
+      </button>
+
+      {/* Aparece recién cuando el padrón falló: ofrecerlo antes sería invitar a saltear el
+          camino que trae los datos bien. */}
+      {error !== undefined && (
+        <button type="button" className="secondary" onClick={byHand}>
+          Cargarla a mano
+        </button>
+      )}
+    </form>
+  )
+}
+
 function FiscalIdentityForm({
   editing,
+  initial,
   onCreated,
   onUpdated,
 }: {
   editing?: FiscalIdentity
+  initial: Seed
   onCreated: () => void
   onUpdated: (identity: FiscalIdentity) => void
 }) {
-  const [name, setName] = useState(editing?.name ?? '')
-  const [taxId, setTaxId] = useState(editing?.tax_id ?? '')
-  const [condicionIva, setCondicionIva] = useState<CondicionIva>(
-    editing?.condicion_iva ?? CondicionIva.INSCRIPTO,
-  )
-  const [address, setAddress] = useState(editing?.address ?? '')
+  const [name, setName] = useState(initial.name)
+  const [taxId, setTaxId] = useState(initial.tax_id)
+  // `null` es "todavía no se eligió", y el desplegable arranca en su placeholder. No hay valor
+  // por default a propósito: la condición decide la letra de cada comprobante que se emita, así
+  // que dejar puesto "responsable inscripto" cuando no se sabe es exactamente un valor
+  // plausible y equivocado — el mismo motivo por el que la letra se deduce en vez de ofrecerse.
+  const [condicionIva, setCondicionIva] = useState<CondicionIva | null>(initial.condicion_iva)
+  const [address, setAddress] = useState(initial.address)
   const [error, setError] = useState<string>()
+  const [note, setNote] = useState(initial.note)
+  const [looking, setLooking] = useState(false)
   const [saved, setSaved] = useState(false)
   const [busy, setBusy] = useState(false)
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault()
+    if (busy || condicionIva === null) return
     setBusy(true)
     setError(undefined)
     setSaved(false)
     const body = {
       name,
-      tax_id: taxId.replace(/\D/g, ''),
+      tax_id: digitsOf(taxId),
       condicion_iva: condicionIva,
       // Cadena vacía y "sin dato" no son lo mismo para una columna que admite NULL: mandar
       // `""` guardaría un domicilio vacío en vez de ninguno.
@@ -152,6 +305,34 @@ function FiscalIdentityForm({
     }
   }
 
+  /**
+   * Vuelve a preguntarle al padrón y **pisa el formulario**, sin guardar nada.
+   *
+   * Sirve para el CUIT que se tipeó mal en el paso anterior y para la razón social o el
+   * domicilio que cambiaron desde que se cargó la identidad. Que quede editable es el punto: el
+   * backend devuelve una propuesta, no un alta.
+   */
+  async function lookup() {
+    setLooking(true)
+    setError(undefined)
+    setNote(undefined)
+    setSaved(false)
+    try {
+      const found = await api.get<FiscalIdentityLookup>(
+        `/fiscal-identities/lookup/${digitsOf(taxId)}`,
+      )
+      setTaxId(found.tax_id)
+      setName(found.name)
+      setCondicionIva(found.condicion_iva)
+      setAddress(found.address ?? '')
+      setNote(noteFor(found) ?? 'Datos traídos del padrón. Revisalos antes de guardar.')
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.detail : 'No se pudo consultar el padrón.')
+    } finally {
+      setLooking(false)
+    }
+  }
+
   /** Cualquier cambio invalida el "Guardado": dejarlo puesto es la forma más barata de que
    *  alguien salga de la pantalla creyendo que guardó lo que acaba de tipear. */
   function edited() {
@@ -160,6 +341,36 @@ function FiscalIdentityForm({
 
   return (
     <form className="card stack" onSubmit={onSubmit}>
+      <div className="row">
+        <div>
+          <label htmlFor="fi-tax-id">CUIT</label>
+          <input
+            id="fi-tax-id"
+            required
+            inputMode="numeric"
+            placeholder="20-12345678-9"
+            value={taxId}
+            onChange={(event) => {
+              edited()
+              setTaxId(event.target.value)
+            }}
+          />
+        </div>
+        <button
+          type="button"
+          className="secondary"
+          onClick={lookup}
+          disabled={digitsOf(taxId).length !== 11 || looking}
+          title="Trae razón social, domicilio y condición IVA del padrón de ARCA"
+        >
+          {looking ? 'Consultando…' : 'Traer del padrón'}
+        </button>
+      </div>
+
+      {note !== undefined && (
+        <Notice kind={note.startsWith('Datos traídos') ? 'ok' : 'warn'}>{note}</Notice>
+      )}
+
       <div>
         <label htmlFor="fi-name">Nombre o razón social</label>
         <input
@@ -173,40 +384,31 @@ function FiscalIdentityForm({
         />
       </div>
 
-      <div className="row">
-        <div>
-          <label htmlFor="fi-tax-id">CUIT</label>
-          {/* Los guiones se limpian al mandar: la columna guarda once dígitos, y hacer que el
-              usuario los tipee sin guiones es pedirle que se adapte al esquema. */}
-          <input
-            id="fi-tax-id"
-            required
-            inputMode="numeric"
-            placeholder="20-12345678-9"
-            value={taxId}
-            onChange={(event) => {
-              edited()
-              setTaxId(event.target.value)
-            }}
-          />
-        </div>
-        <div>
-          <label htmlFor="fi-condicion">Condición frente al IVA</label>
-          <select
-            id="fi-condicion"
-            value={condicionIva}
-            onChange={(event) => {
-              edited()
-              setCondicionIva(Number(event.target.value) as CondicionIva)
-            }}
-          >
-            {EMISOR_CONDICIONES.map((value) => (
-              <option key={value} value={value}>
-                {CONDICION_IVA_LABELS[value]}
-              </option>
-            ))}
-          </select>
-        </div>
+      <div>
+        <label htmlFor="fi-condicion">Condición frente al IVA</label>
+        <select
+          id="fi-condicion"
+          required
+          value={condicionIva ?? ''}
+          onChange={(event) => {
+            edited()
+            setCondicionIva(Number(event.target.value) as CondicionIva)
+          }}
+        >
+          {/* El placeholder existe solo mientras no se eligió, y sale de la lista apenas hay
+              valor: así el desplegable no ofrece volver a "sin elegir", que no es un estado
+              que se pueda guardar. */}
+          {condicionIva === null && (
+            <option value="" disabled>
+              Elegí una…
+            </option>
+          )}
+          {EMISOR_CONDICIONES.map((value) => (
+            <option key={value} value={value}>
+              {CONDICION_IVA_LABELS[value]}
+            </option>
+          ))}
+        </select>
       </div>
 
       <div>

@@ -1,4 +1,4 @@
-"""Consulta al padrón de ARCA para completar un cliente a partir del CUIT.
+"""Consulta al padrón de ARCA para completar un cliente o una identidad fiscal desde el CUIT.
 
 Port del `services/padron.py` de Balance360. Trae razón social, domicilio fiscal y condición
 frente al IVA, para no tipearlos a mano ni equivocarse. La firma y la forma de la respuesta
@@ -47,8 +47,25 @@ from zeep.exceptions import Fault
 from factumov.enums import CondicionIva
 from factumov.exceptions import ArcaError, PadronError
 from factumov.services import arca
+from factumov.services.rate_limit import RateLimiter
 
 SERVICE = "ws_sr_constancia_inscripcion"
+
+# La cuota del padrón la fija ARCA contra **el certificado**, que es uno solo para toda la
+# app: un usuario tecleando CUITs en un loop se la gasta a todos los demás. Por eso el límite
+# va por usuario y no por IP —los endpoints están autenticados, así que hay una clave mejor
+# que la dirección— y por eso existe aunque acá no haya nada que enumerar.
+#
+# **Vive acá y no en un router porque el presupuesto es uno solo.** Lo consultan el alta de un
+# cliente y la de una identidad fiscal, y son la misma llamada al mismo servicio contra el
+# mismo certificado: con un limitador por router, alternar entre las dos pantallas daría el
+# doble de llamadas, que es el mismo argumento por el que `verify-delegation` y
+# `claim-delegation` comparten el suyo. Ponerlo en uno de los dos routers obligaría al otro a
+# importar de un router hermano, que es lo que el proyecto evita desde que `get_current_user`
+# se mudó a `dependencies.py`.
+#
+# Treinta por hora es holgado para cargar a mano y corto para un script.
+LIMITER = RateLimiter(limit=30, window_seconds=60 * 60)
 
 WSDL_URL = {
     "homo": "https://awshomo.afip.gov.ar/sr-padron/webservices/personaServiceA5?wsdl",
@@ -60,10 +77,10 @@ WSDL_URL = {
 IVA_INSCRIPTO = 30
 IVA_EXENTO = 32
 
-# El domicilio va a `Customer.address`, que es String(200).
+# El domicilio va a `Customer.address` o a `FiscalIdentity.address`, las dos String(200).
 ADDRESS_MAX_LENGTH = 200
 
-# Y la razón social a `Customer.name`, que es String(150). El padrón no promete un techo.
+# Y la razón social a `.name`, String(150) en las dos tablas. El padrón no promete un techo.
 NAME_MAX_LENGTH = 150
 
 

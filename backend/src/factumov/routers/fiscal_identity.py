@@ -11,6 +11,7 @@ from factumov.dependencies import (
     enforce_rate_limit,
     get_current_user,
 )
+from factumov.enums import CondicionIva
 from factumov.exceptions import (
     ArcaError,
     DuplicateError,
@@ -18,15 +19,17 @@ from factumov.exceptions import (
     DuplicateFiscalIdentityTaxIdError,
     FiscalIdentityInUseError,
     InUseError,
+    PadronError,
 )
 from factumov.models.fiscal_identity import FiscalIdentity
 from factumov.schemas.fiscal_identity import (
     DelegationStatus,
     FiscalIdentityCreate,
+    FiscalIdentityLookup,
     FiscalIdentityRead,
     FiscalIdentityUpdate,
 )
-from factumov.services import arca, notifications, wsfe
+from factumov.services import arca, notifications, padron, wsfe
 from factumov.services.rate_limit import RateLimiter
 from factumov.services.wsfe import DelegationCheck
 
@@ -66,6 +69,54 @@ _VERIFY_DELEGATION_LIMITER = RateLimiter(limit=30, window_seconds=60 * 60)
 @router.get("", response_model=list[FiscalIdentityRead])
 def list_fiscal_identities(db: SessionDep, user: CurrentUserDep) -> list[FiscalIdentity]:
     return fiscal_identity_crud.get_all(db, user.id)
+
+
+@router.get("/lookup/{tax_id}", response_model=FiscalIdentityLookup)
+def lookup_fiscal_identity(tax_id: str, user: CurrentUserDep) -> FiscalIdentityLookup:
+    """Los datos de un CUIT según el padrón de ARCA, para sembrar el alta de una identidad.
+
+    **Es el primer paso del alta y no un extra.** Al usuario se le pide el CUIT, que es lo
+    único que sabe de memoria, y el resto —razón social, domicilio, condición frente al IVA—
+    lo trae ARCA. La condición es la que más se gana: es un dato fiscal que el usuario suele
+    saber decir mal, y de ella depende la letra de todo lo que emita.
+
+    **No escribe nada**, igual que `GET /customers/lookup/{tax_id}` y que la importación de
+    PDF: devuelve una propuesta que el usuario revisa y confirma con `POST /fiscal-identities`.
+    Consultar dos veces el mismo CUIT no puede dejar dos identidades.
+
+    **404** cuando ARCA no tiene datos de ese CUIT o cuando lo que llegó no es un CUIT; **502**
+    cuando no se pudo preguntar. La pantalla no queda sin salida con ninguno de los dos: ofrece
+    cargar los datos a mano, que es la misma regla que hace que la importación de un PDF
+    ilegible tenga un "empezar en blanco".
+
+    No hace falta que el usuario haya delegado nada: el padrón se consulta con FactuMov como
+    `cuitRepresentada`. La delegación hace falta para *emitir*, no para consultar.
+    """
+    enforce_rate_limit(padron.LIMITER, str(user.id))
+
+    try:
+        taxpayer = padron.get_taxpayer(tax_id)
+    except PadronError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ArcaError:
+        # Ver `_ask_arca`: sin este log, un 502 no deja ningún rastro de su causa.
+        logger.exception("Falló la consulta al padrón del CUIT %s", tax_id)
+        raise HTTPException(
+            status_code=502,
+            detail="No se pudo consultar el padrón de ARCA. Probá de nuevo, o cargá los "
+            "datos a mano.",
+        )
+
+    return FiscalIdentityLookup(
+        tax_id=taxpayer.tax_id,
+        name=taxpayer.name,
+        # Consumidor final no es una condición que un emisor pueda tener — ver el schema.
+        condicion_iva=(
+            None if taxpayer.condicion_iva is CondicionIva.FINAL else taxpayer.condicion_iva
+        ),
+        address=taxpayer.address,
+        active=taxpayer.active,
+    )
 
 
 @router.get("/{fiscal_identity_id}", response_model=FiscalIdentityRead)

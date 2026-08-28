@@ -1,4 +1,4 @@
-"""Consulta al padrón de ARCA: `services/padron.py` y `GET /customers/lookup/{tax_id}`.
+"""Consulta al padrón de ARCA: `services/padron.py` y los dos endpoints que lo usan.
 
 Lo que hay que probar acá no es el SOAP sino la **traducción**: el padrón contesta en su
 vocabulario —`razonSocial`, `domicilioFiscal`, `datosMonotributo`, `idImpuesto`— y el editor
@@ -278,10 +278,106 @@ def test_lookup_does_not_shadow_get_customer(client, customer, padron_returns):
 
 def test_lookup_is_rate_limited(client, padron_returns):
     """La cuota del padrón es del certificado, o sea compartida por todos los usuarios."""
-    from factumov.routers.customer import _PADRON_LIMITER
-
     padron_returns(response())
-    for _ in range(_PADRON_LIMITER.limit):
+    for _ in range(padron.LIMITER.limit):
         assert client.get("/customers/lookup/30712345678").status_code == 200
 
     assert client.get("/customers/lookup/30712345678").status_code == 429
+
+
+# --- El alta de una identidad fiscal arranca por el CUIT ------------------------------
+
+
+def test_identity_lookup_returns_a_prefilled_identity(client, padron_returns):
+    padron_returns(response(domicilio=domicilio(cp="1704"), impuestos=[INSCRIPTO]))
+
+    body = client.get("/fiscal-identities/lookup/30712345678").json()
+
+    assert body == {
+        "tax_id": "30712345678",
+        "name": "ACME SA",
+        "condicion_iva": CondicionIva.INSCRIPTO.value,
+        "address": "Av. Siempreviva 742, Springfield, CP 1704",
+        "active": True,
+    }
+
+
+def test_identity_lookup_leaves_condicion_empty_for_a_consumidor_final(client, padron_returns):
+    """Consumidor final no es una condición que un emisor pueda tener.
+
+    `FiscalIdentityCreate` la rechaza con 422 y el desplegable de la pantalla ni la ofrece, así
+    que proponerla sería proponer un valor que el guardado va a rechazar. El resto de los datos
+    viaja igual: el CUIT se puede cargar, lo que falta es que el usuario elija la condición.
+    """
+    padron_returns(response(impuestos=[]))
+
+    body = client.get("/fiscal-identities/lookup/30712345678").json()
+
+    assert body["condicion_iva"] is None
+    assert body["name"] == "ACME SA"
+
+
+def test_identity_lookup_passes_monotributo_through(client, padron_returns):
+    """El monotributista sí puede emitir, así que su condición viaja tal cual."""
+    padron_returns(response(monotributo=True))
+
+    body = client.get("/fiscal-identities/lookup/30712345678").json()
+
+    assert body["condicion_iva"] == CondicionIva.MONOTRIBUTO.value
+
+
+def test_identity_lookup_creates_no_identity(client, db, padron_returns):
+    """Es una propuesta, no un alta — igual que el lookup de clientes."""
+    from factumov.models import FiscalIdentity
+
+    padron_returns(response())
+    before = db.query(FiscalIdentity).count()
+
+    client.get("/fiscal-identities/lookup/30712345678")
+
+    assert db.query(FiscalIdentity).count() == before
+
+
+def test_identity_lookup_of_an_unknown_cuit_is_404(client, padron_returns):
+    padron_returns(Fault("No existe persona con ese Id"))
+
+    assert client.get("/fiscal-identities/lookup/30712345678").status_code == 404
+
+
+def test_identity_lookup_is_502_when_arca_cannot_be_reached(client, padron_returns):
+    padron_returns(RequestsConnectionError("sin ruta al host"))
+
+    response_ = client.get("/fiscal-identities/lookup/30712345678")
+
+    assert response_.status_code == 502
+    assert "sin ruta al host" not in response_.json()["detail"]
+
+
+def test_identity_lookup_needs_a_session(anonymous_client, padron_returns):
+    padron_returns(response())
+
+    assert anonymous_client.get("/fiscal-identities/lookup/30712345678").status_code == 401
+
+
+def test_identity_lookup_does_not_shadow_get_fiscal_identity(
+    client, fiscal_identity, padron_returns
+):
+    """`/lookup/{tax_id}` y `/{id}` conviven: distinta cantidad de segmentos."""
+    padron_returns(response())
+
+    assert client.get(f"/fiscal-identities/{fiscal_identity.id}").status_code == 200
+
+
+def test_both_lookups_share_one_budget(client, padron_returns):
+    """Es la razón por la que el limitador vive en el servicio y no en un router.
+
+    La cuota la fija ARCA contra el certificado, que es uno solo para toda la app. Con un
+    presupuesto por router, alternar entre el alta de un cliente y la de una identidad daría el
+    doble de llamadas — el mismo argumento por el que `verify-delegation` y `claim-delegation`
+    comparten el suyo.
+    """
+    padron_returns(response())
+    for _ in range(padron.LIMITER.limit):
+        assert client.get("/customers/lookup/30712345678").status_code == 200
+
+    assert client.get("/fiscal-identities/lookup/30712345678").status_code == 429

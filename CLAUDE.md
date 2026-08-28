@@ -1113,6 +1113,48 @@ en el cwd de un contenedor no coordina eso, y encima no sobrevive al deploy.
   que hay una clave mejor que la dirección; y sobre todo la cuota la fija ARCA contra **el
   certificado**, que es uno solo para toda la app: un usuario en loop se la gasta a todos.
 
+### El alta de una identidad fiscal empieza por el CUIT (2026-08-28)
+Pedido por Miguel. `GET /fiscal-identities/lookup/{tax_id}` y la pantalla `/identidades/nueva`
+partida en dos pasos: se pide el CUIT, y la razón social, el domicilio y la condición frente al
+IVA los trae el padrón de ARCA. Es el mismo servicio que ya usaba el alta de un cliente
+(`services/padron.py`), del otro lado del mostrador.
+
+- **El CUIT es lo único que el usuario sabe de memoria.** La razón social exacta y el domicilio
+  fiscal tal como están registrados se tipean mal, y la condición frente al IVA se dice mal: de
+  ella depende **la letra de todo lo que emita**. Anotarse monotributista cuando ARCA lo tiene
+  como inscripto es emitir C donde iba A, y eso no se arregla después — se arregla con una nota
+  de crédito, que FactuMov no emite.
+- **No puede ser la única puerta**, misma regla que el "Empezar en blanco" de la importación de
+  PDF: el padrón contesta 502 cuando ARCA no está —hoy mismo, mientras falte el certificado
+  propio— y un CUIT recién inscripto puede no figurar. El fallo muestra qué pasó y ofrece
+  "Cargarla a mano" con el CUIT ya tipeado. El botón de cargar a mano **aparece recién cuando
+  el padrón falló**: ofrecerlo antes sería invitar a saltear el camino que trae los datos bien.
+- **La condición frente al IVA ya no tiene valor por default.** El desplegable arranca en un
+  placeholder y el `required` no deja guardar sin elegir. Antes venía con "Responsable
+  inscripto" puesto, que es el mismo error que la app rechaza en todos lados: un valor plausible
+  y equivocado en el campo del que cuelga la letra del comprobante.
+- **Consumidor final vuelve como `null` y no como `CondicionIva.FINAL`.** Un emisor no puede ser
+  consumidor final —`FiscalIdentityCreate` lo rechaza con 422 y el desplegable ni lo ofrece— así
+  que devolverlo sería proponer un valor que el guardado va a rechazar, y la pantalla tendría
+  que aprender a descartarlo. La decisión se toma en el borde: el CUIT que el padrón no muestra
+  como emisor vuelve con la condición vacía y un aviso que dice por qué.
+- **`iibb` y `start_date` no vienen del padrón, y no es un olvido.** Ingresos Brutos es
+  provincial —Rentas, ARBA, AGIP— y ARCA no lo tiene. La fecha de inicio de actividades tampoco
+  está como tal en la respuesta del A5: lo más parecido son los períodos de cada actividad, que
+  dicen desde cuándo está registrada *esa* actividad. Deducirla de ahí daría una fecha creíble y
+  equivocada, impresa en un comprobante fiscal.
+- **El limitador se mudó de `routers/customer.py` a `services/padron.py`.** El presupuesto es
+  uno solo: las dos pantallas hacen la misma llamada al mismo servicio contra el mismo
+  certificado, así que un limitador por router dejaría gastar el doble alternando entre ellas —
+  el mismo argumento por el que `verify-delegation` y `claim-delegation` comparten el suyo.
+  Dejarlo en uno de los dos routers habría obligado al otro a importar de un router hermano, que
+  es lo que el proyecto evita desde que `get_current_user` se mudó a `dependencies.py`. Hay un
+  test que gasta la cuota por una pantalla y verifica que la otra recibe el 429.
+- **El formulario conserva un botón "Traer del padrón" al lado del CUIT**, como el de clientes.
+  Sirve para el CUIT que se tipeó mal en el primer paso y para la razón social o el domicilio
+  que cambiaron desde que se cargó la identidad — que es la única forma que hay de enterarse,
+  porque ARCA no avisa.
+
 ### Tests de ARCA
 - **Nada sale a la red.** El SOAP se mockea en `arca.build_client`, que es el nivel más bajo
   con sentido: así se ejercita de verdad la lectura de la respuesta, que es donde están las

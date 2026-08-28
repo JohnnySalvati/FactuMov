@@ -90,6 +90,28 @@ export interface FiscalIdentityCreate {
   start_date?: string | null
 }
 
+/**
+ * Lo que el padrón de ARCA sabe de un CUIT, para sembrar el alta de una identidad fiscal.
+ *
+ * Es una propuesta: el backend no guardó nada. `iibb` y `start_date` no vienen —Ingresos
+ * Brutos es provincial y ARCA no lo tiene, y la fecha de inicio de actividades no está como
+ * tal en la respuesta— así que esos dos siguen siendo del usuario.
+ */
+export interface FiscalIdentityLookup {
+  tax_id: string
+  name: string
+  /**
+   * `null` cuando el padrón no muestra al CUIT ni inscripto, ni exento, ni monotributista.
+   *
+   * Consumidor final no es una condición que un emisor pueda tener: el backend la rechaza con
+   * 422 y el desplegable ni la ofrece, así que en vez de proponer un valor imposible viene
+   * vacío y lo elige el usuario.
+   */
+  condicion_iva: CondicionIva | null
+  address: string | null
+  active: boolean
+}
+
 export interface DelegationStatus {
   granted: boolean
   message: string | null
