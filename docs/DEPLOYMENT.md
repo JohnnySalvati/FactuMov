@@ -350,16 +350,75 @@ MSYS_NO_PATHCONV=1 openssl req -new -key factumov.key -out factumov.csr \
 ```
 
 **Lo que falta son los dos pasos del portal**, que necesitan Clave Fiscal y no se pueden
-automatizar:
+automatizar. Son siempre los mismos dos, en los dos entornos, y conviene tenerlos separados en
+la cabeza porque el segundo es el que se olvida:
 
-3. En el portal de ARCA con Clave Fiscal del `20182810674`, en el servicio de
-   **administración de certificados digitales**, dar de alta un alias nuevo (`factumov`),
-   subir el `.csr` y descargar el `.crt` que devuelve, con ese nombre y en `certs/`. En
-   homologación el equivalente es **WSASS**, con el alias `factumov-homo`.
-4. En **Administrador de Relaciones**, asociar ese alias nuevo a los dos servicios que la app
-   usa: **WSFE** (`wsfe`) y **constancia de inscripción** (`ws_sr_constancia_inscripcion`).
-   Sin el segundo, el que falla no es la consulta al padrón sino WSAA, con "Computador no
-   autorizado a acceder al servicio".
+- **Emitir el certificado**: se sube el `.csr` y ARCA devuelve el `.crt`.
+- **Habilitarle los servicios a ese certificado**: `wsfe` y `ws_sr_constancia_inscripcion`.
+  Un certificado emitido y no habilitado **no falla al leerse**: falla en WSAA, con
+  "Computador no autorizado a acceder al servicio", que no nombra al servicio que falta.
+
+**Primero homologación y después producción**, y no por prolijidad: es el único orden en el
+que la verificación pendiente —la de más abajo— se puede hacer antes de depender de ella. En
+homo el trámite es gratis, instantáneo y se puede rehacer; en prod hay que pedir el servicio
+por Clave Fiscal y esperar.
+
+#### A. Homologación — WSASS
+
+WSASS es el portal de autogestión de homologación: emite el certificado en el momento y
+también habilita los servicios, así que los dos pasos se hacen en el mismo lugar.
+
+1. Entrar con Clave Fiscal del `20182810674` a **WSASS**
+   (`https://wsass-homo.afip.gob.ar/wsass/portal/main.aspx`). Si el servicio no aparece en la
+   lista de la Clave Fiscal, se agrega desde **Administrador de Relaciones** → *Adherir
+   servicio* → AFIP → *WSASS - Autogestión Certificados Homologación*.
+2. **Crear DN y solicitar nuevo certificado**: pegar el contenido de `certs/factumov-homo.csr`
+   —el bloque `BEGIN/END CERTIFICATE REQUEST` entero, incluidas esas dos líneas— y confirmar.
+   Devuelve el certificado en pantalla.
+3. Copiarlo a `certs/factumov-homo.crt`, en PEM. El `.env` de desarrollo ya lo nombra, así que
+   no hay nada más que configurar.
+4. **Adherir Certificado a WSN**, una vez por servicio: el DN recién creado con `wsfe`, y otra
+   vez con `ws_sr_constancia_inscripcion`.
+
+#### B. Producción — Administración de Certificados Digitales
+
+1. Entrar con Clave Fiscal del `20182810674` al portal de ARCA, servicio **Administración de
+   Certificados Digitales**. Si no está en la lista, se adhiere desde **Administrador de
+   Relaciones** → *Adherir servicio* → AFIP → *Servicios Interactivos*.
+2. **Agregar alias**: nombre `factumov`, y subir el archivo `certs/factumov.csr`.
+3. Descargar el `.crt` que queda asociado a ese alias y guardarlo como `certs/factumov.crt`.
+4. En **Administrador de Relaciones** → **Nueva Relación**, dos veces, una por servicio:
+   - *Servicio* → **Buscar** → AFIP → **WebServices** → *Facturación Electrónica* (`wsfe`).
+   - *Representante* → **Buscar** → elegir el **computador** `factumov`, que aparece en la
+     lista recién después del paso 2.
+   - Confirmar, y repetir todo con el servicio de **constancia de inscripción**
+     (`ws_sr_constancia_inscripcion`).
+
+**Las delegaciones que ya nos otorgaron siguen valiendo.** Son de CUIT a CUIT, no al
+certificado: lo que hay que rehacer por certificado nuevo es solo el paso 4, que es la relación
+entre *nuestro* CUIT y los dos servicios.
+
+**Los nombres de los menús se mueven** —ARCA los renombró varias veces— pero las dos cosas que
+hay que conseguir no: un `.crt` a partir del `.csr`, y ese certificado habilitado para los dos
+servicios.
+
+#### C. Probar que quedó bien
+
+Con `factumov-homo.crt` en `certs/`, desde `backend/` y con este equipo en `homo`:
+
+```powershell
+uv run python -c @'
+from factumov.services import arca, padron
+print(arca.get_delegate_tax_id())            # 20182810674, leido del certificado
+print(padron.get_taxpayer("30500010912"))    # INSCRIPTO — ejercita WSAA + el padron
+'@
+```
+
+El primero solo lee el archivo: si contesta, el `.crt` y la `.key` son un par válido. El
+segundo sale a ARCA de verdad, así que es el que prueba los dos servicios del paso 4 — si
+falla con "Computador no autorizado", lo que falta es la habilitación y no el certificado.
+Después, el circuito completo se prueba desde la app, verificando la delegación de una
+identidad fiscal.
 
 **La verificación pendiente se hace con el par de homologación**, y es la premisa entera de
 esta salida: con `factumov-homo.crt` puesto, pedir un TA desde FactuMov mientras Balance360
