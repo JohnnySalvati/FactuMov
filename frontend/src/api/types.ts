@@ -151,6 +151,22 @@ export interface DelegationStatus {
   delegate_tax_id: string | null
 }
 
+/**
+ * La respuesta del link que el mail le manda al operador. Espejo de `DelegationAcceptance`.
+ *
+ * No es `DelegationStatus` porque no le habla al dueño del CUIT sino a quien atiende los de
+ * todos: por eso trae `tax_id` y `identity_name` —hay que decirle de cuál se está hablando— y
+ * no trae las fechas ni el CUIT a autorizar, que servían para refrescar una pantalla que acá
+ * no existe.
+ */
+export interface DelegationAcceptance {
+  granted: boolean
+  tax_id: string
+  identity_name: string
+  /** El texto con el que ARCA dijo que no. `null` cuando `granted`. */
+  message: string | null
+}
+
 /** Un punto de venta habilitado en ARCA. Espejo de `PointOfSaleRead`. */
 export interface PointOfSale {
   number: number

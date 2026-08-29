@@ -1,8 +1,12 @@
-"""Acceso a datos de `fiscal_identities`, siempre scopeado al usuario.
+"""Acceso a datos de `fiscal_identities`, scopeado al usuario salvo una excepción.
 
 Mismo criterio que `crud/customer.py`: el filtro va en la query, no en una comparación
 posterior, para que la identidad fiscal de otro usuario no exista desde el punto de vista
 del que consulta.
+
+La excepción es `get_by_claim_token_hash`, que busca por el token del link que le llega al
+operador. Ahí no hay sesión de la cual scopear y lo que autoriza es el token — está explicado
+en su docstring.
 """
 
 import uuid
@@ -96,11 +100,19 @@ def mark_delegation_verified(db: Session, fiscal_identity: FiscalIdentity) -> Fi
     """
     fiscal_identity.delegation_verified_at = func.now()
     fiscal_identity.delegation_claimed_at = None
+    # Y con el aviso se va su link. El del mail al operador existe para acortar *esta* espera:
+    # una vez contestada, dejarlo vivo sería una credencial sin dueño, sin vencimiento y capaz
+    # de gastar cuota de ARCA —que es del certificado y por lo tanto de todos los usuarios—
+    # cada vez que alguien la apriete. La borra este lugar y no el endpoint porque las dos
+    # formas de verificar, el click y el barrido, pasan por acá.
+    fiscal_identity.delegation_claim_token_hash = None
     db_flush(db, exception_map)
     return fiscal_identity
 
 
-def mark_delegation_claimed(db: Session, fiscal_identity: FiscalIdentity) -> FiscalIdentity:
+def mark_delegation_claimed(
+    db: Session, fiscal_identity: FiscalIdentity, token_hash: str
+) -> FiscalIdentity:
     """Registra que el usuario dice haber otorgado la delegación, con ARCA diciendo que no.
 
     Es lo único que separa "todavía no delegó" de "delegó y falta que FactuMov acepte la
@@ -110,9 +122,19 @@ def mark_delegation_claimed(db: Session, fiscal_identity: FiscalIdentity) -> Fis
     No se pisa si ya había uno. La fecha que importa es la del **primer** aviso: es la que
     mide cuánto hace que esa persona está esperando, y es la que acota el reenvío del mail al
     operador. Pisarla con cada click convertiría un botón en un generador de mails.
+
+    `token_hash` es el SHA-256 del token que va en el link del mail al operador. Lo genera el
+    router y no este módulo, igual que el de confirmación de mail: el token crudo tiene que
+    llegar al mail y no a la base, así que quien lo emite es quien manda el mail.
     """
     if fiscal_identity.delegation_claimed_at is None:
         fiscal_identity.delegation_claimed_at = func.now()
+        # El token del link viaja con el aviso y se guarda en el mismo `if`, que es lo que hace
+        # que no puedan desincronizarse: el link se emite exactamente cuando se emite el mail
+        # que lo lleva, o sea una sola vez. Guardarlo afuera del `if` pisaría el token del mail
+        # que el operador quizás tiene abierto, y ese link dejaría de andar sin que nada lo
+        # explique — el mismo problema que `email_confirmations` resuelve con filas.
+        fiscal_identity.delegation_claim_token_hash = token_hash
         db_flush(db, exception_map)
     return fiscal_identity
 
@@ -132,3 +154,27 @@ def clear_delegation_verified(db: Session, fiscal_identity: FiscalIdentity) -> F
     fiscal_identity.delegation_verified_at = None
     db_flush(db, exception_map)
     return fiscal_identity
+
+
+def get_by_claim_token_hash(db: Session, token_hash: str) -> FiscalIdentity | None:
+    """La identidad que espera aceptación, buscada por el token del link del mail al operador.
+
+    **La única lectura de este módulo sin `user_id`, y es a propósito.** Todas las demás
+    scopean porque quien consulta es un usuario logueado y la identidad de otro no tiene que
+    existir para él. Acá no hay sesión: quien llega es el operador, que no es el dueño de la
+    fila y no podría serlo nunca. Lo que autoriza el pedido es el token, y por eso el token
+    tiene los 256 bits que tiene.
+
+    Pide `delegation_claim_token_hash` no nulo además de comparar, para que un `token_hash`
+    vacío o `None` que se colara no pudiera enganchar a la primera fila sin token.
+    """
+    return (
+        db.execute(
+            select(FiscalIdentity).where(
+                FiscalIdentity.delegation_claim_token_hash.is_not(None),
+                FiscalIdentity.delegation_claim_token_hash == token_hash,
+            )
+        )
+        .scalars()
+        .first()
+    )

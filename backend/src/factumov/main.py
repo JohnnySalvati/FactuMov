@@ -110,5 +110,8 @@ app.include_router(balance360.router)
 app.include_router(customer.router)
 app.include_router(health.router)
 app.include_router(fiscal_identity.router)
+# El segundo router de ese módulo, y el único de la app sin sesión además de `auth`: es donde
+# aterriza el link que el mail le manda al operador. Ver `confirm_delegation_accepted`.
+app.include_router(fiscal_identity.delegation_router)
 app.include_router(invoice.router)
 app.include_router(invoice_template.router)

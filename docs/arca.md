@@ -452,8 +452,11 @@ delegué" con ARCA todavía diciendo que no.
 - **Comparte el presupuesto de ARCA con `verify-delegation`**, que subió de 10 a 30 por hora
   porque ahora la pantalla verifica sola al abrir. La cuota es del certificado, o sea de todos
   los usuarios: presupuestos separados por endpoint dejarían gastar el doble alternando.
-- Es un flag `claim` y no dos funciones porque es exactamente la única diferencia entre los dos
-  endpoints: los dos preguntan lo mismo y difieren en qué escriben cuando la respuesta es no.
+- Es un parámetro y no dos funciones porque es exactamente la única diferencia entre los
+  endpoints: todos preguntan lo mismo y difieren en qué escriben cuando la respuesta es no. Desde
+  el 2026-08-29 ese parámetro es `claim_token_hash: str | None` y no un `bool`: el aviso y el
+  token del link del operador se emiten juntos, y como un `bool` más un hash aparte serían el
+  mismo dato dicho dos veces, podrían contradecirse. No hay aviso sin link.
 
 ### El aviso al operador
 `OPERATOR_EMAIL` en `EmailSettings`, y `notifications.send_delegation_pending_email`.
@@ -463,14 +466,16 @@ delegué" con ARCA todavía diciendo que no.
   sola de que alguien la está esperando. El click del usuario es la única evidencia que va a
   existir nunca, y desperdiciarla deja al usuario esperando a que el operador mire la lista de
   pendientes de ARCA por casualidad.
-- **Una sola vez por identidad**, colgado del primer aviso.
+- **Una sola vez por identidad**, colgado del primer aviso. Esa unicidad es también la del
+  link que lleva adentro: hay un solo token por identidad justamente porque hay un solo mail.
+- **Termina con un link** (2026-08-29) — ver abajo.
 - **Opcional y sin default.** Es el único destinatario que no sale de una fila de `users`, y una
   instalación sin operador tiene que poder arrancar. Sin él, el aviso queda en el log — misma
   política que `send_email_best_effort`, un escalón antes.
 
-### El rechequeo, en tres lugares
+### El rechequeo, en cuatro lugares
 Nadie nos avisa cuando la delegación empieza a funcionar, así que lo único que se puede hacer es
-volver a preguntar. Se pregunta en tres momentos y por motivos distintos:
+volver a preguntar. Se pregunta en cuatro momentos y por motivos distintos:
 
 - **Al abrir la identidad en la pantalla**, una vez por montaje (`useRef`, contra el doble
   montaje de StrictMode). Solo si no está verificada **o si la verificación tiene más de una
@@ -488,6 +493,8 @@ volver a preguntar. Se pregunta en tres momentos y por motivos distintos:
   verificar. Lo que se espera es que una persona lea un mail y haga un click, o sea tiempo
   humano: 15 minutos deja la espera del usuario en unos 7 de promedio y cuesta 4 llamadas por
   hora **por identidad pendiente**, que en el caso normal son cero.
+- **Cuando el operador entra al link de su mail** (2026-08-29), sobre esa identidad y en el acto
+  — ver *El link del mail al operador*.
 
 Los tres comparten el criterio y el freno, que viven en `api/delegation.ts` del lado del
 cliente: `needsChecking` decide si el dato guardado ya sirve, y `checkedRecently` pone un piso de
@@ -504,14 +511,6 @@ dice que todavía no": la pantalla se quedaba en «Falta un paso nuestro» afirm
 mirando, justo cuando no habíamos podido mirar. Ahora queda una línea en gris que dice que no se
 pudo consultar, y el 429 se distingue del resto porque tiene otra salida (esperar) que el usuario
 puede tomar.
-
-**Descartado: un link en el mail del operador para avisarle al sistema que ya aceptó.** Era la
-idea original y tiene dos problemas. El primero es que un link que *afirma* "ya acepté" es una
-segunda fuente de verdad capaz de mentir —aceptaste otra fila, clickeaste antes de tiempo— y el
-usuario se enteraría con un rechazo al emitir. Eso se arregla haciendo que el link solo
-**dispare** la verificación. Pero entonces queda el segundo: con el barrido cada 15 minutos, el
-link ahorra siete minutos a cambio de un endpoint sin sesión protegido por un secreto en el
-`.env`, que además los clientes de mail suelen prefetchear. No paga.
 
 Detalles del barrido:
 
@@ -541,6 +540,48 @@ Detalles del barrido:
 - **`asyncio.to_thread`**, porque `recheck_pending` es sincrónico de punta a punta (SQLAlchemy
   sync y zeep sobre requests) y correrlo derecho bloquearía el event loop toda la conversación
   con ARCA.
+
+### El link del mail al operador (2026-08-29)
+`POST /delegations/accepted`, la pantalla `/delegacion-aceptada` y la columna
+`fiscal_identities.delegation_claim_token_hash`.
+
+El operador termina los dos pasos en ARCA y **ARCA no le contesta nada**: la pantalla de
+«Aceptación de Designación» dice "Aceptada: SI" tanto si con eso alcanzó como si falta la
+relación con el computador, que es el error que este mail existe para prevenir. Hasta acá lo
+único que le quedaba era esperar al barrido —quince minutos, y sin ninguna señal de que el que
+falló fue él— o abrir la app con la cuenta de otro, que no existe. El link es donde pregunta.
+
+- **No le cree.** Lo que escribe la verificación es la respuesta de ARCA y nada más, igual que
+  los otros dos endpoints: el link es un "andá a fijarte ahora", no un "dalo por hecho". Por eso
+  el `granted=False` no es un fracaso del link sino su otra mitad útil, y llega en el único
+  momento en que el operador todavía tiene las pantallas de ARCA abiertas para corregir.
+- **Sin sesión, y no por comodidad.** La identidad fiscal es de otro: `get_fiscal_identity_or_404`
+  le contestaría 404 aunque el operador tuviera cuenta. Lo autoriza el token, igual que en la
+  confirmación de mail. Vive en un segundo router del módulo (`delegation_router`) porque el
+  primero exige sesión en todas sus rutas.
+- **Un token por identidad, no un secreto del `.env`.** 256 bits de `secrets`, guardado como
+  SHA-256 en la fila y emitido junto con el aviso. Se borra en `mark_delegation_verified`, o sea
+  que **muere con la espera que acorta**, la cierre quien la cierre: el link, el barrido o la
+  pantalla del usuario. Un link que sigue vivo después es una credencial sin dueño capaz de
+  gastar cuota de ARCA para siempre.
+- **No es de un solo uso**, al revés que el de confirmación. El caso normal es justamente el
+  "todavía no": el operador completa el paso que faltaba y vuelve a apretar sin pedir un mail
+  nuevo, que es lo que haría inservible al link en el único momento en que sirve.
+- **Columna y no tabla**, al revés que `email_confirmations`. Aquella es tabla porque el reenvío
+  emite un token nuevo sin invalidar el anterior y hacen falta varios vivos a la vez; este mail
+  sale una sola vez por identidad, así que nunca hay más de un link dando vueltas.
+- **Limitado por IP** (10/hora), que es lo que reemplaza al presupuesto por usuario cuando no hay
+  usuario. La cuota de ARCA es del certificado, o sea de todos.
+- **La pantalla pregunta sola al montar** y ofrece un botón para volver a preguntar. Que un
+  cliente de mail prefetchee el link cuesta a lo sumo una consulta a ARCA con techo por IP, y no
+  quema nada: el token no es de un solo uso.
+
+**Revierte el "descartado" que estaba escrito acá.** La versión descartada era un link que
+*afirmaba* "ya acepté" —una segunda fuente de verdad capaz de mentir— protegido por un secreto
+compartido en el `.env`, y se valuó en "ahorra siete minutos de espera del usuario". Las tres
+cosas cambiaron: este link no afirma nada, el secreto es por identidad y muere con ella, y lo que
+compra no es la espera del usuario sino **la única respuesta que el operador puede recibir sobre
+un trámite que ARCA no le contesta**. Ese último punto es el que no estaba en la cuenta original.
 
 ### La revocación deja de ser una nota al pie
 `delegation_verified_at` siempre significó "esto era verdad en esta fecha". Ahora tiene

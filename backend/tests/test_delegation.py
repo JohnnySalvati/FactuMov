@@ -11,6 +11,7 @@ test de router eso escribiría filas fuera de la transacción del fixture.
 """
 
 import logging
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -514,3 +515,231 @@ def test_without_an_operator_the_claim_still_works(
     db.refresh(fiscal_identity)
     assert fiscal_identity.delegation_claimed_at is not None
     assert fiscal_identity.tax_id in caplog.text
+
+
+# --- El link del mail al operador --------------------------------------------------------
+#
+# Lo que cierra el circuito por el otro extremo. El usuario avisa que delegó y sale el mail;
+# el operador hace los dos pasos en ARCA y ARCA no le cuenta a nadie que los hizo. Sin el link,
+# lo único que le queda es esperar al barrido de los quince minutos para saber si quedó bien —
+# y al usuario, para enterarse. Con el link, el que acaba de hacer el trámite pregunta y se
+# entera en el momento, que es cuando todavía puede corregir lo que falte.
+
+_LINK = re.compile(r"https://app\.test/delegacion-aceptada\?token=(\S+)")
+
+
+def operator_token(sent_emails):
+    """El token del link que el mail al operador lleva adentro.
+
+    Se saca del cuerpo del mail y no de la base a propósito: lo que se está probando es que el
+    link **del mail** funcione, y leer el hash de la fila saltearía justamente el paso donde se
+    puede romper — que la URL esté mal armada, o que el token guardado no sea el que se mandó.
+    """
+    match = _LINK.search(sent_emails[-1].body)
+    assert match is not None, sent_emails[-1].body
+    return match.group(1)
+
+
+def accept(anonymous_client, token):
+    return anonymous_client.post("/delegations/accepted", json={"token": token})
+
+
+def test_the_notice_carries_a_link_for_the_operator(
+    client, fiscal_identity, wsfe_returns, operator, sent_emails
+):
+    wsfe_returns(NOT_DELEGATED)
+
+    claim(client, fiscal_identity)
+
+    assert "/delegacion-aceptada?token=" in sent_emails[0].body
+
+
+def test_the_link_verifies_and_needs_no_session(
+    client, anonymous_client, db, fiscal_identity, wsfe_returns, operator, sent_emails
+):
+    """El caso que justifica todo: el operador hizo los dos pasos y avisa.
+
+    Sin sesión, y no por comodidad: la identidad fiscal es de **otro**, así que el operador no
+    la podría abrir ni teniendo cuenta. Lo que autoriza el pedido es el token.
+    """
+    wsfe_returns(NOT_DELEGATED)
+    claim(client, fiscal_identity)
+    token = operator_token(sent_emails)
+
+    wsfe_returns(OK)
+    response = accept(anonymous_client, token)
+
+    assert response.status_code == 200
+    assert response.json()["granted"] is True
+    db.refresh(fiscal_identity)
+    assert fiscal_identity.delegation_verified_at is not None
+
+
+def test_the_link_names_which_identity_it_is_talking_about(
+    client, anonymous_client, fiscal_identity, wsfe_returns, operator, sent_emails
+):
+    """El operador atiende los CUIT de todos y los mails se parecen entre sí."""
+    wsfe_returns(NOT_DELEGATED)
+    claim(client, fiscal_identity)
+    token = operator_token(sent_emails)
+
+    wsfe_returns(OK)
+    body = accept(anonymous_client, token).json()
+
+    assert body["tax_id"] == fiscal_identity.tax_id
+    assert body["identity_name"] == fiscal_identity.name
+
+
+def test_the_link_tells_the_user_right_away(
+    client, anonymous_client, user, fiscal_identity, wsfe_returns, operator, sent_emails
+):
+    """El motivo entero del link: el que esperaba se entera ahora y no en el próximo barrido."""
+    wsfe_returns(NOT_DELEGATED)
+    claim(client, fiscal_identity)
+    token = operator_token(sent_emails)
+
+    wsfe_returns(OK)
+    accept(anonymous_client, token)
+
+    assert sent_emails[-1].to == user.email
+    assert fiscal_identity.tax_id in sent_emails[-1].subject
+
+
+def test_the_link_does_not_take_the_operators_word_for_it(
+    client, anonymous_client, db, fiscal_identity, wsfe_returns, operator, sent_emails
+):
+    """Aceptar la designación habilita a la persona, no al certificado.
+
+    El operador que ya vio la pantalla de ARCA decir "Aceptada: SI" es justo el que más se
+    equivoca acá, así que el link pregunta y contesta que no. Esa es la mitad útil de la
+    pantalla: se entera con las de ARCA todavía abiertas. Ver *Delegar tiene dos partes* en
+    `docs/arca.md`.
+    """
+    wsfe_returns(NOT_DELEGATED)
+    claim(client, fiscal_identity)
+    token = operator_token(sent_emails)
+
+    response = accept(anonymous_client, token)
+
+    assert response.status_code == 200
+    assert response.json()["granted"] is False
+    assert NOT_DELEGATED_MSG in response.json()["message"]
+    db.refresh(fiscal_identity)
+    assert fiscal_identity.delegation_verified_at is None
+    # El aviso del usuario sigue en pie: la espera no terminó y el barrido tiene que seguir
+    # mirándola.
+    assert fiscal_identity.delegation_claimed_at is not None
+    # Y a él no se le dijo nada, que sería mentirle.
+    assert len(sent_emails) == 1
+
+
+def test_the_link_survives_a_no_and_works_again(
+    client, anonymous_client, fiscal_identity, wsfe_returns, operator, sent_emails
+):
+    """El operador completa el paso que faltaba y vuelve a apretar, sin pedir un mail nuevo."""
+    wsfe_returns(NOT_DELEGATED)
+    claim(client, fiscal_identity)
+    token = operator_token(sent_emails)
+
+    assert accept(anonymous_client, token).json()["granted"] is False
+    wsfe_returns(OK)
+    assert accept(anonymous_client, token).json()["granted"] is True
+
+
+def test_the_link_dies_once_the_delegation_is_verified(
+    client, anonymous_client, fiscal_identity, wsfe_returns, operator, sent_emails
+):
+    """Un link que sigue vivo después es una credencial sin dueño que gasta cuota de ARCA."""
+    wsfe_returns(NOT_DELEGATED)
+    claim(client, fiscal_identity)
+    token = operator_token(sent_emails)
+
+    wsfe_returns(OK)
+    accept(anonymous_client, token)
+
+    assert accept(anonymous_client, token).status_code == 400
+
+
+def test_the_link_dies_when_the_screen_verifies_first(
+    client, anonymous_client, fiscal_identity, wsfe_returns, operator, sent_emails
+):
+    """No importa cuál de las tres formas de verificar llegue primero: lo apaga cualquiera.
+
+    Acá la delegación se resuelve sola y el usuario la ve al abrir la pantalla. El link que el
+    operador todavía tiene en la casilla ya no tiene ninguna espera que acortar.
+    """
+    wsfe_returns(NOT_DELEGATED)
+    claim(client, fiscal_identity)
+    token = operator_token(sent_emails)
+
+    wsfe_returns(OK)
+    verify(client, fiscal_identity)
+
+    assert accept(anonymous_client, token).status_code == 400
+
+
+def test_an_unknown_token_is_a_400(anonymous_client, wsfe_returns):
+    wsfe_returns(OK)
+
+    assert accept(anonymous_client, "no-existe").status_code == 400
+
+
+def test_an_unknown_token_does_not_cost_a_call_to_arca(anonymous_client, wsfe_returns):
+    """El 400 sale antes de salir a la red: si no, el link sería un botón para gastar cuota."""
+    calls = wsfe_returns(OK)
+
+    accept(anonymous_client, "no-existe")
+
+    assert calls == []
+
+
+def test_the_link_is_rate_limited_by_ip(
+    client, anonymous_client, fiscal_identity, wsfe_returns, operator, sent_emails
+):
+    """Sin sesión de la cual colgar el presupuesto, se cuenta por IP.
+
+    La cuota de ARCA es del certificado, o sea de todos los usuarios: un link que llegó a una
+    casilla de mail no puede poder gastarla sin techo.
+    """
+    wsfe_returns(NOT_DELEGATED)
+    claim(client, fiscal_identity)
+    token = operator_token(sent_emails)
+
+    for _ in range(10):
+        assert accept(anonymous_client, token).status_code == 200
+    assert accept(anonymous_client, token).status_code == 429
+
+
+def test_arca_down_is_a_502_for_the_operator_too(
+    client, anonymous_client, fiscal_identity, wsfe_returns, operator, sent_emails
+):
+    wsfe_returns(NOT_DELEGATED)
+    claim(client, fiscal_identity)
+    token = operator_token(sent_emails)
+
+    wsfe_returns(RequestsConnectionError("sin ruta al host"))
+
+    assert accept(anonymous_client, token).status_code == 502
+
+
+def test_a_deactivated_user_gets_no_mail_but_the_delegation_is_verified_anyway(
+    client, anonymous_client, db, user, fiscal_identity, wsfe_returns, operator, sent_emails
+):
+    """La verificación es un hecho sobre ARCA y no sobre la cuenta, así que se guarda igual.
+
+    Lo que no se hace es mandarle un mail a alguien cuya cuenta ya no existe — el mismo filtro
+    que el barrido aplica sobre las identidades pendientes.
+    """
+    wsfe_returns(NOT_DELEGATED)
+    claim(client, fiscal_identity)
+    token = operator_token(sent_emails)
+    user.is_active = False
+    db.flush()
+
+    wsfe_returns(OK)
+    response = accept(anonymous_client, token)
+
+    assert response.json()["granted"] is True
+    db.refresh(fiscal_identity)
+    assert fiscal_identity.delegation_verified_at is not None
+    assert len(sent_emails) == 1

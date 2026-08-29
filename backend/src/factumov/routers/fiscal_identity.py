@@ -3,12 +3,13 @@ import uuid
 from datetime import timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 
 from factumov.crud import fiscal_identity as fiscal_identity_crud
 from factumov.dependencies import (
     CurrentUserDep,
     SessionDep,
+    client_key,
     enforce_rate_limit,
     get_current_user,
 )
@@ -23,7 +24,10 @@ from factumov.exceptions import (
     PadronError,
 )
 from factumov.models.fiscal_identity import FiscalIdentity
+from factumov.models.user import User
 from factumov.schemas.fiscal_identity import (
+    DelegationAcceptance,
+    DelegationAcceptanceRequest,
     DelegationStatus,
     FiscalIdentityCreate,
     FiscalIdentityLookup,
@@ -34,6 +38,7 @@ from factumov.schemas.fiscal_identity import (
 )
 from factumov.services import arca, notifications, padron, wsfe
 from factumov.services.rate_limit import RateLimiter
+from factumov.services.security import generate_opaque_token, hash_opaque_token
 from factumov.services.wsfe import DelegationCheck
 
 logger = logging.getLogger(__name__)
@@ -195,7 +200,7 @@ VERIFY_TICKET_MAX_AGE = timedelta(minutes=5)
 def _ask_arca(
     fiscal_identity: FiscalIdentity,
     db: SessionDep,
-    user_id: str,
+    rate_limit_key: str,
     limiter: RateLimiter = _VERIFY_DELEGATION_LIMITER,
 ) -> DelegationCheck:
     """Le pregunta a ARCA si FactuMov puede emitir por este CUIT, y traduce el fallo a un 502.
@@ -206,8 +211,13 @@ def _ask_arca(
     registro antes de mandar el mail. `rollback()` no sirve: bajo el
     `join_transaction_mode="create_savepoint"` del fixture de tests revertiría al savepoint y se
     llevaría puestas las filas que el test armó.
+
+    La clave del limitador se llama `rate_limit_key` y no `user_id` porque no siempre lo es: los
+    tres endpoints del usuario cuentan por usuario, y el del operador —que llega desde un link
+    de mail, sin sesión— cuenta por IP. Lo único que esta función necesita saber de esa clave es
+    contra qué presupuesto descontar.
     """
-    enforce_rate_limit(limiter, user_id)
+    enforce_rate_limit(limiter, rate_limit_key)
 
     tax_id = fiscal_identity.tax_id
     db.commit()
@@ -228,7 +238,11 @@ def _ask_arca(
 
 
 def _apply(
-    db: SessionDep, fiscal_identity: FiscalIdentity, check: DelegationCheck, *, claim: bool
+    db: SessionDep,
+    fiscal_identity: FiscalIdentity,
+    check: DelegationCheck,
+    *,
+    claim_token_hash: str | None,
 ) -> DelegationStatus:
     """Escribe lo que la respuesta de ARCA implica y arma el cuerpo de la respuesta.
 
@@ -240,20 +254,22 @@ def _apply(
       que le da consecuencias a que `delegation_verified_at` haya significado siempre "esto era
       verdad en esta fecha": la delegación se revoca del lado de ARCA sin avisarnos, y sin esto
       la app se enteraría recién con un rechazo al emitir.
-    - **Que no, con `claim`**: se registra que el usuario dice haber delegado, que es lo único
-      que distingue "no delegó" de "delegó y falta que aceptemos la designación".
+    - **Que no, con `claim_token_hash`**: se registra que el usuario dice haber delegado, que es
+      lo único que distingue "no delegó" de "delegó y falta que aceptemos la designación", y con
+      el aviso se guarda el token del link que el mail al operador lleva adentro.
 
-    `claim` es un flag y no dos funciones porque es exactamente la única diferencia entre los
-    dos endpoints: los dos preguntan lo mismo y difieren en qué escriben cuando la respuesta es
-    que no.
+    Un parámetro y no dos funciones porque es exactamente la única diferencia entre los
+    endpoints: todos preguntan lo mismo y difieren en qué escriben cuando la respuesta es que
+    no. Y un `str | None` en vez de un `bool` más un hash aparte, porque los dos serían el mismo
+    dato dicho dos veces y podrían contradecirse: no hay aviso sin link.
     """
     if check.granted:
         fiscal_identity_crud.mark_delegation_verified(db, fiscal_identity)
     else:
         if fiscal_identity.delegation_verified_at is not None:
             fiscal_identity_crud.clear_delegation_verified(db, fiscal_identity)
-        if claim:
-            fiscal_identity_crud.mark_delegation_claimed(db, fiscal_identity)
+        if claim_token_hash is not None:
+            fiscal_identity_crud.mark_delegation_claimed(db, fiscal_identity, claim_token_hash)
 
     # Refresca los `func.now()` que quedaron como expresiones SQL sin evaluar, para poder
     # devolver timestamps reales y no objetos de SQLAlchemy.
@@ -293,7 +309,7 @@ def verify_delegation(
     del navegador pueden repetir solos.
     """
     check = _ask_arca(fiscal_identity, db, str(user.id))
-    return _apply(db, fiscal_identity, check, claim=False)
+    return _apply(db, fiscal_identity, check, claim_token_hash=None)
 
 
 @router.post("/{fiscal_identity_id}/claim-delegation", response_model=DelegationStatus)
@@ -324,6 +340,8 @@ def claim_delegation(
 
     Sale **una sola vez por identidad**, con el primer aviso: `mark_delegation_claimed` no pisa
     la fecha, así que un usuario impaciente apretando el botón no se convierte en veinte mails.
+    Ese mail lleva adentro el link con el que el operador avisa que ya hizo los dos pasos en
+    ARCA, y el token de ese link se emite acá — ver `confirm_delegation_accepted`.
     Y va en `BackgroundTasks` porque acompaña a algo que ya quedó guardado — el aviso está
     commiteado antes de que el mail se intente, así que un SMTP caído no puede hacer que el
     usuario reintente un click que ya surtió efecto.
@@ -334,7 +352,12 @@ def claim_delegation(
     # Antes de escribir: lo que decide si hay que avisar es que este aviso sea nuevo, y después
     # del `_apply` ya no se puede distinguir del que estaba.
     already_claimed = fiscal_identity.delegation_claimed_at is not None
-    status = _apply(db, fiscal_identity, check, claim=True)
+    # El token se emite siempre y se guarda solo si el aviso resulta nuevo — de eso se encarga
+    # `mark_delegation_claimed`. Generar uno que no se use cuesta 32 bytes de `secrets` y evita
+    # la alternativa fea: emitirlo adentro del `if` de más abajo, o sea *después* de escribir,
+    # cuando la fila ya se guardó sin él.
+    raw_token = generate_opaque_token()
+    status = _apply(db, fiscal_identity, check, claim_token_hash=hash_opaque_token(raw_token))
 
     if not already_claimed and status.delegation_claimed_at is not None:
         background.add_task(
@@ -342,6 +365,7 @@ def claim_delegation(
             fiscal_identity.tax_id,
             fiscal_identity.name,
             user.email,
+            raw_token,
         )
     return status
 
@@ -377,4 +401,106 @@ def list_points_of_sale(
             PointOfSaleRead(number=point.number, emission_type=point.emission_type)
             for point in check.points_of_sale
         ],
+    )
+
+
+# --- El link del mail al operador --------------------------------------------------------
+#
+# Todo lo de abajo vive afuera de `router`, que exige sesión en todas sus rutas. Acá no puede
+# haberla: quien llega es el operador, desde un link de mail, y encima sobre una identidad
+# fiscal que **no es suya** — `get_fiscal_identity_or_404` le contestaría 404 aunque tuviera
+# cuenta. Lo que autoriza el pedido es el token, igual que en la confirmación de mail.
+
+delegation_router = APIRouter(prefix="/delegations", tags=["fiscal_identities"])
+
+# Token desconocido y token ya gastado comparten respuesta, porque el remedio es el mismo:
+# esperar el aviso que llega solo, o mirar la identidad en la app. El texto nombra el caso
+# habitual —la delegación ya quedó verificada, y con eso el link se apagó— para que el operador
+# no salga a buscar un problema que no existe.
+_SPENT_ACCEPTANCE_DETAIL = (
+    "Este link ya no vale. Lo más probable es que esa delegación ya haya quedado verificada; "
+    "si no, el aviso del usuario se dio de baja y hay que pedirle que vuelva a avisar."
+)
+
+# Sin sesión de la cual colgar el presupuesto, se cuenta por IP. Diez por hora alcanza de sobra
+# para el uso real —el operador entra, ve que sí, y no vuelve— y le pone un techo a lo único que
+# este endpoint puede gastar de más: la cuota de ARCA, que es del certificado y por lo tanto de
+# todos los usuarios. Es el mismo motivo por el que el botón del usuario tiene el suyo.
+_ACCEPTANCE_LIMITER = RateLimiter(limit=10, window_seconds=60 * 60)
+
+
+@delegation_router.post("/accepted", response_model=DelegationAcceptance)
+def confirm_delegation_accepted(
+    data: DelegationAcceptanceRequest,
+    request: Request,
+    background: BackgroundTasks,
+    db: SessionDep,
+) -> DelegationAcceptance:
+    """El operador dice que ya aceptó la designación en ARCA. **Se le pregunta a ARCA igual.**
+
+    Es el otro extremo de `claim_delegation`. Allá el usuario avisa que hizo su parte y sale un
+    mail al operador; acá el operador avisa que hizo la suya y se cierra la espera. Sin esto la
+    única forma de cerrarla es el barrido de `services/delegation_watch.py`, que corre cada
+    quince minutos: el operador termina el trámite en ARCA y no tiene forma de saber si quedó
+    bien —ni el usuario de enterarse— hasta que al barrido le toque. Con el link, el que acaba
+    de hacer el trámite obtiene la respuesta en el momento, que es cuando todavía tiene las
+    pestañas de ARCA abiertas para corregir lo que falte.
+
+    **No se le cree.** Lo que escribe la verificación es la respuesta de ARCA y nada más, igual
+    que en los otros dos endpoints: el link es un "andá a fijarte ahora", no un "dalo por
+    hecho". Es exactamente la lección de los dos pasos —una designación aceptada sigue
+    contestando 600 si falta la relación con el computador— y el que más se equivoca ahí es
+    justamente el operador, que ya vio la pantalla de ARCA decir "Aceptada: SI".
+
+    Por eso el `granted=False` no es un fracaso del link sino su otra mitad útil: le dice al
+    operador, con el texto de ARCA, que todavía falta algo. Y como el token sobrevive a la
+    respuesta negativa, puede completar el paso que falte y volver a apretar sin pedir un mail
+    nuevo.
+
+    **El mail al usuario sale de acá cuando ARCA dice que sí**, y es el motivo entero de que
+    esto exista: el que estaba esperando se entera al toque en vez de en el próximo barrido. Es
+    el mismo mail, `send_delegation_ready_email`, para que las dos formas de cerrar la espera se
+    vean idénticas del lado del usuario.
+
+    **400** para un token desconocido o ya gastado —el link se apaga al verificar—, **429** por
+    IP, y **502** cuando no se pudo preguntar, los tres con los mismos motivos que en el resto
+    del módulo.
+    """
+    fiscal_identity = fiscal_identity_crud.get_by_claim_token_hash(
+        db, hash_opaque_token(data.token)
+    )
+    if fiscal_identity is None:
+        raise HTTPException(status_code=400, detail=_SPENT_ACCEPTANCE_DETAIL)
+
+    # Los cuatro se leen antes de `_ask_arca`, que commitea y con eso expira los atributos de
+    # las filas: después de la llamada a ARCA cada uno costaría un SELECT de más. El dueño se
+    # busca a mano porque no hay relación declarada entre las dos tablas — ver CLAUDE.md →
+    # *Ownership scoping*, y `delegation_watch._pending`, que hace el join por lo mismo.
+    tax_id = fiscal_identity.tax_id
+    identity_name = fiscal_identity.name
+    owner = db.get(User, fiscal_identity.user_id)
+    # `is_active` por lo mismo que lo filtra el barrido: mandarle un mail a alguien cuya cuenta
+    # ya no existe es gastar en molestar a nadie. Lo que no cambia es la verificación, que se
+    # guarda igual — es un hecho sobre ARCA y no sobre la cuenta.
+    notify: str | None = owner.email if owner is not None and owner.is_active else None
+
+    check = _ask_arca(fiscal_identity, db, client_key(request), limiter=_ACCEPTANCE_LIMITER)
+    status = _apply(db, fiscal_identity, check, claim_token_hash=None)
+
+    if status.granted:
+        logger.info(
+            "El operador cerró la espera del CUIT %s desde el link del mail; ARCA ya nos "
+            "habilita.",
+            tax_id,
+        )
+        if notify is not None:
+            background.add_task(
+                notifications.send_delegation_ready_email, notify, identity_name, tax_id
+            )
+
+    return DelegationAcceptance(
+        granted=status.granted,
+        tax_id=tax_id,
+        identity_name=identity_name,
+        message=status.message,
     )

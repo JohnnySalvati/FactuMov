@@ -134,6 +134,39 @@ class DelegationStatus(BaseModel):
     delegate_tax_id: str | None = None
 
 
+class DelegationAcceptanceRequest(BaseModel):
+    """El token del link que el mail al operador lleva abajo de las instrucciones.
+
+    Viaja en el cuerpo y no en la query string, igual que el de confirmación de mail: la query
+    string queda en el historial del navegador, en el `Referer` y en el access log de nginx, y
+    esto es una credencial. El link sí lo lleva en la query —no hay otra forma de escribir un
+    link— y la pantalla lo pasa al cuerpo antes de tocar la API.
+    """
+
+    token: str
+
+
+class DelegationAcceptance(BaseModel):
+    """Lo que ve el operador después de decir "ya acepté la designación".
+
+    No es `DelegationStatus` aunque conteste casi lo mismo, y la diferencia es de quién es cada
+    respuesta. Aquella le habla al dueño del CUIT, que ya sabe cuál es porque lo tiene abierto
+    en la pantalla; esta le habla a alguien que atiende varios CUIT de gente distinta y llega
+    desde un mail, así que tiene que decir **de cuál** está hablando. Y al revés: `claimed_at`,
+    `verified_at` y `delegate_tax_id` no viajan, porque no hay ninguna pantalla que refrescar
+    con ellos ni ninguna instrucción que darle al operador sobre a quién autorizar.
+    """
+
+    granted: bool
+    # De qué identidad se está hablando. El operador los tiene todos en la casilla y los mails
+    # se parecen entre sí: sin esto, la pantalla que dice "listo" no dice listo de qué.
+    tax_id: str
+    identity_name: str
+    # `None` cuando `granted`. Cuando no, el texto con el que ARCA lo explicó — que en el caso
+    # típico es el código 600, o sea el que no distingue "falta el paso 2" de "no hay nada".
+    message: str | None = None
+
+
 class PointOfSaleRead(BaseModel):
     """Un punto de venta habilitado en ARCA, tal como se le ofrece a la pantalla."""
 

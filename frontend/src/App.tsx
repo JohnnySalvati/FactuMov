@@ -7,6 +7,7 @@ import { AuthProvider } from './auth/AuthProvider'
 import { ConfirmEmailPage } from './pages/ConfirmEmailPage'
 import { CustomerPage } from './pages/CustomerPage'
 import { CustomersPage } from './pages/CustomersPage'
+import { DelegationAcceptedPage } from './pages/DelegationAcceptedPage'
 import { FiscalIdentitiesPage } from './pages/FiscalIdentitiesPage'
 import { EmitPage } from './pages/EmitPage'
 import { FiscalIdentityPage } from './pages/FiscalIdentityPage'
@@ -26,18 +27,24 @@ export function App() {
     <AuthProvider>
       <BrowserRouter>
         <Routes>
-          {/* Las cinco pantallas sin sesión comparten layout: la marca arriba y el crédito
-              de InSoft abajo. Es también el único lugar de la app donde se muestra la marca a
+          {/* Las pantallas sin sesión comparten layout: la marca arriba y el crédito de
+              InSoft abajo. Es también el único lugar de la app donde se muestra la marca a
               alguien que todavía no entró. */}
           <Route element={<PublicLayout />}>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/registro" element={<RegisterPage />} />
-            {/* Las dos rutas que nombran un link de mail. Sus nombres los fijan
+            {/* Las rutas que nombran un link de mail. Sus nombres los fijan
                 `_CONFIRMATION_PATH` y `_PASSWORD_RESET_PATH` del backend: cambiarlos acá rompe
                 los mails que ya se enviaron. */}
             <Route path="/confirmar-email" element={<ConfirmEmailPage />} />
             <Route path="/olvide-password" element={<ForgotPasswordPage />} />
             <Route path="/restablecer-password" element={<ResetPasswordPage />} />
+            {/* La única ruta pública que no es para un usuario: donde aterriza el operador
+                desde el mail que le pide aceptar una designación en ARCA. Va sin sesión
+                porque la identidad fiscal que mira no es suya y nunca podría serlo — lo que
+                lo autoriza es el token del link. Su nombre lo fija
+                `_DELEGATION_ACCEPTED_PATH` del backend. */}
+            <Route path="/delegacion-aceptada" element={<DelegationAcceptedPage />} />
           </Route>
 
           <Route element={<RequireAuth />}>

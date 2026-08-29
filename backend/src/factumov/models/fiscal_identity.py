@@ -58,6 +58,22 @@ class FiscalIdentity(Base, TimestampMixin):
     # Timestamp y no booleano, como las otras tres del proyecto: el "cuándo" es lo que la
     # pantalla muestra ("nos avisaste hace 2 horas") y lo que acota el reenvío del aviso.
     delegation_claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # El token del link que el mail al operador le pone abajo de las instrucciones, para que
+    # pueda avisar que ya hizo los dos pasos en ARCA sin esperar al barrido de los 15 minutos.
+    #
+    # Guardado como SHA-256, igual que el de sesión y el de confirmación de mail — ver
+    # `services/security.py`. Va acá y no en una tabla propia, al revés que `email_confirmations`:
+    # aquella existe porque el reenvío emite un token nuevo sin invalidar el anterior y hacen
+    # falta varios vivos a la vez. Acá el mail sale **una sola vez por identidad**, así que nunca
+    # hay más de un link dando vueltas y una fila aparte sería una fila por columna.
+    #
+    # Vive exactamente lo que vive la espera: se emite con el aviso del usuario y se borra al
+    # verificar. Un link que sigue andando después de que la delegación quedó verificada es una
+    # credencial sin dueño que puede gastar cuota de ARCA para siempre.
+    #
+    # `unique` por lo mismo que en las otras tres tablas de tokens: es además el índice por el
+    # que se busca. Postgres deja repetir el NULL, que es lo que tienen casi todas las filas.
+    delegation_claim_token_hash: Mapped[str | None] = mapped_column(String(64), unique=True)
 
     invoice_templates: Mapped[list["InvoiceTemplate"]] = relationship(
         back_populates="fiscal_identity", passive_deletes="all"

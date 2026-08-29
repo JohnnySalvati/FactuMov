@@ -22,6 +22,9 @@ logger = logging.getLogger(__name__)
 _CONFIRMATION_PATH = "/confirmar-email"
 _PASSWORD_RESET_PATH = "/restablecer-password"
 _REGISTER_PATH = "/registro"
+# La única pantalla de la app que no es para un usuario: donde aterriza el operador cuando dice
+# que ya aceptó la designación en ARCA.
+_DELEGATION_ACCEPTED_PATH = "/delegacion-aceptada"
 
 # Cuál de los dos transportes usa cada mail — la decisión está explicada en `email.py`. En
 # una línea: el mail que **es** el producto del request usa `send_email`, que levanta si no
@@ -248,7 +251,9 @@ def send_delegation_instructions_email(to: str) -> None:
     )
 
 
-def send_delegation_pending_email(tax_id: str, identity_name: str, user_email: str) -> None:
+def send_delegation_pending_email(
+    tax_id: str, identity_name: str, user_email: str, raw_token: str
+) -> None:
     """Le avisa al operador que hay una designación esperando que la acepte en ARCA.
 
     **Es el único mail de la app que no le va a un usuario**, y existe porque hay un paso
@@ -269,8 +274,17 @@ def send_delegation_pending_email(tax_id: str, identity_name: str, user_email: s
     eso, una designación perfectamente aceptada sigue contestando el código 600, que es
     indistinguible de no haber hecho nada. Ver *Delegar tiene dos partes* en `docs/arca.md`.
 
+    **Termina con un link, agregado el 2026-08-29.** Los dos pasos se hacen en ARCA, que no le
+    cuenta nada a nadie: hasta ahora el operador los terminaba y no tenía forma de saber si
+    habían quedado bien, ni el usuario de enterarse, hasta que al barrido de los quince minutos
+    le tocara. El link contesta las dos cosas en el momento —le pregunta a ARCA y le avisa al
+    usuario si dice que sí— y sobre todo contesta *que no* cuando falta el paso 2, que es el
+    error que este mail existe para prevenir y el único momento en que el operador todavía
+    tiene las pantallas de ARCA abiertas para corregirlo.
+
     Best effort, y sale una sola vez por identidad: lo dispara el **primer** aviso, no cada
-    click. Ver `crud/fiscal_identity.mark_delegation_claimed`.
+    click. Ver `crud/fiscal_identity.mark_delegation_claimed`. Esa unicidad es también la del
+    link: hay un solo token por identidad justamente porque hay un solo mail.
 
     Sin `OPERATOR_EMAIL` configurado no hay a quién avisarle, y eso no puede romper el
     request del usuario: queda un WARNING en el log, que es donde lo va a ver quien
@@ -313,9 +327,14 @@ def send_delegation_pending_email(tax_id: str, identity_name: str, user_email: s
             "     contestando el código 600 igual que si no hubieras aceptado nada.\n\n"
             "Los dos pasos van por cada CUIT que nos delegue. No alcanza con haberlos "
             "hecho una vez.\n\n"
-            "El usuario ya sabe que la demora es nuestra y está esperando. No hace falta "
-            "que le contestes: FactuMov reverifica contra ARCA cada 15 minutos y le avisa "
-            "cuando quede habilitado.\n"
+            "Cuando termines los dos pasos, entrá acá para avisarle a FactuMov:\n\n"
+            f"{_url(_DELEGATION_ACCEPTED_PATH, raw_token)}\n\n"
+            "Ese link le pregunta a ARCA en el momento y te contesta. Si dice que todavía no, "
+            "casi seguro falta el PASO 2: volvé, completalo y entrá al link de nuevo. Si dice "
+            "que sí, le avisamos al usuario en el acto y no queda nada más por hacer.\n\n"
+            "El usuario ya sabe que la demora es nuestra y está esperando. No hace falta que "
+            "le contestes: si no entrás al link, FactuMov reverifica igual contra ARCA cada "
+            "15 minutos y le avisa cuando quede habilitado.\n"
         ),
     )
 

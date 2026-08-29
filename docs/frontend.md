@@ -11,11 +11,19 @@ dependencia agregada al scaffold.
 
 
 ## Las pantallas sin sesión
-Cinco, todas fuera de `RequireAuth`: `/login`, `/registro`, `/confirmar-email`,
-`/olvide-password` y `/restablecer-password`. Las tres últimas aterrizan un link de mail o
-disparan uno, y **sus paths los fija el backend** (`_CONFIRMATION_PATH`,
-`_PASSWORD_RESET_PATH` y `_REGISTER_PATH` de `notifications.py`): cambiarles el nombre acá sin
-cambiarlo allá deja apuntando a la nada los mails ya enviados.
+Seis, todas fuera de `RequireAuth`: `/login`, `/registro`, `/confirmar-email`,
+`/olvide-password`, `/restablecer-password` y `/delegacion-aceptada`. Las cuatro últimas
+aterrizan un link de mail o disparan uno, y **sus paths los fija el backend**
+(`_CONFIRMATION_PATH`, `_PASSWORD_RESET_PATH`, `_REGISTER_PATH` y `_DELEGATION_ACCEPTED_PATH` de
+`notifications.py`): cambiarles el nombre acá sin cambiarlo allá deja apuntando a la nada los
+mails ya enviados.
+
+`/delegacion-aceptada` es **la única pantalla de la app que no le habla a un usuario**: la abre
+el operador desde el mail que le pide aceptar una designación en ARCA, y le contesta si con eso
+alcanzó. Va sin sesión porque la identidad fiscal que mira no es suya y nunca podría serlo — lo
+autoriza el token del link. Pregunta sola al montar, como `ConfirmEmailPage`, y deja un botón
+para volver a preguntar: el "todavía no" es el caso normal, y quien lo recibe suele tener que
+completar un paso en ARCA y reintentar. Ver *El link del mail al operador* en `docs/arca.md`.
 
 ## Sesión
 - **No se guarda nada del lado del cliente.** La cookie es `httpOnly`, así que el JS no la
