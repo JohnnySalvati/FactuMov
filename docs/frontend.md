@@ -393,15 +393,12 @@ desde un iPad sin consola, no algo que va abajo del botón de emitir una factura
   escribirlo. Es la otra mitad del dictado: el que le habla al celular para no tipear tampoco
   quiere tener que leer la respuesta — con el teléfono en el bolsillo, manejando, o con el
   papel en la otra mano. Lo escrito no se va: es lo que queda para revisar antes de emitir, y
-  es lo que el oído no puede releer. La voz dice el modelo y las fechas antes de navegar
-  ("Alquiler mensual. Desde el 1 de agosto. Hasta el 31 de agosto"), los cuatro finales que no
-  salieron, y los errores del micrófono — "no se escuchó nada" es justo el caso en que el
-  usuario está esperando algo que no va a llegar. `speechSynthesis` es el mismo Web Speech API
+  es lo que el oído no puede releer. La voz lee el comprobante entero cuando la pantalla de
+  emisión tiene qué mostrar, los cuatro finales que no salieron, y los errores del micrófono
+  — "no se escuchó nada" es justo el caso en que el usuario está esperando algo que no va a
+  llegar. `speechSynthesis` es el mismo Web Speech API
   del otro lado, y al revés que el reconocimiento **no sale del dispositivo**: la voz la
   sintetiza el sistema.
-  - **El nombre que se dice es el guardado, no el que se escuchó.** Si se dijo "alquiler" y el
-    modelo se llama "Alquiler cochera", eso es exactamente lo que hay que enterarse; repetir lo
-    que uno dijo no confirma nada.
   - **Las fechas se dicen en palabras** ("15 de agosto"), y con el año solo cuando no es el
     corriente. `formatDate` no sirve para el oído: "15/08/2026" se lee "quince barra cero ocho
     barra dos mil veintiséis", que es lo último que uno quiere escuchar cuando lo que está
@@ -412,9 +409,9 @@ desde un iPad sin consola, no algo que va abajo del botón de emitir una factura
     lo último que quiere en una oficina con gente al lado, y son la misma persona en dos
     momentos del día. Prendido por default porque esto contesta **a un dictado**: el que apretó
     el micrófono ya habló en voz alta. El interruptor es uno solo y global, al lado del
-    micrófono del comando; repetirlo junto a cada campo serían cuatro botones de silencio para
-    una preferencia sola en la pantalla de emisión. **Rugosidad conocida:** para cambiarla desde
-    esa pantalla hay que volver a la grilla.
+    micrófono del comando y otra vez en la pantalla de emisión, que es la que más habla;
+    repetirlo junto a **cada campo** serían cuatro botones de silencio para una preferencia
+    sola.
   - **`armSpeech()` corre en el toque del usuario, no en la respuesta.** Hace dos cosas que
     después no se pueden hacer: corta lo que la app estuviera diciendo —si no, lo primero que
     escucha el micrófono que se está abriendo es a la app terminando la frase anterior, y lo
@@ -429,8 +426,39 @@ desde un iPad sin consola, no algo que va abajo del botón de emitir una factura
     `lang = 'es-AR'` la elige el sistema y siempre hay una.
   - **El `localStorage` va adentro de un `try`**: en Safari con navegación privada **tira** en
     vez de devolver `null`, y sin el `try` la grilla de modelos no renderiza.
+- **La lectura completa ocurre en la pantalla de emisión, no en la grilla** (2026-08-28).
+  Cuando el comando encuentra el modelo, la grilla **no dice nada**: navega. Lo que se lee en
+  voz alta es el comprobante entero y recién cuando el `preview` llegó — "Factura B, punto de
+  venta 1. Emite Fulano. A Mengano. Total 42350 pesos. Fecha 28 de agosto. Período desde el 1
+  de agosto. Hasta el 31 de agosto. Vence el 10 de septiembre." Un resumen dicho desde la
+  grilla solo puede repetir **lo que se dictó**, y lo que hay que revisar antes de pedir un CAE
+  incluye todo lo que nadie dijo: la letra que dedujo el backend, el emisor, el cliente, el
+  importe que se va a declarar y las fechas que la app puso sola. Y encima se pisarían: `say`
+  cancela lo anterior, así que dos respuestas seguidas son una respuesta cortada al medio.
+  - **Se lee una vez, al aparecer la pantalla**, y no se relee cuando se corrige una fecha —
+    esa corrección ya tiene su propia respuesta, la del micrófono del campo. Releer siete
+    líneas en cada retoque termina con el usuario apagando la voz, y con eso perdiendo la
+    lectura, que es lo que vale. La guarda es una ref y no una lista de dependencias recortada:
+    así el linter ve todo lo que el efecto usa y "una sola vez" queda escrito en el código en
+    vez de deducido de lo que falta.
+  - **Se lee siempre que la voz esté prendida, aunque se haya llegado tocando.** Es la
+    confirmación de un acto irreversible: quién emite, a quién, por cuánto y con qué fechas. El
+    interruptor es el que decide si la app habla, no el camino por el que se llegó.
+  - **El importe se dice sin separadores** ("42350 pesos", y los centavos solo si los hay): el
+    "$ 42.350,00" de `money` el sintetizador lo lee por pedazos y con los puntos adentro. Es lo
+    mismo que pasa con las fechas y las barras — lo que se muestra y lo que se dice no son el
+    mismo texto porque no entran por el mismo lado.
+  - **El CUIT y el documento no se dicen.** Once dígitos de corrido no los verifica nadie de
+    oído y alargan la lectura justo antes de lo único que hay que decidir. Quedan en la
+    pantalla, que es donde se comparan.
+  - **`blocked_reason` va al final**, que es donde está el botón: si no se puede emitir, eso es
+    lo que hay que hacer y tiene que ser lo último que quede sonando. Los dos fracasos
+    —no poder cargar el preview y no poder emitir— también se dicen, por el mismo motivo que
+    los errores del micrófono.
+  - **El interruptor de la voz está también en esta pantalla**, que es la que más habla: tiene
+    que haber dónde callarla sin volver a la grilla. Es el mismo botón y la misma preferencia.
 - **Sin banco de pruebas en el frontend.** Los casos de `parseSpokenDate` y de `commands.ts` se
-  corren con `esbuild` + `node` desde el scratchpad (35 casos, todos en verde) en vez de sumar
+  corren con `esbuild` + `node` desde el scratchpad (38 casos, todos en verde) en vez de sumar
   `vitest`: es la misma decisión que TanStack Query y Tailwind. Revisar cuando esta gramática
   vuelva a crecer — es la candidata más clara a necesitarlo.
 - **Rugosidad conocida:** en pantalla ancha, "Período desde" y "Hasta" comparten un `.row` con

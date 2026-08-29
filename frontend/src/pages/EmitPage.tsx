@@ -1,12 +1,19 @@
-import { useCallback, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router'
 
 import { ApiError, api } from '../api/client'
-import type { EmitRequest, Invoice, InvoicePreview } from '../api/types'
+import {
+  VOUCHER_TYPE_LABELS,
+  type EmitRequest,
+  type Invoice,
+  type InvoicePreview,
+} from '../api/types'
 import { DictateDate } from '../components/DictateDate'
 import { Notice } from '../components/Notice'
+import { SpeakToggle } from '../components/SpeakToggle'
 import { formatDate, isoDate, money } from '../format'
 import { useResource } from '../hooks/useResource'
+import { say, spokenAmount, spokenDate } from '../speak'
 
 /**
  * La pantalla de confirmación de la emisión.
@@ -61,9 +68,54 @@ function defaultPeriod() {
  * La forma alcanza —que el día exista lo verificó `parseSpokenDate`, y el rango lo verifica el
  * backend.
  */
-function spokenDate(params: URLSearchParams, key: string): string | undefined {
+function dateParam(params: URLSearchParams, key: string): string | undefined {
   const value = params.get(key)
   return value !== null && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : undefined
+}
+
+/**
+ * Todo el comprobante, dicho en voz alta.
+ *
+ * **Es la lectura completa de lo que se va a emitir**, y por eso ocurre acá y no en la grilla:
+ * el comando hablado solo conoce lo que se dijo, y lo que hay que confirmar antes de pedir un
+ * CAE es lo que la pantalla muestra — la letra que dedujo el backend, el emisor, el cliente, el
+ * importe que se va a declarar y las cuatro fechas, tanto las que se dictaron como las que la
+ * app puso sola. Un resumen dicho antes de esta pantalla omitiría justamente lo que nadie
+ * eligió y nadie revisó.
+ *
+ * Va en el mismo archivo que el `<dl>` que muestra esos datos, y en el mismo orden, por lo
+ * mismo que `outcomeAloud` está pegado a su texto: son la misma respuesta por dos canales, y la
+ * que se desactualice va a ser la que quede lejos.
+ *
+ * El CUIT y el documento **no se dicen**: once dígitos leídos de corrido no los verifica nadie
+ * de oído, y alargan la lectura justo antes de lo único que hay que decidir. Quedan en la
+ * pantalla, que es donde se comparan.
+ *
+ * `blocked_reason` va al final, que es donde está el botón: si no se puede emitir, eso es lo
+ * que hay que hacer y tiene que ser lo último que quede sonando.
+ */
+function previewAloud(
+  data: InvoicePreview,
+  date: string,
+  period: { from_date: string; to_date: string; due_date: string },
+  today: Date,
+): string {
+  const lines = [
+    `${VOUCHER_TYPE_LABELS[data.voucher_type]}, punto de venta ${data.pos}`,
+    `Emite ${data.issuer_name}`,
+    `A ${data.customer_name}`,
+    `Total ${spokenAmount(data.total)}`,
+    `Fecha ${spokenDate(date, today)}`,
+  ]
+  if (data.needs_service_dates) {
+    lines.push(
+      `Período desde el ${spokenDate(period.from_date, today)}`,
+      `hasta el ${spokenDate(period.to_date, today)}`,
+      `Vence el ${spokenDate(period.due_date, today)}`,
+    )
+  }
+  if (data.blocked_reason !== null) lines.push(`No se puede emitir. ${data.blocked_reason}`)
+  return `${lines.join('. ')}.`
 }
 
 function EmitScreen({ id }: { id: string }) {
@@ -76,10 +128,10 @@ function EmitScreen({ id }: { id: string }) {
 
   const [params] = useSearchParams()
   const spoken = {
-    date: spokenDate(params, 'fecha'),
-    from_date: spokenDate(params, 'desde'),
-    to_date: spokenDate(params, 'hasta'),
-    due_date: spokenDate(params, 'vence'),
+    date: dateParam(params, 'fecha'),
+    from_date: dateParam(params, 'desde'),
+    to_date: dateParam(params, 'hasta'),
+    due_date: dateParam(params, 'vence'),
   }
   const dictated = Object.values(spoken).some((value) => value !== undefined)
 
@@ -127,12 +179,49 @@ function EmitScreen({ id }: { id: string }) {
 
   const data = preview.data
 
+  /**
+   * Apenas la pantalla tiene qué mostrar, la app la lee entera. **Una sola vez.**
+   *
+   * Se lee lo que hay cuando la pantalla aparece, que es lo que se va a emitir si el usuario no
+   * toca nada. Corregir una fecha después no vuelve a disparar las siete líneas: esa corrección
+   * ya tiene su propia respuesta hablada —la del micrófono del campo, que dice la fecha
+   * sola— y releer todo en cada retoque terminaría con el usuario apagando la voz, y con eso
+   * perdiendo la lectura, que es lo que vale.
+   *
+   * La guarda es una ref y no una lista de dependencias recortada. Recortarla diría lo mismo y
+   * escondería que el efecto usa `period` y `chosenDate`; así el linter ve todo lo que se usa y
+   * "una sola vez" queda escrito en el código en vez de deducido de lo que falta.
+   */
+  const alreadyRead = useRef(false)
+  useEffect(() => {
+    if (data === undefined || alreadyRead.current) return
+    alreadyRead.current = true
+    say(previewAloud(data, chosenDate ?? data.date, period, new Date()))
+  }, [data, chosenDate, period])
+
+  // Los dos fracasos posibles también se dicen: no poder cargar el preview y no poder emitir.
+  // Es el mismo criterio que los errores del micrófono — el que no está mirando la pantalla
+  // está esperando algo que no va a llegar, y el segundo es además el momento más tenso de la
+  // app, con el dedo recién levantado del botón.
+  useEffect(() => {
+    if (preview.error !== undefined) say(preview.error)
+  }, [preview.error])
+  useEffect(() => {
+    if (error !== undefined) say(error)
+  }, [error])
+
   return (
     <div className="page">
       <Link className="back" to={`/modelos/${id}`}>
         ← Modelo
       </Link>
-      <h1>Emitir</h1>
+      {/* El interruptor de la voz va acá **y** en la grilla: esta es la pantalla que más
+          habla, así que tiene que ser una en la que se pueda callar. Es el mismo botón y la
+          misma preferencia, y apagarlo corta la lectura en curso. */}
+      <div className="page-head">
+        <h1>Emitir</h1>
+        <SpeakToggle />
+      </div>
 
       <Notice kind="error">{preview.error ?? error}</Notice>
       {preview.loading && data === undefined && <p className="muted">Cargando…</p>}

@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
 
-import { emitPath, matchTemplate, parseSpokenCommand, type SpokenDates } from '../commands'
+import { emitPath, matchTemplate, parseSpokenCommand } from '../commands'
 import { useSpeechInput } from '../hooks/useSpeechInput'
-import { armSpeech, say, spokenDate } from '../speak'
+import { armSpeech, say } from '../speak'
 import { SpeakToggle } from './SpeakToggle'
 
 interface Props {
@@ -14,9 +14,8 @@ interface Props {
  * Lo último que **no** salió, para poder contarlo en una sola línea de estado.
  *
  * No tiene caso "salió bien": cuando sale bien la app cambia de pantalla, esta se desmonta y
- * la confirmación de lo que se entendió es la pantalla de emisión, que muestra el modelo, el
- * destinatario, el importe y las fechas cargadas — más lo que la voz haya dicho, que sigue
- * sonando mientras la pantalla cambia.
+ * la confirmación de lo que se entendió es la pantalla de emisión, que muestra —y lee en voz
+ * alta— el modelo, el destinatario, el importe y las fechas cargadas.
  */
 type Outcome =
   | { kind: 'not-a-command' }
@@ -49,19 +48,6 @@ function outcomeAloud(outcome: Outcome): string {
   }
 }
 
-/** "Alquiler mensual. Desde el 1 de agosto. Hasta el 31 de agosto." */
-function commandAloud(name: string, dates: SpokenDates, today: Date): string {
-  const said = (label: string, iso?: string) =>
-    iso === undefined ? [] : [`${label} ${spokenDate(iso, today)}`]
-  return [
-    name,
-    ...said('fecha', dates.date),
-    ...said('desde el', dates.from_date),
-    ...said('hasta el', dates.to_date),
-    ...said('vence el', dates.due_date),
-  ].join('. ')
-}
-
 /**
  * "Emitir alquiler mensual desde el 1 de agosto hasta el 31, vence el 10 de septiembre."
  *
@@ -74,9 +60,10 @@ function commandAloud(name: string, dates: SpokenDates, today: Date): string {
  * la misma regla que ya tenía el micrófono de las fechas, y la que hace que entender mal sea
  * una molestia y no una factura equivocada.
  *
- * **Y contesta hablando**, además de escribir en pantalla lo que entendió: el que dictó para
- * no tipear tampoco quiere tener que leer. Se puede apagar con el botón de al lado — ver
- * `speak.ts`.
+ * **Contesta hablando** lo que no salió, además de escribirlo: el que dictó para no tipear
+ * tampoco quiere tener que leer. Lo que sí salió no se dice acá — lo lee entera la pantalla de
+ * emisión, que es la que conoce el comprobante completo. Se puede apagar con el botón de al
+ * lado — ver `speak.ts`.
  *
  * Es un botón ancho y no el cuadradito de `DictateDate` porque acá el micrófono no acompaña a
  * ningún campo: es la acción de la pantalla, y en un celular tiene que poder tocarse sin
@@ -107,11 +94,11 @@ export function DictateCommand({ templates }: Props) {
     if (match.kind === 'none') return report({ kind: 'none' })
     if (match.kind === 'many') return report({ kind: 'many', names: match.names })
 
-    // Se dice **antes** de navegar y no después: la frase sigue sonando mientras la pantalla
-    // cambia —la síntesis es del navegador, no de este componente— y así el que no mira ya
-    // escuchó qué modelo y con qué fechas se va a emitir, que es lo que tiene que poder
-    // frenar a tiempo.
-    say(commandAloud(match.name, command.dates, today))
+    // **Acá no se dice nada**, aunque haya con qué: lo que se entendió lo lee la pantalla de
+    // emisión, entera y recién cuando la tiene. Un resumen dicho desde acá diría solo lo que
+    // se dictó —ni el emisor, ni el cliente, ni el importe, ni las fechas que la app pone
+    // sola— y encima le pisaría el arranque a la lectura buena: `say` cancela lo anterior,
+    // así que dos respuestas seguidas son una respuesta cortada al medio.
     navigate(emitPath(match.id, command.dates))
   })
 

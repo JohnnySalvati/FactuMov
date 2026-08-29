@@ -558,6 +558,15 @@ button.mic.wide {
   margin-bottom: 1rem;
 }
 
+/* El título de la pantalla con un botón al lado. Hoy es el interruptor de la voz en la
+   pantalla de emitir; el `<h1>` se queda con el espacio que sobra. */
+.page-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
 /* --- Pantalla ancha ----------------------------------------------------------------- */
 /*
  * 700px: el ancho a partir del cual dos campos conviven en un renglón sin quedar apretados.

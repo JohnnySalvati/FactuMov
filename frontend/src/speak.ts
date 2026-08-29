@@ -138,3 +138,21 @@ export function spokenDate(iso: string, today: Date): string {
   const suffix = year === today.getFullYear() ? '' : ` de ${year}`
   return `${day} de ${name}${suffix}`
 }
+
+/**
+ * `"42350.00"` → "42350 pesos". `"42350.50"` → "42350 pesos con 50 centavos".
+ *
+ * Los dígitos van pelados y **sin separador de miles**: el sintetizador lee "42350" como
+ * cuarenta y dos mil trescientos cincuenta, que es lo que hay que oír, mientras que el
+ * "$ 42.350,00" de `money` lo lee por pedazos y con los puntos adentro. Es el mismo motivo por
+ * el que las fechas no se dicen con barras — lo que se muestra y lo que se dice no son el
+ * mismo texto porque no entran por el mismo lado.
+ *
+ * Los centavos se dicen solo si los hay: en una factura casi siempre son cero, y "con cero
+ * centavos" en cada lectura es ruido que tapa lo que sí cambia.
+ */
+export function spokenAmount(decimal: string): string {
+  const [whole = '0', cents = ''] = decimal.split('.')
+  const centavos = Number(cents.padEnd(2, '0').slice(0, 2))
+  return `${whole} pesos${centavos === 0 ? '' : ` con ${centavos} centavos`}`
+}

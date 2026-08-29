@@ -212,10 +212,7 @@ function inMonthOf(iso: string, anchor: string): string | undefined {
 }
 
 export type TemplateMatch =
-  /** El nombre viaja con el id porque es lo que la app repite en voz alta al confirmar: lo que
-   *  hay que oír es el nombre **guardado**, no el que se entendió. Si se dijo "alquiler" y el
-   *  modelo se llama "Alquiler cochera", eso es exactamente lo que hay que enterarse. */
-  | { kind: 'one'; id: string; name: string }
+  | { kind: 'one'; id: string }
   | { kind: 'none' }
   /** Más de un modelo coincide. Se devuelven los nombres para poder mostrarlos. */
   | { kind: 'many'; names: string[] }
@@ -257,7 +254,7 @@ export function matchTemplate(
 
   for (const matches of passes) {
     const found = candidates.filter((candidate) => matches(candidate.normalized))
-    if (found.length === 1) return { kind: 'one', id: found[0]!.id, name: found[0]!.name }
+    if (found.length === 1) return { kind: 'one', id: found[0]!.id }
     if (found.length > 1) return { kind: 'many', names: found.map((candidate) => candidate.name) }
   }
   return { kind: 'none' }

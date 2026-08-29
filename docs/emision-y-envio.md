@@ -168,6 +168,13 @@ verdad.
   botón lo siga apretando el dedo — la voz llena el formulario y ahorra la parte reversible del
   camino, nada más. La pantalla avisa cuando las fechas vinieron del dictado, porque con hoy
   puesto por default se ve exactamente igual. Ver *Frontend → Dictado por voz*.
+- **Y con la voz prendida, la pantalla se lee sola en voz alta** (2026-08-28): letra, punto de
+  venta, emisor, cliente, importe y las cuatro fechas, las dictadas y las que puso la app. Es
+  la confirmación de un acto irreversible dicha por el otro canal, así que se lee entera y se
+  lee siempre —también cuando se llegó tocando— y termina en `blocked_reason` si lo hay, que
+  es lo que hay que resolver. Se lee **una vez**, al aparecer: corregir después una fecha ya
+  tiene su propia respuesta hablada, y releer todo en cada retoque termina con el usuario
+  apagando la voz.
 - **El `preview` avisa antes de apretar** cuando falta la delegación (`blocked_reason`), en vez
   de dejar que el botón falle con un 409.
 - **`if (busy) return` además del `disabled` del botón.** El `disabled` cubre el click y no el
