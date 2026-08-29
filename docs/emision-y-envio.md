@@ -146,6 +146,15 @@ verdad.
     siembras nunca son iguales— y se reemplaza por lo enviado después de cada PATCH exitoso.
     Deshacer a mano lo que uno cambió vuelve a habilitar emitir, que es lo correcto: ahí ya no
     hay nada que guardar ni que descartar.
+- **Y sin cambios tampoco se ofrece guardar (2026-08-28).** El botón "Guardar cambios" no
+  aparece hasta que hay uno. Es la otra mitad de lo mismo: un modelo abierto y no tocado no
+  tiene nada que guardar, y ofrecerlo igual le pregunta al usuario si quiere guardar unos
+  cambios que no hizo — que es la forma más barata de hacerlo dudar de si los hizo. Apagado
+  sería medio arreglo: el botón seguiría siendo lo primero que se ve al final del formulario,
+  donde ahora se ve "Emitir esta factura", que es lo que de verdad se va a hacer con un modelo
+  que ya está como tiene que estar. Va con un guard en el `onSubmit` y no solo con el botón
+  ausente: un `<form>` con un solo campo de texto se envía igual apretando Enter, y ese PATCH
+  vacío dejaría un "Guardado." sobre un guardado que no ocurrió.
 - **No es un `window.confirm`.** Hay que mostrar la letra, el destinatario y el importe exacto,
   y eso no entra en un diálogo del sistema — que además bloquea el hilo, no se puede estilar, y
   queda suprimido si el usuario marcó "no mostrar más". Mismo criterio que el borrado de las
@@ -153,6 +162,12 @@ verdad.
 - **Los importes salen del `preview` del backend**, no de la cuenta del editor. Las dos dan lo
   mismo hoy; la diferencia es que este número es el que se va a declarar, y dos cuentas capaces
   de discrepar justo en esa pantalla no valen lo que ahorran.
+- **Las cuatro fechas pueden llegar dictadas** desde la grilla de modelos, colgadas de la query
+  (`?fecha=&desde=&hasta=&vence=`): es la segunda mitad de "emitir alquiler desde el 1 de agosto
+  hasta el 31". Lo que el comando hablado **no** cambia es que esta pantalla exista y que el
+  botón lo siga apretando el dedo — la voz llena el formulario y ahorra la parte reversible del
+  camino, nada más. La pantalla avisa cuando las fechas vinieron del dictado, porque con hoy
+  puesto por default se ve exactamente igual. Ver *Frontend → Dictado por voz*.
 - **El `preview` avisa antes de apretar** cuando falta la delegación (`blocked_reason`), en vez
   de dejar que el botón falle con un 409.
 - **`if (busy) return` además del `disabled` del botón.** El `disabled` cubre el click y no el

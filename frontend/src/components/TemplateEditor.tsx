@@ -37,6 +37,7 @@ export function TemplateEditor({
   customers,
   onSubmit,
   submitLabel,
+  canSubmit = true,
   busy,
   error,
 }: {
@@ -46,6 +47,18 @@ export function TemplateEditor({
   customers: Customer[]
   onSubmit: () => void
   submitLabel: string
+  /**
+   * Si hay algo para guardar. Con `false` **el botón no se dibuja**, no se dibuja apagado.
+   *
+   * Un modelo abierto y no tocado no tiene nada que guardar, y ofrecer "Guardar cambios"
+   * igual le pregunta al usuario si quiere guardar unos cambios que no hizo — que es la forma
+   * más barata de hacerlo dudar de si los hizo. Apagado sería la mitad del arreglo: el botón
+   * seguiría estando y seguiría siendo lo primero que se ve al final del formulario.
+   *
+   * El default es `true` porque un modelo nuevo siempre se puede guardar: ahí el formulario
+   * no se compara contra nada, no existe todavía.
+   */
+  canSubmit?: boolean
   busy: boolean
   error?: string
 }) {
@@ -78,6 +91,10 @@ export function TemplateEditor({
       className="stack"
       onSubmit={(event) => {
         event.preventDefault()
+        // El guard además del botón que no está: sin botón de submit, un `<form>` con un solo
+        // campo de texto se envía igual apretando Enter. Sin esto, el Enter mandaría un PATCH
+        // que no cambia nada y la pantalla diría "Guardado." sobre un guardado que no ocurrió.
+        if (!canSubmit) return
         onSubmit()
       }}
     >
@@ -275,9 +292,11 @@ export function TemplateEditor({
 
       <Notice kind="error">{error}</Notice>
 
-      <button type="submit" disabled={busy}>
-        {busy ? 'Guardando…' : submitLabel}
-      </button>
+      {canSubmit && (
+        <button type="submit" disabled={busy}>
+          {busy ? 'Guardando…' : submitLabel}
+        </button>
+      )}
     </form>
   )
 }

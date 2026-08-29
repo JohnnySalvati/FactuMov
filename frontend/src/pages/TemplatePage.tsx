@@ -162,6 +162,11 @@ function TemplateScreen({ id }: { id: string }) {
           customers={customers.data ?? []}
           onSubmit={save}
           submitLabel="Guardar cambios"
+          // Sin cambios no hay nada que guardar, y el botón no aparece. Es la misma decisión
+          // que la de más abajo con "Emitir": la pantalla ofrece la acción que corresponde al
+          // estado en el que está, en vez de mostrarlas todas siempre y dejar que el usuario
+          // adivine cuál tiene sentido ahora.
+          canSubmit={dirty}
           busy={busy}
           error={error}
         />
