@@ -294,10 +294,10 @@ Dos detalles que van con esto:
 ## Dictado por voz: las fechas y el comando de emitir (2026-08-28)
 Un micrófono al lado de cada campo de fecha de `/modelos/:id/emitir`, y un botón "Emitir por
 voz" arriba de la grilla de modelos que entiende **"emitir alquiler mensual desde el 1 de
-agosto hasta el 31, vence el 10 de septiembre"**. Son cuatro archivos:
-`hooks/useSpeechInput.ts` (abrir el micrófono), `speech.ts` (de lo que se escuchó a una
-fecha), `commands.ts` (de lo que se escuchó a un comando) y los dos componentes,
-`DictateDate` y `DictateCommand`.
+agosto hasta el 31, vence el 10 de septiembre"**. La app escucha y **contesta hablando**.
+Son cinco archivos: `hooks/useSpeechInput.ts` (abrir el micrófono), `speech.ts` (de lo que se
+escuchó a una fecha), `commands.ts` (de lo que se escuchó a un comando), `speak.ts` (la voz de
+vuelta) y los tres componentes, `DictateDate`, `DictateCommand` y `SpeakToggle`.
 
 **Nació como spike y el spike cerró el mismo día**: existía para averiguar si el
 reconocimiento de voz del navegador anda en el celular —y sobre todo en iOS con la app
@@ -389,8 +389,48 @@ desde un iPad sin consola, no algo que va abajo del botón de emitir una factura
 - **`stop()` y no `abort()` cuando el usuario dice que terminó.** En iOS el motor no entrega
   nada hasta que se le pide finalizar, así que `abort` garantizaba el síntoma reportado:
   micrófono abierto, cuadrado apretado, nada capturado.
+- **La app contesta hablando lo que entendió** (`speak.ts`, `SpeakToggle`), además de
+  escribirlo. Es la otra mitad del dictado: el que le habla al celular para no tipear tampoco
+  quiere tener que leer la respuesta — con el teléfono en el bolsillo, manejando, o con el
+  papel en la otra mano. Lo escrito no se va: es lo que queda para revisar antes de emitir, y
+  es lo que el oído no puede releer. La voz dice el modelo y las fechas antes de navegar
+  ("Alquiler mensual. Desde el 1 de agosto. Hasta el 31 de agosto"), los cuatro finales que no
+  salieron, y los errores del micrófono — "no se escuchó nada" es justo el caso en que el
+  usuario está esperando algo que no va a llegar. `speechSynthesis` es el mismo Web Speech API
+  del otro lado, y al revés que el reconocimiento **no sale del dispositivo**: la voz la
+  sintetiza el sistema.
+  - **El nombre que se dice es el guardado, no el que se escuchó.** Si se dijo "alquiler" y el
+    modelo se llama "Alquiler cochera", eso es exactamente lo que hay que enterarse; repetir lo
+    que uno dijo no confirma nada.
+  - **Las fechas se dicen en palabras** ("15 de agosto"), y con el año solo cuando no es el
+    corriente. `formatDate` no sirve para el oído: "15/08/2026" se lee "quince barra cero ocho
+    barra dos mil veintiséis", que es lo último que uno quiere escuchar cuando lo que está
+    confirmando es una fecha. Y el año, que casi siempre es el corriente, alargaría todas las
+    respuestas para el caso raro — pero cuando cambia se dice, porque es cuando el dictado pudo
+    haber entendido otra cosa.
+  - **Se puede apagar, y se recuerda.** Contestar hablando es lo que uno quiere cuando dicta y
+    lo último que quiere en una oficina con gente al lado, y son la misma persona en dos
+    momentos del día. Prendido por default porque esto contesta **a un dictado**: el que apretó
+    el micrófono ya habló en voz alta. El interruptor es uno solo y global, al lado del
+    micrófono del comando; repetirlo junto a cada campo serían cuatro botones de silencio para
+    una preferencia sola en la pantalla de emisión. **Rugosidad conocida:** para cambiarla desde
+    esa pantalla hay que volver a la grilla.
+  - **`armSpeech()` corre en el toque del usuario, no en la respuesta.** Hace dos cosas que
+    después no se pueden hacer: corta lo que la app estuviera diciendo —si no, lo primero que
+    escucha el micrófono que se está abriendo es a la app terminando la frase anterior, y lo
+    transcribe— y paga la entrada de iOS, que exige que el primer `speak()` de la página salga
+    de un gesto. El nuestro sale de un callback del reconocedor, que no lo es.
+  - **Las frases se pisan, no se encolan** (`cancel()` antes de cada una). Dictar tres veces
+    seguidas tiene que contestar lo último que se entendió, no una fila de tres respuestas de
+    las cuales las dos primeras ya no son ciertas.
+  - **No se enumeran las voces del sistema.** `getVoices()` devuelve vacío hasta que el
+    navegador las carga —de forma asincrónica, y en Chrome la primera vez llega tarde—, así que
+    elegir una a mano sería esperar un evento o hablar en inglés la primera vez. Pidiendo
+    `lang = 'es-AR'` la elige el sistema y siempre hay una.
+  - **El `localStorage` va adentro de un `try`**: en Safari con navegación privada **tira** en
+    vez de devolver `null`, y sin el `try` la grilla de modelos no renderiza.
 - **Sin banco de pruebas en el frontend.** Los casos de `parseSpokenDate` y de `commands.ts` se
-  corren con `esbuild` + `node` desde el scratchpad (33 casos, todos en verde) en vez de sumar
+  corren con `esbuild` + `node` desde el scratchpad (35 casos, todos en verde) en vez de sumar
   `vitest`: es la misma decisión que TanStack Query y Tailwind. Revisar cuando esta gramática
   vuelva a crecer — es la candidata más clara a necesitarlo.
 - **Rugosidad conocida:** en pantalla ancha, "Período desde" y "Hasta" comparten un `.row` con

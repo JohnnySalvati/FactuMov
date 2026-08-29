@@ -1,8 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
 
-import { emitPath, matchTemplate, parseSpokenCommand } from '../commands'
+import { emitPath, matchTemplate, parseSpokenCommand, type SpokenDates } from '../commands'
 import { useSpeechInput } from '../hooks/useSpeechInput'
+import { armSpeech, say, spokenDate } from '../speak'
+import { SpeakToggle } from './SpeakToggle'
 
 interface Props {
   templates: ReadonlyArray<{ id: string; name: string }>
@@ -13,13 +15,52 @@ interface Props {
  *
  * No tiene caso "salió bien": cuando sale bien la app cambia de pantalla, esta se desmonta y
  * la confirmación de lo que se entendió es la pantalla de emisión, que muestra el modelo, el
- * destinatario, el importe y las fechas cargadas. Un cartel verde acá lo vería nadie.
+ * destinatario, el importe y las fechas cargadas — más lo que la voz haya dicho, que sigue
+ * sonando mientras la pantalla cambia.
  */
 type Outcome =
   | { kind: 'not-a-command' }
   | { kind: 'none' }
   | { kind: 'many'; names: string[] }
   | { kind: 'unclear'; labels: string[] }
+
+/**
+ * Lo mismo que dice la pantalla, dicho para el oído.
+ *
+ * Está acá al lado del texto escrito y no en el `commands.ts` para que las dos versiones se
+ * lean juntas: son la misma respuesta, y la que se desactualice va a ser la que quede lejos.
+ * Lo que cambia entre una y otra es la forma —hablando no se puede decir «lo que se escuchó»
+ * entre comillas, y una lista se enumera distinto— pero nunca el contenido: si la voz dijera
+ * menos que la pantalla, confiar en el oído sería peor que leer.
+ */
+function outcomeAloud(outcome: Outcome): string {
+  switch (outcome.kind) {
+    case 'not-a-command':
+      return 'Eso no es un comando. Empezá diciendo emitir.'
+    case 'none':
+      return 'No encontré ningún modelo que se llame así.'
+    case 'many':
+      return (
+        `Hay más de un modelo que coincide: ${outcome.names.join(', ')}. ` +
+        'Decí el nombre completo.'
+      )
+    case 'unclear':
+      return `No entendí la fecha de ${outcome.labels.join(', ni la de ')}.`
+  }
+}
+
+/** "Alquiler mensual. Desde el 1 de agosto. Hasta el 31 de agosto." */
+function commandAloud(name: string, dates: SpokenDates, today: Date): string {
+  const said = (label: string, iso?: string) =>
+    iso === undefined ? [] : [`${label} ${spokenDate(iso, today)}`]
+  return [
+    name,
+    ...said('fecha', dates.date),
+    ...said('desde el', dates.from_date),
+    ...said('hasta el', dates.to_date),
+    ...said('vence el', dates.due_date),
+  ].join('. ')
+}
 
 /**
  * "Emitir alquiler mensual desde el 1 de agosto hasta el 31, vence el 10 de septiembre."
@@ -33,6 +74,10 @@ type Outcome =
  * la misma regla que ya tenía el micrófono de las fechas, y la que hace que entender mal sea
  * una molestia y no una factura equivocada.
  *
+ * **Y contesta hablando**, además de escribir en pantalla lo que entendió: el que dictó para
+ * no tipear tampoco quiere tener que leer. Se puede apagar con el botón de al lado — ver
+ * `speak.ts`.
+ *
  * Es un botón ancho y no el cuadradito de `DictateDate` porque acá el micrófono no acompaña a
  * ningún campo: es la acción de la pantalla, y en un celular tiene que poder tocarse sin
  * apuntar. Por eso también dice qué hace en vez de mostrar solo el ícono.
@@ -42,47 +87,66 @@ export function DictateCommand({ templates }: Props) {
   const [heard, setHeard] = useState<string>()
   const [outcome, setOutcome] = useState<Outcome>()
 
+  /** Contar lo que pasó por los dos canales a la vez. Es el único lugar que fija un `Outcome`. */
+  const report = (next: Outcome) => {
+    setOutcome(next)
+    say(outcomeAloud(next))
+  }
+
   const speech = useSpeechInput((spoken) => {
     setHeard(spoken)
-    const command = parseSpokenCommand(spoken, new Date())
-    if (command === undefined) {
-      setOutcome({ kind: 'not-a-command' })
-      return
-    }
+    const today = new Date()
+    const command = parseSpokenCommand(spoken, today)
+    if (command === undefined) return report({ kind: 'not-a-command' })
     // Las fechas se revisan **antes** que el modelo: si algo no se entendió no hay que
     // navegar, y da igual de qué modelo se trate. Al revés, una fecha perdida terminaría en
     // la pantalla de emisión disfrazada del default del mes en curso.
-    if (command.unclear.length > 0) {
-      setOutcome({ kind: 'unclear', labels: command.unclear })
-      return
-    }
+    if (command.unclear.length > 0) return report({ kind: 'unclear', labels: command.unclear })
+
     const match = matchTemplate(command.name, templates)
-    if (match.kind === 'none') {
-      setOutcome({ kind: 'none' })
-      return
-    }
-    if (match.kind === 'many') {
-      setOutcome({ kind: 'many', names: match.names })
-      return
-    }
+    if (match.kind === 'none') return report({ kind: 'none' })
+    if (match.kind === 'many') return report({ kind: 'many', names: match.names })
+
+    // Se dice **antes** de navegar y no después: la frase sigue sonando mientras la pantalla
+    // cambia —la síntesis es del navegador, no de este componente— y así el que no mira ya
+    // escuchó qué modelo y con qué fechas se va a emitir, que es lo que tiene que poder
+    // frenar a tiempo.
+    say(commandAloud(match.name, command.dates, today))
     navigate(emitPath(match.id, command.dates))
   })
+
+  // Los errores del micrófono también se dicen: "no se escuchó nada" es justo el caso en que
+  // el usuario está esperando una respuesta que no va a llegar, y sin voz solo la ve quien
+  // estaba mirando la pantalla. El efecto corre cuando cambia el error y no en cada render.
+  useEffect(() => {
+    if (speech.error !== undefined) say(speech.error)
+  }, [speech.error])
 
   if (!speech.supported) return null
 
   return (
     <div className="voice-command">
-      {/* `type="button"` por costumbre y no por necesidad —acá no hay ningún `<form>` que
-          pueda enviarse— pero el día que esto entre en uno, el default de `submit` sería el
-          peor lugar posible para descubrirlo. */}
-      <button
-        type="button"
-        className="mic wide"
-        aria-pressed={speech.listening}
-        onClick={speech.listening ? speech.stop : speech.start}
-      >
-        {speech.listening ? '■ Escuchando…' : '🎤 Emitir por voz'}
-      </button>
+      <div className="with-mic">
+        {/* `type="button"` por costumbre y no por necesidad —acá no hay ningún `<form>` que
+            pueda enviarse— pero el día que esto entre en uno, el default de `submit` sería el
+            peor lugar posible para descubrirlo. */}
+        <button
+          type="button"
+          className="mic wide"
+          aria-pressed={speech.listening}
+          onClick={() => {
+            if (speech.listening) return speech.stop()
+            // Desde el toque, que es lo que iOS pide para poder hablar después, y lo que
+            // corta la respuesta anterior antes de abrir el micrófono — si no, lo primero que
+            // escucharía es a la app terminando la frase.
+            armSpeech()
+            speech.start()
+          }}
+        >
+          {speech.listening ? '■ Escuchando…' : '🎤 Emitir por voz'}
+        </button>
+        <SpeakToggle />
+      </div>
 
       <p className="mic-status" aria-live="polite">
         {speech.error !== undefined ? (

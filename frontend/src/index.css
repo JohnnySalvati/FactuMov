@@ -546,7 +546,8 @@ button.mic[aria-pressed='true'] {
 /* El micrófono del comando hablado no acompaña a ningún campo: es la acción de la pantalla,
    así que ocupa el ancho como cualquier otro botón de la app y dice qué hace. */
 button.mic.wide {
-  width: 100%;
+  flex: 1;
+  width: auto;
   min-width: 0;
   padding: 0.6rem 1rem;
   font-size: 1rem;

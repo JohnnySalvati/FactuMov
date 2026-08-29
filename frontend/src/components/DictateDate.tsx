@@ -1,7 +1,8 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 
 import { formatDate } from '../format'
 import { useSpeechInput } from '../hooks/useSpeechInput'
+import { armSpeech, say, spokenDate } from '../speak'
 import { parseSpokenDate } from '../speech'
 
 interface Props {
@@ -42,10 +43,21 @@ export function DictateDate({ id, label, value, min, max, hint, onChange }: Prop
   const [last, setLast] = useState<{ heard: string; date?: string }>()
 
   const speech = useSpeechInput((heard) => {
-    const date = parseSpokenDate(heard, new Date())
+    const today = new Date()
+    const date = parseSpokenDate(heard, today)
     setLast({ heard, date })
     if (date !== undefined) onChange(date)
+    // Se dice la fecha sola y no "vencimiento del pago, 10 de septiembre": el campo lo eligió
+    // el dedo que apretó **este** micrófono, así que lo único que falta confirmar es en qué
+    // día cayó lo que se dijo. Ver `speak.ts` por qué no se dice "10 barra 9 barra 2026".
+    say(date === undefined ? 'No entendí una fecha.' : spokenDate(date, today))
   })
+
+  // Los errores del micrófono también se dicen: son el caso en que el usuario está esperando
+  // una respuesta que no va a llegar. Ver el mismo efecto en `DictateCommand`.
+  useEffect(() => {
+    if (speech.error !== undefined) say(speech.error)
+  }, [speech.error])
 
   return (
     <div>
@@ -69,7 +81,13 @@ export function DictateDate({ id, label, value, min, max, hint, onChange }: Prop
             className="mic"
             aria-label={`Dictar ${label.toLowerCase()}`}
             aria-pressed={speech.listening}
-            onClick={speech.listening ? speech.stop : speech.start}
+            onClick={() => {
+              if (speech.listening) return speech.stop()
+              // Desde el toque: es donde iOS habilita el primer `speak()` de la página, y
+              // donde se corta la respuesta anterior antes de abrir el micrófono.
+              armSpeech()
+              speech.start()
+            }}
           >
             {speech.listening ? '■' : '🎤'}
           </button>
