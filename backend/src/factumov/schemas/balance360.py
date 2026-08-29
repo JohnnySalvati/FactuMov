@@ -41,6 +41,20 @@ class Balance360ConnectionUpsert(BaseModel):
             raise ValueError("La dirección tiene que empezar con http:// o https://")
         return value
 
+    @field_validator("api_token")
+    @classmethod
+    def _clean_api_token(cls, value: str) -> str:
+        """Sin espacios ni saltos de línea alrededor.
+
+        El token se copia de la salida de un `create_api_token.py` corrido por ssh, y ahí es
+        fácil llevarse un espacio o un `
+` de más. Del otro lado el hash no coincide y la
+        respuesta es un 401 idéntico al de un token revocado, así que la pantalla manda a
+        generar otro —y el que se pegue va a fallar igual—. Un `strip` que no se ve es más
+        barato que un mensaje que explique lo que no se ve.
+        """
+        return value.strip()
+
 
 class Balance360ConnectionRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)

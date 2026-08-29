@@ -309,6 +309,19 @@ def test_un_token_que_balance360_no_acepta_no_se_guarda(client, db, http):
     assert db.query(Balance360Connection).count() == 0
 
 
+def test_el_token_se_limpia_antes_de_probarlo(client, db, http):
+    """Un espacio de más al copiarlo del ssh da el mismo 401 que un token revocado."""
+    response = client.put(
+        "/balance360",
+        json={"base_url": "https://balance.test", "api_token": "  b360_unTokenDePrueba\n"},
+    )
+
+    assert response.status_code == 200
+    (call,) = http["calls"]
+    assert call["headers"]["Authorization"] == "Bearer b360_unTokenDePrueba"
+    assert db.query(Balance360Connection).one().token_hint == "ueba"
+
+
 def test_una_direccion_sin_esquema_se_rechaza_con_422(client, http):
     response = client.put(
         "/balance360", json={"base_url": "balance.test", "api_token": "b360_unToken"}
