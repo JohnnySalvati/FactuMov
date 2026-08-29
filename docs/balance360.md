@@ -164,6 +164,14 @@ seguía el redirect veía un 200 con HTML — habría creído que registró.
 El token se emite a mano, del lado del servidor, con `uv run python create_api_token.py <mail>
 <nombre>`. Sale por pantalla una sola vez.
 
+**No caduca**: `api_tokens` no tiene expiración, solo `revoked_at`. O sea que se emite una vez
+por integración y **por base** —dev y prod son dos Postgres distintos, así que son dos tokens—
+y sigue valiendo hasta que alguien lo revoque con `revoke_api_token.py`, que sin nombre los
+lista con su `last_used_at` y con un nombre o un prefijo de id revoca ese. Solo hace falta
+reemitirlo si se filtró, si se perdió el texto plano, o si se perdió la `SECRET_ENCRYPTION_KEY`
+de acá: en ese caso el guardado deja de poder abrirse y el original ya no existe en ningún
+lado.
+
 ## La pantalla
 
 `/ajustes`, a la que se llega por el engranaje de la barra. No es una quinta pestaña: los
