@@ -16,7 +16,7 @@ es por qué.
 | [`desarrollo.md`](desarrollo.md) | Los tres procesos que hay que levantar, cómo llegar desde el celular, por qué HTTPS en dev no es opcional, el proxy de Vite |
 | [`modelo-de-datos.md`](modelo-de-datos.md) | El principio rector (`InvoiceTemplate` = `Invoice` menos lo que cambia), las tablas, las desviaciones respecto de Balance360 y **cómo se deduce la letra del comprobante** |
 | [`parser-e-importacion.md`](parser-e-importacion.md) | El relevamiento de los servicios de Balance360, el parser de PDF y sus reglas por letra, el segundo layout pendiente, y `POST /invoice-templates/import` |
-| [`autenticacion.md`](autenticacion.md) | Sesión opaca en cookie, registro self-serve con confirmación, reset de contraseña, los seis mails, rate limiting y por qué el fallo de SMTP se ve |
+| [`autenticacion.md`](autenticacion.md) | Sesión opaca en cookie, registro self-serve con confirmación, reset de contraseña, los mails, rate limiting y por qué el fallo de SMTP se ve |
 | [`arca.md`](arca.md) | WSAA y el ticket en tabla, el padrón, la delegación y sus **dos partes**, el rechequeo, y por qué no hay paquete compartido con Balance360 |
 | [`emision-y-envio.md`](emision-y-envio.md) | Pedir el CAE, los importes y su redondeo, los dos códigos heredados que estaban mal, el PDF con el QR fiscal y el envío por email |
 | [`frontend.md`](frontend.md) | La SPA: sesión, mobile-first, la grilla de tarjetas y su gesto, y los detalles que costaron una vuelta |

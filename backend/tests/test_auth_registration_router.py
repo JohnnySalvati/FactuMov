@@ -362,3 +362,71 @@ def test_the_token_is_committed_before_the_mail_goes_out(anonymous_client, db, m
 
     assert "mail" in order
     assert order.index("commit") < order.index("mail")
+
+
+# --- el aviso al operador -----------------------------------------------------------------
+#
+# El segundo mail de la app que no le va a un usuario. No pide ninguna acción: es la señal de
+# que alguien está usando el producto, que hoy no existe en ningún otro lado — para enterarse
+# hay que entrar a la base.
+
+
+@pytest.fixture
+def operator(monkeypatch):
+    """Un `OPERATOR_EMAIL` configurado. Por default la suite no tiene, como la app."""
+    monkeypatch.setenv("OPERATOR_EMAIL", "operador@factumov.com.ar")
+    email_service.get_email_settings.cache_clear()
+    yield "operador@factumov.com.ar"
+    email_service.get_email_settings.cache_clear()
+
+
+def test_a_new_registration_mails_the_operator(anonymous_client, operator, sent_emails):
+    register(anonymous_client, "ana@cucu.com")
+
+    to_operator = [sent for sent in sent_emails if sent.to == operator]
+    assert len(to_operator) == 1
+    assert "ana@cucu.com" in to_operator[0].subject
+
+
+def test_the_notice_says_the_account_is_not_usable_yet(anonymous_client, operator, sent_emails):
+    """Avisa de un registro, no de un usuario: la dirección todavía no está confirmada."""
+    register(anonymous_client, "ana@cucu.com")
+
+    body = next(sent.body for sent in sent_emails if sent.to == operator)
+    assert "ana@cucu.com" in body
+    assert "no confirmó" in body
+
+
+def test_the_user_still_gets_the_confirmation(anonymous_client, operator, sent_emails):
+    """El aviso se suma al mail del usuario, no lo reemplaza."""
+    register(anonymous_client, "ana@cucu.com")
+
+    assert [sent.to for sent in sent_emails] == ["ana@cucu.com", operator]
+
+
+def test_registering_again_does_not_mail_the_operator(anonymous_client, operator, sent_emails):
+    """Volver a registrarse con una dirección sin confirmar no es un alta nueva."""
+    register(anonymous_client, "ana@cucu.com")
+    sent_emails.clear()
+
+    register(anonymous_client, "ana@cucu.com")
+
+    assert [sent.to for sent in sent_emails] == ["ana@cucu.com"]
+
+
+def test_registering_over_a_confirmed_address_does_not_mail_the_operator(
+    anonymous_client, db, operator, sent_emails
+):
+    make_user(db, email="ana@cucu.com", email_confirmed_at=datetime.now(UTC))
+
+    register(anonymous_client, "ana@cucu.com")
+
+    assert [sent.to for sent in sent_emails] == ["ana@cucu.com"]
+
+
+def test_without_an_operator_only_the_user_is_mailed(anonymous_client, sent_emails):
+    """Sin `OPERATOR_EMAIL` no hay a quién avisarle, y eso no puede romper el registro."""
+    response = register(anonymous_client, "ana@cucu.com")
+
+    assert response.status_code == 202
+    assert [sent.to for sent in sent_emails] == ["ana@cucu.com"]

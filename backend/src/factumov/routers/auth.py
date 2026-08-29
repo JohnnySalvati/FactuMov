@@ -212,7 +212,9 @@ def _issue_confirmation(db: Session, user: User) -> None:
 
 
 @router.post("/register", status_code=202, response_model=MessageResponse)
-def register(data: RegisterRequest, request: Request, db: SessionDep) -> MessageResponse:
+def register(
+    data: RegisterRequest, request: Request, background: BackgroundTasks, db: SessionDep
+) -> MessageResponse:
     """Alta self-serve. La respuesta no depende de si la dirección ya existía.
 
     La contraseña se hashea **antes** de buscar al usuario, aunque en dos de las tres ramas
@@ -257,6 +259,15 @@ def register(data: RegisterRequest, request: Request, db: SessionDep) -> Message
             db.rollback()
         else:
             _issue_confirmation(db, user)
+            # El aviso al operador, y **solo en esta rama**: es la única en la que apareció
+            # una fila que no estaba. Un segundo registro sobre una dirección que ya existía
+            # no es alguien registrándose, es alguien volviendo.
+            #
+            # En background y no acá mismo, que es lo que lo vuelve inofensivo para la
+            # propiedad anti-enumeración de este endpoint: un envío sincrónico de más haría
+            # que esta rama tarde el doble que las otras dos, y el reloj contestaría lo que
+            # el 202 idéntico se cuida de no contestar. Corre después de la respuesta.
+            background.add_task(notifications.send_new_user_email, user.email)
     elif user.email_confirmed_at is None:
         _issue_confirmation(db, user)
     else:

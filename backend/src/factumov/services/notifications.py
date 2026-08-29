@@ -74,6 +74,50 @@ def send_already_registered_email(to: str) -> None:
     )
 
 
+def send_new_user_email(user_email: str) -> None:
+    """Le avisa al operador que se registró alguien.
+
+    Es el segundo mail que no le va a un usuario, y a diferencia del de la delegación no pide
+    ninguna acción: es una señal de que el producto se está usando, que en una app recién
+    salida es la que se mira todos los días y hoy no existe en ningún lado — para enterarse
+    hay que entrar a la base.
+
+    **Sale del registro y no de la confirmación**, o sea que avisa de una cuenta que todavía
+    no se puede usar. Es a propósito: el que se registró y no confirmó también es información,
+    y encima es la mitad interesante —alguien entró, quiso, y quedó a mitad de camino—. El
+    cuerpo lo dice para que nadie lea "usuario nuevo" donde dice "intento".
+
+    Lo dispara **solo el alta de una fila nueva**. Un segundo registro sobre una dirección que
+    ya estaba no es alguien registrándose: es alguien volviendo.
+
+    Best effort y en background, y acá eso no es solo por costumbre: `register` contesta lo
+    mismo exista o no la dirección, y las tres ramas mandan un mail para que las tres puedan
+    fallar igual. Un mail sincrónico de más en una sola de las tres la haría más lenta que las
+    otras dos y con eso contestaría, por el reloj, la pregunta que el 202 calla. Ver
+    `routers/auth.register`.
+    """
+    settings = email.get_email_settings()
+    if settings.operator_email is None:
+        # INFO y no WARNING, al revés que el aviso de la delegación: allá hay alguien
+        # esperando un click que nadie va a dar, acá no hay nada pendiente. Nombra la variable
+        # igual, que es lo que hace falta para prenderlo.
+        logger.info("Se registró %s y no hay OPERATOR_EMAIL configurado para avisar.", user_email)
+        return
+
+    email.send_email_best_effort(
+        to=settings.operator_email,
+        subject=f"Alguien se registró en FactuMov: {user_email}",
+        body=(
+            f"{user_email} acaba de crear una cuenta en FactuMov.\n\n"
+            "Todavía no confirmó la dirección, así que la cuenta no se puede usar: le "
+            "mandamos el link y vence en unas horas. Si confirma, le llegan solas las "
+            "instrucciones para delegarnos WSFE en ARCA.\n\n"
+            "No hace falta que hagas nada. Si más adelante carga un CUIT y nos designa, te "
+            "va a llegar otro aviso — ese sí pide un click tuyo en ARCA.\n"
+        ),
+    )
+
+
 def send_password_reset_email(to: str, raw_token: str, valid_for_minutes: int) -> None:
     """El link para elegir una contraseña nueva."""
     email.send_email(

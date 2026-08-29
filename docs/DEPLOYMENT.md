@@ -104,8 +104,9 @@ Lo que no puede quedar como está:
 - `APP_BASE_URL=https://factumov.insoft.net.ar`. De acá cuelgan el link de confirmación y el
   de reset que salen por mail. Con `https://` y con el dominio real; un valor viejo manda
   mails con links muertos y no tiene ningún síntoma en el arranque.
-- `OPERATOR_EMAIL`. Hoy es lo único que avisa que un usuario está esperando que aceptemos su
-  designación en ARCA — ese click no lo expone ningún web service.
+- `OPERATOR_EMAIL`. Los dos avisos que no le van a ningún usuario: que alguien se registró, y
+  que un usuario está esperando que aceptemos su designación en ARCA — ese click no lo expone
+  ningún web service. Vacío es válido y los dos quedan en el log.
 - `ARCA_ENV` va en **`prod`**, y con eso el certificado propio pasa a ser un prerrequisito
   y no una prolijidad. Ver la sección 7.
 

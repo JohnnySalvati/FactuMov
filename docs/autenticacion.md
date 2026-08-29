@@ -232,11 +232,37 @@ confirmación pasó a mandarse adentro del request (ver *El fallo de SMTP se ve*
 que exigía es el mismo: primero se guarda el token, después sale el link que lo nombra. Sigue
 valiendo tal cual para los mails que **sí** quedaron en background.
 
+### El aviso de que alguien se registró (2026-08-28)
+Cada alta nueva le manda un mail a `OPERATOR_EMAIL`. Pedido por Miguel: hoy, para enterarse de
+que alguien empezó a usar FactuMov, hay que entrar a la base — que es la peor forma posible de
+seguir el único número que importa en una app recién publicada.
+
+- **Sale del registro y no de la confirmación**, o sea que avisa de una cuenta que todavía no
+  se puede usar. Es a propósito: el que se registró y no confirmó también es información, y es
+  la mitad interesante —alguien entró, quiso, y quedó a mitad de camino—. El cuerpo lo dice con
+  todas las letras para que nadie lea "usuario nuevo" donde dice "intento".
+- **Solo cuando aparece una fila que no estaba.** Las otras dos ramas de `register` —dirección
+  sin confirmar que se vuelve a registrar, dirección ya confirmada— no son alguien
+  registrándose: son alguien volviendo.
+- **En `BackgroundTasks` y best effort, y acá eso es parte de la seguridad, no una costumbre.**
+  `register` contesta lo mismo exista o no la dirección, y las tres ramas mandan un mail
+  justamente para que las tres puedan fallar igual. Un envío sincrónico de más en una sola de
+  las tres la haría tardar el doble que las otras dos, y el reloj contestaría la pregunta que
+  el 202 idéntico se cuida de no contestar — el mismo oráculo que el hash de Argon2 evita
+  hasheando antes de mirar la base. Corriendo después de la respuesta, la rama nueva no se
+  distingue de las otras; y si el mail no sale, el registro ya ocurrió igual.
+- **Sin `OPERATOR_EMAIL` queda un INFO en el log**, no un WARNING. Es la diferencia con el
+  aviso de la delegación: allá hay una persona esperando un click que nadie va a dar, acá no
+  hay nada pendiente. La línea nombra la variable, que es lo único que hace falta saber para
+  prenderlo.
+- **Es el segundo mail de la app que no le va a un usuario.** El otro es el de la designación
+  pendiente en ARCA — ver *ARCA → La designación que hay que aceptar a mano*.
+
 ### Mail: dónde vive cada cosa
 | Archivo | Rol |
 |---|---|
 | `services/email.py` | Transporte: `EmailSettings`, SMTP, STARTTLS, timeout, `send_email` / `send_email_best_effort` |
-| `services/notifications.py` | Contenido: asunto y cuerpo de los seis mails, y cuál de los dos transportes usa cada uno |
+| `services/notifications.py` | Contenido: asunto y cuerpo de los mails, y cuál de los dos transportes usa cada uno |
 
 Separados porque cambian por motivos distintos: cambiar de proveedor no toca una palabra de
 los textos, y corregir la redacción de un mail no debería obligar a leer código de sockets.
