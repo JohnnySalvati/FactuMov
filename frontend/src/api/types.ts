@@ -407,6 +407,21 @@ export interface Invoice {
   /** A qué dirección salió ese último envío. `null` = todavía no se mandó. */
   sent_to: string | null
 
+  /**
+   * En qué anda la copia de esta factura en Balance360.
+   *
+   * `null` es el caso más común y **no** quiere decir que algo esté pendiente: la factura se
+   * emitió sin la integración conectada, así que nunca entró al circuito y la pantalla no
+   * muestra ningún indicador.
+   */
+  balance360_status: Balance360Status | null
+  /** El id del comprobante del otro lado. `null` mientras no esté registrado. */
+  balance360_invoice_id: string | null
+  /** Por qué falló el último intento, escrito para que lo lea el usuario. */
+  balance360_error: string | null
+  /** Cuándo se registró, o cuándo se intentó por última vez. */
+  balance360_synced_at: string | null
+
   created_at: string
   updated_at: string
 
@@ -494,4 +509,62 @@ export interface InvoiceTemplateDraft {
   pos: number | null
   concepto: Concepto
   lines: InvoiceTemplateLineDraft[]
+}
+
+/**
+ * El estado de la copia de una factura en Balance360.
+ *
+ * Strings y no números, al revés que los enums fiscales: estos no son códigos de ARCA sino
+ * nombres nuestros, y el JSON manda el valor del enum de Python, que ya es la palabra.
+ */
+export const Balance360Status = {
+  pending: 'pending',
+  registered: 'registered',
+  failed: 'failed',
+} as const
+export type Balance360Status = (typeof Balance360Status)[keyof typeof Balance360Status]
+
+export const BALANCE360_STATUS_LABELS: Record<Balance360Status, string> = {
+  [Balance360Status.pending]: 'Registrando en Balance360…',
+  [Balance360Status.registered]: 'Registrada en Balance360',
+  [Balance360Status.failed]: 'No se registró en Balance360',
+}
+
+/** La conexión del usuario con su Balance360. El token nunca vuelve: solo su pista. */
+export interface Balance360Connection {
+  id: string
+  base_url: string
+  /** Los últimos cuatro caracteres del token guardado, para poder distinguirlo de otro. */
+  token_hint: string
+  /**
+   * Cuándo Balance360 lo aceptó por última vez. `null` = nunca se pudo probar.
+   *
+   * No dice que siga siendo válido: lo pueden haber revocado del otro lado sin avisarnos.
+   */
+  verified_at: string | null
+  auto_register: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface Balance360Settings {
+  /**
+   * Si el **servidor** puede guardar tokens. `false` cuando falta la clave de cifrado: la app
+   * anda igual y esta pantalla lo dice antes de que alguien pegue una credencial.
+   */
+  available: boolean
+  /** `null` = no conectado, que es un estado normal y no un error. */
+  connection: Balance360Connection | null
+}
+
+export interface Balance360ConnectionUpsert {
+  base_url: string
+  api_token: string
+  auto_register: boolean
+}
+
+export interface Balance360RegisterPendingResult {
+  attempted: number
+  registered: number
+  failed: number
 }

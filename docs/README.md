@@ -20,6 +20,7 @@ es por qué.
 | [`arca.md`](arca.md) | WSAA y el ticket en tabla, el padrón, la delegación y sus **dos partes**, el rechequeo, y por qué no hay paquete compartido con Balance360 |
 | [`emision-y-envio.md`](emision-y-envio.md) | Pedir el CAE, los importes y su redondeo, los dos códigos heredados que estaban mal, el PDF con el QR fiscal y el envío por email |
 | [`frontend.md`](frontend.md) | La SPA: sesión, mobile-first, la grilla de tarjetas y su gesto, y los detalles que costaron una vuelta |
+| [`balance360.md`](balance360.md) | La integración con Balance360: el push tras emitir, el estado por factura, el token cifrado y el contrato entre las dos apps |
 | [`ownership-y-tests.md`](ownership-y-tests.md) | `user_id` y el scoping de todas las queries, y las convenciones de la suite |
 | [`marca.md`](marca.md) | El ícono, el acento verde, los PNG y el manifest — y **la landing de InSoft**: la tarjeta de FactuMov, el ícono que le faltaba a Balance360 y cómo se publica |
 | [`produccion.md`](produccion.md) | Las **decisiones** del deploy: los tres servicios, el nginx del compose, el `.env` de producción, el pasaje a `prod` |

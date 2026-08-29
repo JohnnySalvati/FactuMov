@@ -8,6 +8,7 @@ from fastapi import FastAPI
 
 from factumov.routers import (
     auth,
+    balance360,
     customer,
     fiscal_identity,
     health,
@@ -96,6 +97,7 @@ async def _recheck_delegations_forever() -> None:
 app = FastAPI(title="FactuMov", lifespan=lifespan)
 
 app.include_router(auth.router)
+app.include_router(balance360.router)
 app.include_router(customer.router)
 app.include_router(health.router)
 app.include_router(fiscal_identity.router)

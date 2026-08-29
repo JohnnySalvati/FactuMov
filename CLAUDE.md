@@ -26,6 +26,7 @@ que cambió es que ahora se puede encontrar.
 | WSAA, padrón, delegación, `arca_tickets` | [`docs/arca.md`](docs/arca.md) |
 | Pedir el CAE, los importes, el PDF, mandarlo | [`docs/emision-y-envio.md`](docs/emision-y-envio.md) |
 | La SPA: pantallas, gestos, CSS | [`docs/frontend.md`](docs/frontend.md) |
+| Conectar con Balance360 y registrar lo emitido | [`docs/balance360.md`](docs/balance360.md) |
 | Scoping por usuario y convenciones de test | [`docs/ownership-y-tests.md`](docs/ownership-y-tests.md) |
 | Ícono, paleta, la landing de InSoft | [`docs/marca.md`](docs/marca.md) |
 | Las decisiones del deploy | [`docs/produccion.md`](docs/produccion.md) |
@@ -137,6 +138,8 @@ FactuMov/
 │   │       ├── invoice_draft.py    # ParsedInvoice → InvoiceTemplateDraft
 │   │       ├── invoice_totals.py   # neto, IVA y total según la letra
 │   │       ├── emission.py         # modelo → CAE de ARCA → Invoice guardada
+│   │       ├── balance360.py       # copia la factura emitida a Balance360
+│   │       ├── secrets.py          # cifra los secretos que hay que poder volver a leer
 │   │       └── invoice_pdf.py      # Invoice → QR + HTML + PDF (imprime las propias)
 │   └── tests/
 │       └── samples/                # 10 facturas PDF reales (1 A, 4 B, 5 C)

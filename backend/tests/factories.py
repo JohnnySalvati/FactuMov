@@ -25,11 +25,14 @@ import itertools
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from factumov.enums import Concepto, CondicionIva, DocType, IvaAliquot
+from factumov.enums import Concepto, CondicionIva, DocType, IvaAliquot, VoucherType
 from factumov.models.arca_ticket import ArcaTicket
+from factumov.models.balance360_connection import Balance360Connection
 from factumov.models.customer import Customer
 from factumov.models.email_confirmation import EmailConfirmation
 from factumov.models.fiscal_identity import FiscalIdentity
+from factumov.models.invoice import Invoice
+from factumov.models.invoice_line import InvoiceLine
 from factumov.models.invoice_template import InvoiceTemplate
 from factumov.models.invoice_template_line import InvoiceTemplateLine
 from factumov.models.password_reset import PasswordReset
@@ -37,6 +40,7 @@ from factumov.models.user import User
 from factumov.models.user_session import UserSession
 from factumov.schemas.invoice_template import InvoiceTemplateCreate
 from factumov.schemas.invoice_template_line import InvoiceTemplateLineCreate
+from factumov.services import secrets as secrets_service
 from factumov.services.security import hash_opaque_token, hash_password
 
 _sequence = itertools.count(1)
@@ -257,3 +261,90 @@ def make_arca_ticket(
     db.add(ticket)
     db.flush()
     return ticket
+
+
+def make_invoice(
+    db,
+    fiscal_identity,
+    customer,
+    voucher_type=VoucherType.A,
+    pos=1,
+    number=None,
+    lines=None,
+    net_total=Decimal("1000.00"),
+    iva_total=Decimal("210.00"),
+    total=Decimal("1210.00"),
+):
+    """Una factura ya emitida, escrita directo por el ORM.
+
+    No pasa por `services/emission.py` a propósito: emitir sale a ARCA, y lo que estos tests
+    necesitan es el resultado —una fila con CAE— y no el camino. Recibe la identidad fiscal y
+    el cliente enteros y no sus ids porque copia de ellos las columnas del emisor y del
+    receptor, que es justamente lo que hace la emisión de verdad.
+    """
+    if lines is None:
+        lines = [
+            InvoiceLine(
+                position=0,
+                description="Desarrollo",
+                quantity=Decimal("1"),
+                unit_price=Decimal("1000.00"),
+                iva_aliquot=IvaAliquot.standard,
+            )
+        ]
+    invoice = Invoice(
+        fiscal_identity_id=fiscal_identity.id,
+        customer_id=customer.id,
+        voucher_type=voucher_type,
+        pos=pos,
+        number=number if number is not None else next(_sequence),
+        date=datetime.now(UTC).date(),
+        concepto=Concepto.products,
+        cae="86350816969306",
+        cae_expiry=datetime.now(UTC).date() + timedelta(days=10),
+        net_total=net_total,
+        iva_total=iva_total,
+        total=total,
+        issuer_name=fiscal_identity.name,
+        issuer_tax_id=fiscal_identity.tax_id,
+        issuer_condicion_iva=fiscal_identity.condicion_iva,
+        issuer_address=fiscal_identity.address,
+        issuer_iibb=fiscal_identity.iibb,
+        issuer_start_date=fiscal_identity.start_date,
+        customer_name=customer.name,
+        customer_doc_type=customer.doc_type,
+        customer_doc_number=customer.doc_number,
+        customer_condicion_iva=customer.condicion_iva,
+        customer_address=customer.address,
+        lines=lines,
+    )
+    db.add(invoice)
+    db.flush()
+    return invoice
+
+
+def make_balance360_connection(
+    db,
+    user_id,
+    base_url="https://balance.test",
+    token="b360_token_de_prueba",
+    auto_register=True,
+    verified_at=None,
+):
+    """La conexión con Balance360, con el token cifrado de verdad.
+
+    Cifra en vez de escribir cualquier cosa en `encrypted_token` porque el camino que estos
+    tests ejercitan lo descifra: un valor inventado fallaría en `secrets.decrypt` y el test
+    pasaría —o fallaría— por un motivo que no es el que está probando.
+    """
+    connection = Balance360Connection(
+        user_id=user_id,
+        base_url=base_url,
+        encrypted_token=secrets_service.encrypt(token),
+        token_hint=token[-4:],
+        auto_register=auto_register,
+        verified_at=verified_at,
+    )
+    db.add(connection)
+    db.flush()
+    return connection

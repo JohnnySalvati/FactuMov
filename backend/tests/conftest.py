@@ -18,6 +18,7 @@ from factumov.main import app
 from factumov.models.base import Base
 from factumov.services import arca as arca_service
 from factumov.services import email as email_service
+from factumov.services import secrets as secrets_service
 from factumov.services.rate_limit import reset_all as reset_all_limiters
 from tests import factories
 
@@ -84,6 +85,30 @@ def email_settings(monkeypatch):
     email_service.get_email_settings.cache_clear()
     yield
     email_service.get_email_settings.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def secrets_settings(monkeypatch):
+    """Una clave de cifrado fija para toda la suite, y desenganchada del `.env`.
+
+    Autouse por lo mismo que `email_settings` y `arca_settings`: sin esto, tener o no tener
+    `SECRET_ENCRYPTION_KEY` en el `.env` de la máquina decide si los tests de la integración
+    con Balance360 pasan, y la falla aparece en una máquina y en ninguna otra.
+
+    La clave está escrita acá en claro y no pasa nada: es de un entorno de prueba y no cifra
+    nada que exista fuera de esta suite. El día que un test necesite probar el caso *sin*
+    clave, la borra con `monkeypatch.delenv` y limpia los dos caches.
+
+    Los dos `cache_clear` son los dos `lru_cache` del módulo: el de la config y el del cifrador
+    construido a partir de ella. Limpiar solo el primero dejaría el Fernet viejo en pie.
+    """
+    monkeypatch.setitem(secrets_service.SecretsSettings.model_config, "env_file", None)
+    monkeypatch.setenv("SECRET_ENCRYPTION_KEY", "2fB0k8b3xJ0Zr1nQ7yQ0m4l6q8s2u4w6y8A0C2E4G6I=")
+    secrets_service.get_secrets_settings.cache_clear()
+    secrets_service._cipher.cache_clear()
+    yield
+    secrets_service.get_secrets_settings.cache_clear()
+    secrets_service._cipher.cache_clear()
 
 
 # El CUIT que lleva el certificado de prueba en el `serialNumber` del subject. No es el de

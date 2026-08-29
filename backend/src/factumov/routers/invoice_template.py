@@ -3,10 +3,12 @@ import uuid
 from datetime import date
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile
 
+from factumov.crud import balance360_connection as balance360_connection_crud
 from factumov.crud import customer as customer_crud
 from factumov.crud import fiscal_identity as fiscal_identity_crud
+from factumov.crud import invoice as invoice_crud
 from factumov.crud import invoice_template as invoice_template_crud
 from factumov.dependencies import (
     CurrentUserDep,
@@ -34,6 +36,7 @@ from factumov.schemas.invoice_template import (
     InvoiceTemplateUpdate,
 )
 from factumov.schemas.invoice_template_draft import InvoiceTemplateDraft
+from factumov.services import balance360
 from factumov.services.emission import EmissionRequest, emission_date_bounds, emit
 from factumov.services.invoice_draft import build_draft
 from factumov.services.invoice_parser import parse_invoice_pdf
@@ -226,6 +229,7 @@ def preview_emission(invoice_template: InvoiceTemplateDep) -> InvoicePreview:
 def emit_invoice(
     data: EmitRequest,
     invoice_template: InvoiceTemplateDep,
+    background_tasks: BackgroundTasks,
     db: SessionDep,
     user: CurrentUserDep,
 ) -> Invoice:
@@ -303,6 +307,21 @@ def emit_invoice(
             "el sitio de ARCA si la factura quedó emitida antes de volver a intentar.",
         )
 
+    # El registro en Balance360 va **después** de la emisión y desacoplado de ella. Cuando
+    # llegamos acá el CAE ya existe y es irreversible: hacer que la respuesta dependa de que
+    # la otra app conteste convertiría un Balance360 caído en una emisión sin respuesta, con
+    # un comprobante autorizado del que el usuario no se entera. La factura sale en `pending`
+    # y la copia ocurre en un `BackgroundTask`, que corre después de mandar el 201.
+    connection = balance360_connection_crud.get_for_user(db, user.id)
+    should_register = connection is not None and connection.auto_register
+    if should_register:
+        invoice_crud.mark_balance360_pending(db, invoice)
+
     db.commit()
     db.refresh(invoice)
+
+    if should_register:
+        # Ids y no el objeto: la sesión de este request se cierra antes de que la tarea corra.
+        background_tasks.add_task(balance360.register_in_background, invoice.id, user.id)
+
     return invoice

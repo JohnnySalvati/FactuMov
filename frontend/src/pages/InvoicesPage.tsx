@@ -49,11 +49,17 @@ export function InvoicesPage() {
                 <span className="record-main">
                   <strong className="mono">
                     {invoice.label}
-                    {/* La única marca que se muestra en la lista, con el mismo criterio que
-                        el "Sin verificar" de las identidades fiscales: es el único pendiente
-                        que puede tener una factura ya emitida, y sin esto habría que entrar a
-                        cada una para encontrar la que falta mandar. */}
+                    {/* Las dos marcas de la lista, con el mismo criterio que el "Sin
+                        verificar" de las identidades fiscales: son los únicos pendientes que
+                        puede tener una factura ya emitida, y sin esto habría que entrar a cada
+                        una para encontrar la que falta mandar o registrar. */}
                     {invoice.sent_at === null && <span className="badge pending">Sin enviar</span>}
+                    {/* Solo `failed`. `pending` dura segundos —el registro corre apenas
+                        sale la respuesta de emitir— y marcarlo acá haría parpadear un
+                        cartel que ya no es cierto para cuando alguien lo lee. */}
+                    {invoice.balance360_status === 'failed' && (
+                      <span className="badge pending">Sin registrar</span>
+                    )}
                   </strong>
                   <span className="muted">{invoice.customer_name}</span>
                 </span>

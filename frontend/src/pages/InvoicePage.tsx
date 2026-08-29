@@ -2,7 +2,12 @@ import { useCallback, useState } from 'react'
 import { Link, Navigate, useParams } from 'react-router'
 
 import { ApiError, api } from '../api/client'
-import { CONCEPTO_LABELS, IVA_ALIQUOT_LABELS, type Invoice } from '../api/types'
+import {
+  BALANCE360_STATUS_LABELS,
+  CONCEPTO_LABELS,
+  IVA_ALIQUOT_LABELS,
+  type Invoice,
+} from '../api/types'
 import { Notice } from '../components/Notice'
 import { formatDate, money } from '../format'
 import { useResource } from '../hooks/useResource'
@@ -34,6 +39,7 @@ function InvoiceScreen({ id }: { id: string }) {
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<string>()
   const [justSent, setJustSent] = useState(false)
+  const [registering, setRegistering] = useState(false)
 
   async function send() {
     if (sending) return
@@ -50,6 +56,27 @@ function InvoiceScreen({ id }: { id: string }) {
       setSendError(caught instanceof ApiError ? caught.detail : 'No se pudo mandar el mail.')
     } finally {
       setSending(false)
+    }
+  }
+
+  /**
+   * Reintenta la copia en Balance360. **No hay confirmación y no hace falta.**
+   *
+   * Es idempotente del otro lado: el id de esta factura viaja como clave, así que un segundo
+   * registro devuelve el comprobante que ya estaba en vez de duplicarlo. Es la diferencia con
+   * emitir, donde repetir crea un comprobante nuevo y por eso hay una pantalla entera de
+   * confirmación.
+   */
+  async function register() {
+    if (registering) return
+    setRegistering(true)
+    try {
+      await api.post<Invoice>(`/invoices/${id}/register`, undefined)
+      // Sin `catch` que muestre nada: el endpoint contesta 200 ande o no ande, y el motivo del
+      // fallo vuelve adentro de la factura. Recargar es lo que lo pone en pantalla.
+      invoice.reload()
+    } finally {
+      setRegistering(false)
     }
   }
 
@@ -186,6 +213,36 @@ function InvoiceScreen({ id }: { id: string }) {
               </p>
             )}
           </div>
+
+          {/* El bloque de Balance360 aparece **solo si la factura entró al circuito**. Con
+              `null` —el caso de todas las emitidas antes de conectar la cuenta— no se muestra
+              nada: un indicador en gris diciendo "no registrada" en cada factura vieja sería
+              ruido permanente sobre algo que nunca tuvo que pasar. */}
+          {data.balance360_status !== null && (
+            <div className="card stack">
+              <p style={{ margin: 0 }}>
+                {BALANCE360_STATUS_LABELS[data.balance360_status]}
+                {data.balance360_synced_at !== null && (
+                  <span className="muted">
+                    {' '}
+                    · {formatDate(data.balance360_synced_at.slice(0, 10))}
+                  </span>
+                )}
+              </p>
+
+              {/* El motivo tal como lo dio Balance360: "el CUIT no está cargado", "elegí una
+                  entidad". Es lo único que le dice al usuario qué tiene que arreglar allá. */}
+              {data.balance360_error !== null && (
+                <Notice kind="warn">{data.balance360_error}</Notice>
+              )}
+
+              {data.balance360_status !== 'registered' && (
+                <button className="secondary" onClick={register} disabled={registering}>
+                  {registering ? 'Registrando…' : 'Reintentar el registro'}
+                </button>
+              )}
+            </div>
+          )}
         </>
       )}
     </div>

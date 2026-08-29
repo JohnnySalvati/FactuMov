@@ -12,16 +12,26 @@ cliente SOAP es autouse y falla ruidosamente si alguien llama a una operación q
 configuró.
 """
 
+import uuid
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 from requests.exceptions import ConnectionError as RequestsConnectionError
 from sqlalchemy import select
 from zeep.exceptions import Fault
 
-from factumov.enums import Concepto, CondicionIva, DocType, IvaAliquot, VoucherType
+from factumov import database
+from factumov.enums import (
+    Balance360Status,
+    Concepto,
+    CondicionIva,
+    DocType,
+    IvaAliquot,
+    VoucherType,
+)
 from factumov.exceptions import ArcaError, WsfeError
 from factumov.models.invoice import Invoice
 from factumov.services import arca, wsfe
@@ -816,3 +826,101 @@ def test_the_pdf_opens_in_the_browser_instead_of_downloading(client, emitted):
 
     assert response.headers["content-disposition"].startswith("inline")
     assert "FactuMov-B-00001-00000042.pdf" in response.headers["content-disposition"]
+
+
+# --- El registro en Balance360 ---------------------------------------------------------------
+#
+# Va acá y no en `test_balance360.py` porque lo que se prueba es el enganche con la emisión, y
+# el montaje que hace falta —el SOAP mockeado, la identidad delegada, el modelo— vive en este
+# archivo. El `TestClient` corre los `BackgroundTask` como parte del ciclo de la respuesta, así
+# que emitir por HTTP ejercita la cadena entera.
+
+
+@pytest.fixture
+def background_session(monkeypatch, db):
+    """Ata la sesión del `BackgroundTask` a la transacción del test.
+
+    `register_in_background` abre la suya con `SessionLocal` a propósito —cuando corre, la del
+    request ya se cerró—, y eso la deja mirando la base real, donde nada de lo que armó el test
+    existe: la tarea no encuentra la factura y se va sin hacer nada. Es el mismo problema que
+    resuelve `_db_override` para los requests, y la misma solución.
+
+    El `__exit__` no cierra nada: la sesión es del fixture `db`, que la cierra él.
+    """
+
+    class KeepOpen:
+        def __enter__(self):
+            return db
+
+        def __exit__(self, *args):
+            return False
+
+    monkeypatch.setattr(database, "SessionLocal", KeepOpen)
+
+
+def test_emitir_con_balance360_conectado_registra_la_factura(
+    client, db, user, template, wsfe_calls, monkeypatch, background_session
+):
+    from factumov.services import balance360
+    from tests.factories import make_balance360_connection
+
+    make_balance360_connection(db, user.id)
+    remote_id = uuid4()
+    posted = []
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        posted.append(json)
+        return SimpleNamespace(
+            status_code=201,
+            ok=True,
+            json=lambda: {
+                "id": str(remote_id),
+                "entity_id": str(uuid4()),
+                "entity_name": "InSoft",
+                "contact_id": str(uuid4()),
+                "already_registered": False,
+            },
+        )
+
+    monkeypatch.setattr(balance360.requests, "post", fake_post)
+
+    response = emit(client, template.id)
+
+    assert response.status_code == 201
+    # El 201 sale antes de que el registro ocurra: la respuesta lo dice "pendiente".
+    assert response.json()["balance360_status"] == "pending"
+    # Y para cuando el request terminó, el background task ya corrió.
+    assert posted and posted[0]["cae"] == response.json()["cae"]
+    invoice = db.get(Invoice, uuid.UUID(response.json()["id"]))
+    db.refresh(invoice)
+    assert invoice.balance360_status is Balance360Status.REGISTERED
+    assert invoice.balance360_invoice_id == remote_id
+
+
+def test_balance360_caido_no_impide_emitir(
+    client, db, user, template, wsfe_calls, monkeypatch, background_session
+):
+    """El CAE ya existe cuando esto corre. Un 502 acá dejaría un comprobante huérfano."""
+    from factumov.services import balance360
+    from tests.factories import make_balance360_connection
+
+    make_balance360_connection(db, user.id)
+
+    def explode(url, json=None, headers=None, timeout=None):
+        raise balance360.RequestException("connection refused")
+
+    monkeypatch.setattr(balance360.requests, "post", explode)
+
+    response = emit(client, template.id)
+
+    assert response.status_code == 201
+    invoice = db.get(Invoice, uuid.UUID(response.json()["id"]))
+    db.refresh(invoice)
+    assert invoice.balance360_status is Balance360Status.FAILED
+
+
+def test_sin_cuenta_conectada_emitir_no_deja_nada_pendiente(client, db, template, wsfe_calls):
+    """Estado `NULL`: la factura ni siquiera entra al circuito."""
+    response = emit(client, template.id)
+
+    assert response.json()["balance360_status"] is None

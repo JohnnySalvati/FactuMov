@@ -17,6 +17,7 @@ import { LoginPage } from './pages/LoginPage'
 import { NewTemplatePage } from './pages/NewTemplatePage'
 import { RegisterPage } from './pages/RegisterPage'
 import { ResetPasswordPage } from './pages/ResetPasswordPage'
+import { SettingsPage } from './pages/SettingsPage'
 import { TemplatePage } from './pages/TemplatePage'
 import { TemplatesPage } from './pages/TemplatesPage'
 
@@ -68,6 +69,12 @@ export function App() {
               <Route path="/clientes" element={<CustomersPage />} />
               <Route path="/clientes/nuevo" element={<CustomerPage />} />
               <Route path="/clientes/:id" element={<CustomerPage />} />
+              {/* Fuera de las cuatro pestañas y del gesto de deslizar: los ajustes se
+                  tocan una vez y no se vuelven a mirar, así que ocupar un quinto lugar en la
+                  barra le cobraría ancho a las cuatro que sí se usan todas las semanas. Se
+                  llega por el engranaje, que en el celular es lo único de la derecha que se
+                  ve — el mail del usuario está oculto abajo de 640px. */}
+              <Route path="/ajustes" element={<SettingsPage />} />
             </Route>
           </Route>
 

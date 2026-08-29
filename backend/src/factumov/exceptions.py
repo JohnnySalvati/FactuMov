@@ -129,3 +129,38 @@ class UndecidableVoucherTypeError(Exception):
     `services/voucher.py` se rompa ruidosamente si mañana alguien afloja aquel validador, en
     vez de que la deducción devuelva una letra plausible y equivocada.
     """
+
+
+class SecretsNotConfiguredError(Exception):
+    """El servidor no tiene `SECRET_ENCRYPTION_KEY`, así que no puede guardar secretos ajenos.
+
+    Es una falta de configuración de la instalación y no un error del usuario, pero termina
+    en un 503 con un texto que lo dice: el que aprieta "conectar" no puede hacer nada al
+    respecto, y un 500 mudo lo dejaría reintentando para siempre.
+    """
+
+
+class SecretDecryptionError(Exception):
+    """Hay un secreto guardado pero la clave actual no lo abre.
+
+    Pasa cuando `SECRET_ENCRYPTION_KEY` cambió —se rotó, se perdió, se levantó otro entorno
+    contra la misma base—. El dato no se recupera y no hace falta: el remedio es volver a
+    pegar el token, que del otro lado se puede reemitir.
+    """
+
+
+class Balance360Error(Exception):
+    """No se pudo registrar el comprobante en Balance360.
+
+    Cubre las dos familias que para el usuario son lo mismo —la app no contestó, o contestó
+    que no— porque en ninguna de las dos hay una factura registrada del otro lado. La
+    diferencia entre "reintentá" y "arreglá esto en Balance360" viaja en `retryable`, no en
+    el tipo: la decide el status HTTP y no hay una jerarquía que la refleje mejor.
+
+    Nunca sube a la respuesta de `/emit`. La emisión ya ocurrió cuando esto puede fallar, y
+    hacerla fallar por el registro convertiría un problema de la copia en un CAE huérfano.
+    """
+
+    def __init__(self, message: str, *, retryable: bool = True) -> None:
+        super().__init__(message)
+        self.retryable = retryable

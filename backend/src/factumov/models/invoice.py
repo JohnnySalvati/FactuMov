@@ -16,7 +16,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from factumov.enums import Concepto, CondicionIva, DocType, VoucherType
+from factumov.enums import Balance360Status, Concepto, CondicionIva, DocType, VoucherType
 from factumov.models.base import Base, TimestampMixin
 
 if TYPE_CHECKING:
@@ -149,6 +149,29 @@ class Invoice(Base, TimestampMixin):
     # No es acuse de recibo. Dice que el servidor de mail lo aceptó, no que el cliente lo haya
     # recibido ni abierto — eso necesitaría un proveedor con webhooks, que es otra unidad.
     sent_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # --- La copia en Balance360 ---
+    #
+    # Cuatro columnas acá y no una tabla aparte: es una relación uno a uno con la factura, no
+    # tiene historia que guardar —lo que importa es el último intento— y sacarlas afuera
+    # obligaría a un join en la grilla, que es justamente donde se muestra el indicador.
+    #
+    # `None` en las cuatro es el caso más común y no significa que algo esté pendiente: la
+    # factura se emitió sin la integración conectada y nunca entró al circuito. Ver
+    # `Balance360Status`.
+    balance360_status: Mapped[Balance360Status | None] = mapped_column(Enum(Balance360Status))
+    # El id de la factura del otro lado. Es lo que vuelve del registro y lo único que permite
+    # armar el link a Balance360 desde acá.
+    balance360_invoice_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    # Por qué falló el último intento, **en el idioma del usuario**: el mensaje que devolvió
+    # Balance360 ("el CUIT no está cargado", "elegí una entidad") es accionable y es lo único
+    # que le dice qué arreglar. Se pisa en cada intento; el histórico va al log.
+    balance360_error: Mapped[str | None] = mapped_column(String(300))
+    # Cuándo se registró, o cuándo se intentó por última vez. Sirve para el "reintentado hace
+    # 5 minutos" de la pantalla y para no reintentar en loop lo que acaba de fallar.
+    balance360_synced_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
 
     fiscal_identity: Mapped["FiscalIdentity"] = relationship()
     customer: Mapped["Customer"] = relationship()

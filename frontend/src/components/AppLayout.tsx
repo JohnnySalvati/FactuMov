@@ -56,6 +56,19 @@ export function AppLayout() {
         </nav>
         <div className="app-user">
           <span className="app-user-email">{user?.email}</span>
+          {/* Los ajustes no son una quinta pestaña: se tocan una vez y le cobrarían ancho a
+              las cuatro que se usan todas las semanas. El engranaje va acá y no colgado del
+              mail porque el mail está oculto en el celular, que es el caso principal.
+              `aria-label` porque el contenido es un símbolo: sin eso el lector de pantalla
+              anuncia "engranaje" o directamente nada. */}
+          <NavLink
+            to="/ajustes"
+            className={({ isActive }) => `app-settings ${isActive ? 'active' : ''}`}
+            aria-label="Ajustes"
+            title="Ajustes"
+          >
+            ⚙
+          </NavLink>
           <button className="secondary" onClick={onLogout}>
             Salir
           </button>

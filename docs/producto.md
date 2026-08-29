@@ -97,16 +97,26 @@ escrita y a la espera de que se corra su `scp.ps1`.
    que a Balance360 le faltaba. Ver *La landing, escrita* en [`marca.md`](marca.md).
    - **Falta publicarla**: correr `scp.ps1` desde `E:\Capacitacion\InSoft\LandingPage`, que
      es lo único que toca el server.
-3. **Segundo layout del parser** — ver *Parser → Pendiente: un segundo layout*. No bloquea
+3. ~~**Integración con Balance360**~~ — **hecha el 2026-08-29.** Lo que se emite acá queda
+   asentado allá como comprobante de venta impago, sin recargarlo a mano. Toca las dos apps:
+   Balance360 sumó `POST /api/invoices/issued` —y de paso cerró su `/api`, que estaba
+   abierto—, y FactuMov, la conexión por usuario con el token cifrado, el estado de registro
+   por factura y los dos reintentos. Ver [`balance360.md`](balance360.md).
+   - **Falta emitir el token en el servidor de Balance360** y pegarlo en Ajustes. Hasta que
+     eso pase, todo lo demás de FactuMov anda igual y las facturas salen con el estado en
+     `null`, que es "no entró al circuito".
+4. **Segundo layout del parser** — ver *Parser → Pendiente: un segundo layout*. No bloquea
    nada: hoy el usuario puede cargar el modelo a mano.
-4. **WhatsApp**, la otra mitad de la funcionalidad #5. Sin empezar y sin decisión tomada
+5. **WhatsApp**, la otra mitad de la funcionalidad #5. Sin empezar y sin decisión tomada
    sobre qué proveedor.
 
 Y dos cosas que la emisión dejó anotadas y no son unidades todavía:
 
 - **Los valores de `CondicionIva` de Balance360 están mal** — ver *Emisión con CAE → Dos
   códigos heredados*. Acá se corrigieron; allá pueden estar declarando la condición
-  equivocada del receptor en cada factura. Sin revisar.
+  equivocada del receptor en cada factura. Sin revisar. La integración **no lo arregla pero
+  tampoco lo empeora**: los enums viajan por nombre justamente para que el error de allá no
+  se propague a lo que registramos nosotros.
 - **Ninguna pantalla usa `/invoices` para reemitir el mes siguiente.** Hoy se vuelve al
   modelo, que es correcto, pero "emitir igual que el mes pasado" es el gesto que más se va a
   repetir. **El comando hablado (2026-08-28) resuelve la mitad**: desde la grilla se dice

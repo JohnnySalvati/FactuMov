@@ -140,3 +140,21 @@ class CondicionIva(Enum):
     # 6 es "Responsable Monotributo". El 13 —que estaba acá antes— es "Monotributista Social",
     # una categoría distinta y mucho más chica.
     MONOTRIBUTO = 6
+
+
+class Balance360Status(Enum):
+    """En qué anda la copia de una factura emitida hacia Balance360.
+
+    `NULL` en la columna es un cuarto estado y el más común: la factura se emitió sin que el
+    usuario tuviera la integración conectada, así que nunca entró al circuito. No es
+    `FAILED` —no falló nada— ni `PENDING` —no hay nada esperando—, y la pantalla no muestra
+    ningún indicador. Que sea la ausencia de valor y no un miembro más deja además la
+    consulta de reintentos ("todas las `FAILED`") sin arrastrar las viejas.
+
+    `PENDING` es el estado en el que la factura sale de `/emit`: el registro ocurre después
+    y desacoplado, así que entre el CAE y la copia hay una ventana real, no instantánea.
+    """
+
+    PENDING = "pending"
+    REGISTERED = "registered"
+    FAILED = "failed"

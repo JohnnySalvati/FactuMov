@@ -4,6 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 
+from factumov.crud import balance360_connection as balance360_connection_crud
 from factumov.crud import invoice as invoice_crud
 from factumov.dependencies import (
     CurrentUserDep,
@@ -16,7 +17,7 @@ from factumov.schemas.invoice import InvoiceRead
 
 # Importados como módulo y no por nombre, para que un test pueda parchearlos en un solo lugar
 # — el mismo criterio que `MAX_UPLOAD_BYTES` y `notifications.py`.
-from factumov.services import invoice_pdf, notifications
+from factumov.services import balance360, invoice_pdf, notifications
 from factumov.services.email import EmailDeliveryError
 from factumov.services.invoice_pdf import format_amount
 from factumov.services.rate_limit import RateLimiter
@@ -35,6 +36,10 @@ router = APIRouter(
 _SEND_LIMITER = RateLimiter(limit=60, window_seconds=60 * 60)
 
 _NO_EMAIL_DETAIL = "Este cliente no tiene email cargado. Agregáselo en su ficha y volvé a intentar."
+
+# Un reintento por factura pega una vez a Balance360. Es más generoso que el envío de mail
+# porque no molesta a ningún tercero: lo único que gasta es una conexión contra una app propia.
+_REGISTER_LIMITER = RateLimiter(limit=120, window_seconds=60 * 60)
 
 _MAIL_UNAVAILABLE_DETAIL = (
     "No pudimos mandar el mail. La factura está emitida igual: reintentá en unos minutos."
@@ -139,6 +144,39 @@ def send_invoice(invoice: InvoiceDep, db: SessionDep, user: CurrentUserDep) -> I
 
     invoice_crud.mark_sent(db, invoice, address)
     db.commit()
+    db.refresh(invoice)
+    return invoice
+
+
+@router.post("/{invoice_id}/register", response_model=InvoiceRead)
+def register_invoice(invoice: InvoiceDep, db: SessionDep, user: CurrentUserDep) -> Invoice:
+    """Reintenta copiar **esta** factura a Balance360.
+
+    Es el botón que aparece al lado del error: el usuario cargó el CUIT que faltaba del otro
+    lado, o le reemitieron el token, y lo que quiere es probar esa factura y ver si ahora sí.
+
+    **Se puede repetir sin miedo**, y eso no lo garantiza este endpoint sino la idempotencia
+    del otro lado: el id de esta factura viaja como clave, así que un segundo registro devuelve
+    el comprobante que ya estaba en vez de duplicarlo. Es lo que permite que el reintento no
+    tenga confirmación, al revés de `/emit`.
+
+    **Siempre 200**, ande o no ande. El resultado del intento no es el resultado del request:
+    la factura vuelve con su estado y su mensaje de error adentro, que es lo que la pantalla
+    tiene que mostrar igual. Un 502 obligaría a la SPA a leer el motivo de dos lugares
+    distintos según cómo haya salido.
+
+    Sincrónico y no en background, al revés que el disparo de la emisión: acá el registro *es*
+    lo que se pidió, y hay alguien esperando para verlo.
+    """
+    enforce_rate_limit(_REGISTER_LIMITER, str(user.id))
+
+    if balance360_connection_crud.get_for_user(db, user.id) is None:
+        raise HTTPException(
+            status_code=409,
+            detail="No hay ninguna cuenta de Balance360 conectada. Conectala desde Ajustes.",
+        )
+
+    balance360.register(db, invoice)
     db.refresh(invoice)
     return invoice
 

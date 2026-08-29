@@ -222,6 +222,26 @@ a {
   display: none;
 }
 
+/* El engranaje de los ajustes. Alto y ancho fijos para que el objetivo táctil no dependa
+   del glifo, que cambia de tamaño según la fuente de emoji que tenga el sistema. */
+.app-settings {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.2rem;
+  height: 2.2rem;
+  border-radius: 8px;
+  font-size: 1.1rem;
+  text-decoration: none;
+  color: var(--muted);
+}
+
+.app-settings.active,
+.app-settings:hover {
+  color: var(--text);
+  background: var(--surface);
+}
+
 /* El "Salir" no se estira: está al lado del nombre de la app, no en un formulario. */
 .app-user button {
   width: auto;
@@ -321,6 +341,26 @@ label {
   font-size: 0.85rem;
   color: var(--muted);
   margin-bottom: 0.3rem;
+}
+
+/* El único checkbox de la app. `label` es `display: block` con el control debajo, que es lo
+   correcto para un campo de texto y absurdo para una casilla: acá el texto va al lado. El
+   `width: auto` es imprescindible — sin él la regla de abajo le da el ancho de la pantalla. */
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: inherit;
+  font-size: 0.95rem;
+}
+
+.checkbox input[type='checkbox'] {
+  width: auto;
+  /* 1.1rem y no el tamaño de fábrica: el objetivo táctil de un checkbox nativo en el celular
+     queda por debajo de lo que un dedo acierta con comodidad. */
+  min-width: 1.1rem;
+  height: 1.1rem;
+  margin: 0;
 }
 
 input,

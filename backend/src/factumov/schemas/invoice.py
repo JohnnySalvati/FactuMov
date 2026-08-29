@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from factumov.enums import Concepto, CondicionIva, DocType, VoucherType
+from factumov.enums import Balance360Status, Concepto, CondicionIva, DocType, VoucherType
 from factumov.schemas.invoice_line import InvoiceLineRead
 
 
@@ -108,6 +108,14 @@ class InvoiceRead(BaseModel):
     # se mandó.
     sent_at: datetime.datetime | None
     sent_to: str | None
+
+    # El estado de la copia en Balance360. `null` es el caso normal de casi todas las
+    # facturas —se emitieron sin la integración conectada— y la pantalla no muestra nada.
+    # Solo con un estado hay indicador, y solo con `failed` hay algo que reintentar.
+    balance360_status: Balance360Status | None
+    balance360_invoice_id: UUID | None
+    balance360_error: str | None
+    balance360_synced_at: datetime.datetime | None
 
     created_at: datetime.datetime
     updated_at: datetime.datetime

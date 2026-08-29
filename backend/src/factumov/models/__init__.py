@@ -1,4 +1,5 @@
 from factumov.models.arca_ticket import ArcaTicket
+from factumov.models.balance360_connection import Balance360Connection
 from factumov.models.customer import Customer
 from factumov.models.email_confirmation import EmailConfirmation
 from factumov.models.fiscal_identity import FiscalIdentity
@@ -12,6 +13,7 @@ from factumov.models.user_session import UserSession
 
 __all__ = [
     "ArcaTicket",
+    "Balance360Connection",
     "Customer",
     "EmailConfirmation",
     "FiscalIdentity",
