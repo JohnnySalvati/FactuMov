@@ -237,6 +237,41 @@ la escribe; el de FactuMov la tiene puesta.
 Ninguna de las dos se alcanza desde la máquina de desarrollo sin la VPN levantada: están en
 `192.168.100.x` y la LAN de casa es `192.168.1.x`.
 
+## Que los logs se vean (2026-08-29)
+`src/factumov/logging_config.py`, llamado desde el `lifespan`. Nace de una falla que costó una
+sesión entera de diagnóstico sobre una delegación que no verificaba: **los `logger.info` de la
+app no se imprimían en ninguna parte.**
+
+Uvicorn configura **sus** loggers (`uvicorn`, `uvicorn.error`, `uvicorn.access`) y no toca el
+root. Como el proyecto nunca configuró nada, todo lo que la app logueaba caía en
+`logging.lastResort` —el handler de emergencia de la stdlib—, que imprime a stderr **de WARNING
+para arriba**. O sea que la app solo sabía contar lo que salía mal.
+
+Eso no era cosmético. El barrido de delegaciones anuncia su camino feliz con dos INFO
+(`main.py` y `services/delegation_watch.py`) y saltea con un DEBUG, así que en un
+`docker compose logs app` **el barrido funcionando, el barrido sin nada que hacer y el barrido
+muerto se ven exactamente igual**: en silencio. Diagnosticar por qué una delegación no se
+verificaba sola empezó, por eso, sin ninguna evidencia.
+
+- **El nivel se pone en el logger `factumov`, no en el root.** Poner el root en INFO prendería
+  también el de zeep, urllib3 y SQLAlchemy, y los dos renglones que importan quedarían
+  enterrados — el mismo problema con la forma invertida. El root queda en WARNING, que es el
+  piso razonable para las librerías, y hay un test de cada lado.
+- **Que eso alcance depende de una sutileza que conviene tener escrita**: al propagar, un record
+  ya admitido por el logger que lo emitió no vuelve a chequear el nivel de los loggers de
+  arriba, solo el de los handlers. Por eso `factumov` en INFO alcanza con el root en WARNING.
+- **`LOG_LEVEL`, default INFO.** El default tiene que ser el que hace visible el trabajo de
+  fondo, que es justo lo que no se veía. Los niveles de la app están elegidos para eso: el
+  camino feliz es INFO y lo raro es WARNING o ERROR, así que INFO es la bitácora y no ruido.
+- **A stderr, que es donde escribe uvicorn**, para que el orden de los renglones entre las dos
+  fuentes se conserve.
+- **Se llama desde el `lifespan` y no en el import de `main`.** Tocar la config global de
+  `logging` al importar se la impondría a cualquiera que importe el módulo — los tests, sin ir
+  más lejos, que arman su `TestClient` sin levantar el lifespan. El lifespan es exactamente el
+  momento en que esto pasa a ser un proceso servidor.
+- **Idempotente**, con una marca sobre el handler propio: sin eso, una segunda llamada
+  duplicaría cada línea.
+
 ## Lo que ya estaba decidido y sigue igual
 - **Backups.** Hoy no hay ninguno de FactuMov. El comando está en
   [`DEPLOYMENT.md`](DEPLOYMENT.md) § 8.

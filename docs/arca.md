@@ -321,6 +321,37 @@ código 600. Esa es la raíz de todo lo que sigue.
   homo, y homo no ejercita el paso 2.** La tabla ya estaba rotulada así; queda anotado igual
   porque es fácil leerla como si el camino de producción estuviera probado entero.
 
+### Aceptar la designación tampoco alcanza: hay un tercer paso (2026-08-29)
+Descubierto en producción, otra vez con `27177624441`. El *Administrador de Relaciones* mostraba
+las once relaciones delegadas al `20182810674` y la de **Facturación Electrónica** decía
+`Aceptada: SI` — y WSFE seguía contestando 600. La lista de arriba estaba incompleta:
+
+3. **FactuMov le pasa ese servicio a su certificado**: *Administrador de Relaciones* → *Nueva
+   Relación*, con **Representado** el CUIT delegante, **Servicio** → BUSCAR → WebServices →
+   Facturación Electrónica, y **Representante** → BUSCAR → el **computador** cuyo certificado usa
+   la app. No el CUIT `20182810674`, que es el que viene puesto por default.
+4. Recién ahí WSFE habilita el CUIT.
+
+**Por qué:** WSAA no le emite el ticket a una persona, se lo emite a un **certificado**, y la
+lista de relaciones que WSFE valida al leer `Auth.Cuit` es la que cuelga de ese certificado y no
+la del CUIT que lo posee. Aceptar la designación habilita a la persona; el paso 3 es el que
+traslada ese permiso al certificado. De ahí que el 600 diga literalmente `ValidacionDeToken`.
+
+- **Va por cada CUIT que nos delegue.** No es un alta que se hace una vez y queda.
+- **Los dos estados se ven idénticos desde la app**, y por eso el diagnóstico costó una sesión
+  entera: una designación sin aceptar y una aceptada sin el paso 3 devuelven el mismo 600. Lo
+  único que los separa es abrir el Administrador de Relaciones y mirar.
+- **La sonda de control que lo aísla**: `FEParamGetPtosVenta` con `Auth.Cuit` = el CUIT del
+  propio certificado. Eso no depende de ninguna delegación, así que si el control contesta bien
+  y el CUIT delegado contesta 600, el problema está en las relaciones de ese CUIT y no en
+  nuestro acceso a WSFE. Es lo primero que conviene correr ante un 600 inesperado, antes de
+  tocar una línea de código.
+- **El mail al operador describía solo el paso 2**, o sea que documentaba un trámite que no
+  alcanza — la causa raíz de que esto llegara a producción. Corregido: ahora lista los dos y
+  nombra el error fácil de cometer, que es dejar el propio CUIT como Representante.
+- **Sigue sin poder automatizarse.** Igual que la aceptación, es Clave Fiscal y una página que
+  ningún web service expone. Lo que cambia es que ahora el mail lo dice completo.
+
 ### El estado que ARCA no publica
 `fiscal_identities.delegation_claimed_at` (migración `c8a1e4f60b92`): cuándo el usuario dijo "ya
 delegué" con ARCA todavía diciendo que no.
@@ -360,19 +391,42 @@ delegué" con ARCA todavía diciendo que no.
   instalación sin operador tiene que poder arrancar. Sin él, el aviso queda en el log — misma
   política que `send_email_best_effort`, un escalón antes.
 
-### El rechequeo, en dos lugares
+### El rechequeo, en tres lugares
 Nadie nos avisa cuando la delegación empieza a funcionar, así que lo único que se puede hacer es
-volver a preguntar. Se pregunta en dos momentos y por dos motivos distintos:
+volver a preguntar. Se pregunta en tres momentos y por motivos distintos:
 
 - **Al abrir la identidad en la pantalla**, una vez por montaje (`useRef`, contra el doble
   montaje de StrictMode). Solo si no está verificada **o si la verificación tiene más de una
   semana** — repreguntar por una verificada hace días no aprende nada y gasta cuota compartida.
-  Es silencioso: no lo pidió nadie, así que un ARCA caído deja la pantalla como estaba en vez de
-  pintar un cartel rojo.
+- **Al abrir la grilla de identidades** (2026-08-29), sobre las mismas que necesitarían chequeo,
+  de a una y en orden. Se agregó porque el aviso "Sin verificar" de las tarjetas salía de la
+  columna guardada y nada más: una identidad ya habilitada en ARCA seguía marcada como sin
+  verificar hasta que alguien entrara a ella. La marca existe justamente para no tener que entrar
+  tarjeta por tarjeta, o sea que era la única pantalla donde el dato tenía que estar fresco y la
+  única que no lo refrescaba. **Secuencial y no `Promise.all`**: son varios segundos de
+  conversación con ARCA por un certificado compartido, y dispararlas juntas es la forma más
+  rápida de comerse el 429. **Se corta en el primer fallo**, porque lo que hace fallar a una las
+  hace fallar a todas.
 - **`services/delegation_watch.py`, cada 15 minutos**, sobre las que avisaron y siguen sin
   verificar. Lo que se espera es que una persona lea un mail y haga un click, o sea tiempo
   humano: 15 minutos deja la espera del usuario en unos 7 de promedio y cuesta 4 llamadas por
   hora **por identidad pendiente**, que en el caso normal son cero.
+
+Los tres comparten el criterio y el freno, que viven en `api/delegation.ts` del lado del
+cliente: `needsChecking` decide si el dato guardado ya sirve, y `checkedRecently` pone un piso de
+cinco minutos entre dos consultas por la misma identidad. Ese segundo freno es nuevo y lo trajo
+la grilla: una identidad sin verificar la necesita *siempre*, así que sin él entrar y salir de la
+lista diez veces son diez llamadas por CUIT — y con el limitador en 30 por hora, el propio
+usuario se dejaría afuera. Vive a nivel de módulo y no en un `useRef` justamente porque lo que
+hay que sobrevivir es el desmontaje al navegar entre la grilla y el detalle.
+
+**Los dos chequeos del cliente ya no son mudos** (2026-08-29). Siguen sin pintar el cartel rojo
+—no los pidió nadie, y el rojo es de las acciones que el usuario eligió—, pero el
+`.catch(() => {})` que tenían dejaba un 502 o un 429 viéndose *exactamente igual* que un "ARCA
+dice que todavía no": la pantalla se quedaba en «Falta un paso nuestro» afirmando que estamos
+mirando, justo cuando no habíamos podido mirar. Ahora queda una línea en gris que dice que no se
+pudo consultar, y el 429 se distingue del resto porque tiene otra salida (esperar) que el usuario
+puede tomar.
 
 **Descartado: un link en el mail del operador para avisarle al sistema que ya aceptó.** Era la
 idea original y tiene dos problemas. El primero es que un link que *afirma* "ya acepté" es una

@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from factumov.logging_config import configure_logging
 from factumov.routers import (
     auth,
     balance360,
@@ -35,10 +36,18 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     levanta el server, que es cuando el `.env` está a mano. Los endpoints que dependen del
     mail contestan igual 503 en vez de un 202 mentiroso — ver `routers/auth.py`.
 
-    El logger no tiene handler propio: uvicorn configura los suyos y no toca el root, así que
-    esto sale por `logging.lastResort`, que imprime a stderr de WARNING para arriba. Alcanza
-    justo para lo que hace falta acá, que es que se vea en la terminal.
+    **Lo primero que hace es configurar el logging**, antes de loguear nada. Hasta que no
+    corre `configure_logging` el único handler que existe es `logging.lastResort`, que imprime
+    de WARNING para arriba: el ERROR de abajo se vería igual, pero el INFO del caso normal no,
+    y tampoco los del barrido de delegaciones. Ver `logging_config.py`.
+
+    Va acá y no en el import del módulo porque tocar la config global de `logging` al importar
+    le impondría los handlers de la app a cualquiera que importe `main` —los tests, sin ir más
+    lejos, que arman su propio `TestClient` sin levantar el lifespan—. El lifespan es
+    exactamente el momento en que esto empieza a ser un proceso servidor y no un módulo.
     """
+    configure_logging()
+
     problem = email.config_problem()
     if problem is None:
         logger.info("Config de mail leída correctamente.")

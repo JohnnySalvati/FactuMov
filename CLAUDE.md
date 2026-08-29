@@ -128,6 +128,7 @@ FactuMov/
 │   ├── src/factumov/
 │   │   ├── main.py
 │   │   ├── database.py
+│   │   ├── logging_config.py     # que los INFO de la app se impriman — ver *produccion*
 │   │   ├── models/      # SQLAlchemy
 │   │   ├── schemas/     # Pydantic — entrada/salida de la API
 │   │   ├── crud/

@@ -87,6 +87,13 @@ lleva a `/modelos/nuevo`, `/identidades/nueva`, `/clientes/nuevo`.
   usuario tendría que entrar tarjeta por tarjeta a buscar cuál lo está frenando. Aparece solo
   cuando falta, o sea que el estado normal sigue siendo una grilla de nombres. La regla que fija
   el `warning` de `TileItem` es esa: un estado que bloquea, no un dato más que mostrar.
+- **Y ese aviso se refresca contra ARCA al abrir la grilla** (2026-08-29). Antes salía de la
+  columna guardada y nada más, así que decía la verdad recién después de entrar a la identidad:
+  una que ya estaba habilitada seguía marcada como sin verificar hasta que alguien la abriera.
+  Era la única pantalla donde el dato tenía que estar fresco —existe justamente para no entrar
+  tarjeta por tarjeta— y la única que no lo refrescaba. El criterio y los frenos son los mismos
+  que usa la pantalla de detalle y viven en `api/delegation.ts`; el porqué de cada uno, en
+  *El rechequeo, en tres lugares* de [`arca.md`](arca.md).
 - **Se fue `DeleteButton` con las tablas.** El tacho de dos pasos ("¿Eliminar? Sí / No") existía
   para las filas; en la grilla, sostener el dedo medio segundo ya *es* el paso deliberado, y lo
   que hace falta después es un objetivo grande y sin ambigüedad. Lo que se conserva de él es la

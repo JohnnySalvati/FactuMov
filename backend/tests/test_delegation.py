@@ -415,6 +415,29 @@ def test_the_notice_names_who_is_waiting(
     assert "Aceptación de Designación" in body
 
 
+def test_the_notice_asks_for_the_second_step_too(
+    client, fiscal_identity, wsfe_returns, operator, sent_emails
+):
+    """Aceptar la designación **no alcanza**, y el mail que decía que sí costó una producción.
+
+    La designación aceptada habilita a la persona; WSAA le emite el ticket al certificado, y la
+    lista de relaciones que WSFE valida es la del certificado. Falta crear la relación que la
+    aceptación no crea, con el computador como representante. Sin ese paso ARCA sigue
+    contestando 600 —indistinguible de no haber hecho nada— y el operador se queda mirando una
+    designación que dice "Aceptada: SI" mientras el usuario espera. Ver *Delegar tiene dos
+    partes* en `docs/arca.md`.
+    """
+    wsfe_returns(NOT_DELEGATED)
+
+    claim(client, fiscal_identity)
+
+    body = sent_emails[0].body
+    assert "Nueva Relación" in body
+    assert "COMPUTADOR" in body
+    # Que sea por cada CUIT es la mitad que hace que el trámite no se pueda dar por hecho.
+    assert "por cada CUIT" in body
+
+
 def test_only_the_first_claim_mails(client, fiscal_identity, wsfe_returns, operator, sent_emails):
     """Un usuario impaciente apretando el botón no puede convertirse en veinte mails."""
     wsfe_returns(NOT_DELEGATED)

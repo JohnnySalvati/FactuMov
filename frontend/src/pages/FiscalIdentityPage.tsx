@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 
 import { ApiError, api } from '../api/client'
+import { checkedRecently, markChecked, needsChecking } from '../api/delegation'
 import {
   CONDICION_IVA_LABELS,
   CondicionIva,
@@ -447,18 +448,6 @@ function FiscalIdentityForm({
  * hay que acordarse de apretar.
  */
 
-/** Cada cuánto vale la pena volver a preguntarle a ARCA por una delegación ya verificada.
- *
- *  No es un vencimiento: es cada cuánto se repregunta sola. La delegación se revoca del lado de
- *  ARCA sin avisarnos, y sin esto la app se enteraría recién con un rechazo al emitir — o sea
- *  en el peor momento posible. Una semana es holgado porque revocar no es frecuente, y el costo
- *  es una llamada por identidad por semana. */
-const STALE_AFTER_MS = 7 * 24 * 60 * 60 * 1000
-
-function needsChecking(verifiedAt: string | null): boolean {
-  return verifiedAt === null || Date.now() - new Date(verifiedAt).getTime() > STALE_AFTER_MS
-}
-
 function DelegationCard({
   identity,
   onChanged,
@@ -472,7 +461,13 @@ function DelegationCard({
   // anteriores— de un `setState` sincrónico dentro de un efecto, y sobre todo prender el
   // indicador *después* del primer render hace que la tarjeta muestre "Sin verificar" un frame
   // antes de decir que está consultando. El estado inicial ya sabe cuál de los dos es.
-  const [busy, setBusy] = useState(() => needsChecking(identity.delegation_verified_at))
+  const [busy, setBusy] = useState(
+    () => needsChecking(identity.delegation_verified_at) && !checkedRecently(identity.id),
+  )
+  // Por qué el chequeo automático no pudo contestar. Va aparte de `error` a propósito: `error`
+  // es el cartel rojo de una acción que el usuario eligió, y esto es una nota al pie sobre algo
+  // que la pantalla intentó sola.
+  const [autoNote, setAutoNote] = useState<string>()
   // La última respuesta de ARCA. Se guarda por un solo dato: `delegate_tax_id`, el CUIT al que
   // hay que autorizar. No se escribe acá a mano aunque sea el mismo siempre — sale de
   // `arca.get_delegate_tax_id()`, que lo lee del certificado, y una segunda copia es
@@ -481,12 +476,16 @@ function DelegationCard({
 
   const run = useCallback(
     async (path: 'verify-delegation' | 'claim-delegation') => {
+      // Los dos endpoints salen a ARCA con el mismo certificado, así que los dos cuentan para
+      // el piso entre consultas — ver `api/delegation.ts`.
+      markChecked(identity.id)
       try {
         const result = await api.post<DelegationStatus>(
           `/fiscal-identities/${identity.id}/${path}`,
         )
         setStatus(result)
         setError(undefined)
+        setAutoNote(undefined)
         onChanged({
           ...identity,
           delegation_verified_at: result.delegation_verified_at,
@@ -505,17 +504,27 @@ function DelegationCard({
   // desarrollo dispararía dos llamadas a ARCA por cada apertura — el mismo guard que
   // `ConfirmEmailPage`. Y la condición es `needsChecking` y no "siempre": repreguntar por una
   // identidad verificada hace días no aprende nada y gasta cuota que es de todos los usuarios,
-  // porque el certificado de ARCA es uno solo para toda la app.
+  // porque el certificado de ARCA es uno solo para toda la app. `checkedRecently` es el mismo
+  // cuidado a través de los montajes, ahora que la grilla también pregunta.
   const checkedOnMount = useRef(false)
   useEffect(() => {
     if (checkedOnMount.current) return
     if (!needsChecking(identity.delegation_verified_at)) return
+    if (checkedRecently(identity.id)) return
     checkedOnMount.current = true
-    // Silencioso a propósito: esto no lo pidió nadie. Si ARCA no contesta, la pantalla se queda
-    // mostrando lo que ya sabía, que sigue siendo cierto. El cartel rojo queda para las dos
-    // acciones que el usuario sí eligió.
-    void run('verify-delegation').catch(() => {})
-  }, [run, identity.delegation_verified_at])
+    // **Sin cartel rojo, pero no en silencio.** Sigue sin ser un error del usuario —esto no lo
+    // pidió nadie—, así que no se pinta como los de las acciones que él eligió. Pero tragarse
+    // el fallo entero, que es lo que hacía antes un `.catch(() => {})`, deja un 502 o un 429
+    // viéndose exactamente igual que un "ARCA dice que todavía no": la pantalla se queda en
+    // «Falta un paso nuestro» afirmando que estamos mirando, justo cuando no pudimos mirar.
+    void run('verify-delegation').catch((caught: unknown) => {
+      setAutoNote(
+        caught instanceof ApiError && caught.status === 429
+          ? 'Consultamos ARCA demasiadas veces; probá de nuevo en un rato.'
+          : 'No se pudo consultar ARCA recién.',
+      )
+    })
+  }, [run, identity.id, identity.delegation_verified_at])
 
   async function claim() {
     if (busy) return
@@ -546,6 +555,7 @@ function DelegationCard({
         )}
         {verified && <span className="muted">Última: {formatDate(verified)}</span>}
         {busy && <span className="muted">Consultando ARCA…</span>}
+        {!busy && autoNote !== undefined && <span className="muted">{autoNote}</span>}
       </div>
 
       {error && <Notice kind="error">{error}</Notice>}

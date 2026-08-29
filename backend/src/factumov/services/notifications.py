@@ -261,6 +261,14 @@ def send_delegation_pending_email(tax_id: str, identity_name: str, user_email: s
     él dice "ya delegué" y ARCA sigue diciendo que no — el único instante en que existe
     evidencia de que hay una persona esperando del otro lado.
 
+    **Describe dos pasos y no uno, corregido el 2026-08-29.** Las instrucciones anteriores
+    terminaban en «aceptá la designación», y eso no alcanza: aceptarla habilita a la *persona*,
+    pero WSAA le emite el ticket al *certificado* y la lista de relaciones que WSFE valida es la
+    del certificado. Falta entonces crear a mano la relación que la aceptación no crea —el
+    servicio, con el **computador** como representante— y hay que hacerlo por cada CUIT. Sin
+    eso, una designación perfectamente aceptada sigue contestando el código 600, que es
+    indistinguible de no haber hecho nada. Ver *Delegar tiene dos partes* en `docs/arca.md`.
+
     Best effort, y sale una sola vez por identidad: lo dispara el **primer** aviso, no cada
     click. Ver `crud/fiscal_identity.mark_delegation_claimed`.
 
@@ -286,15 +294,28 @@ def send_delegation_pending_email(tax_id: str, identity_name: str, user_email: s
         body=(
             f"{user_email} cargó la identidad fiscal «{identity_name}» (CUIT {tax_id}) "
             "y dice que ya nos designó como representante en ARCA. WSFE todavía no nos "
-            "habilita, así que falta aceptar la designación:\n\n"
-            "1. Entrá a arca.gob.ar con la Clave Fiscal de FactuMov.\n"
-            "2. Abrí 'Administrador de Relaciones de Clave Fiscal'.\n"
-            "3. Entrá en 'Aceptación de Designación'.\n"
-            f"4. Aceptá la fila del representado {tax_id}, servicio Facturación "
+            "habilita, así que faltan DOS pasos, no uno.\n\n"
+            "Entrá a arca.gob.ar con la Clave Fiscal de FactuMov y abrí el "
+            "'Administrador de Relaciones de Clave Fiscal'.\n\n"
+            "PASO 1 - Aceptar la designación\n"
+            "  a. Entrá en 'Aceptación de Designación'.\n"
+            f"  b. Aceptá la fila del representado {tax_id}, servicio Facturación "
             "Electrónica.\n\n"
+            "PASO 2 - Darle ese servicio al certificado\n"
+            "  a. Volvé al Administrador de Relaciones y elegí 'Nueva Relación'.\n"
+            f"  b. En Representado poné {tax_id}.\n"
+            "  c. En Servicio: BUSCAR -> WebServices -> Facturación Electrónica.\n"
+            "  d. En Representante: BUSCAR -> el COMPUTADOR cuyo certificado usa "
+            "FactuMov,\n"
+            "     NO tu CUIT. Si dejás tu CUIT, la relación queda colgada de la persona\n"
+            "     y no del certificado. WSAA le emite el ticket al certificado, y la\n"
+            "     lista de relaciones que WSFE valida es la de él: sin este paso sigue\n"
+            "     contestando el código 600 igual que si no hubieras aceptado nada.\n\n"
+            "Los dos pasos van por cada CUIT que nos delegue. No alcanza con haberlos "
+            "hecho una vez.\n\n"
             "El usuario ya sabe que la demora es nuestra y está esperando. No hace falta "
-            "que le contestes: FactuMov reverifica contra ARCA y le avisa cuando quede "
-            "habilitado.\n"
+            "que le contestes: FactuMov reverifica contra ARCA cada 15 minutos y le avisa "
+            "cuando quede habilitado.\n"
         ),
     )
 
