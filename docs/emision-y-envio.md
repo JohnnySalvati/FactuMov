@@ -130,6 +130,22 @@ en una operación que se hace unas pocas veces por mes.
 "Emitir" al lado de "Guardar cambios" es, en un celular, un dedo mal apoyado y una factura de
 verdad.
 
+- **Con cambios sin guardar, emitir no se ofrece (2026-08-28).** En su lugar aparece
+  "Descartar cambios", y el link vuelve recién cuando el modelo está guardado o los cambios
+  quedaron descartados. Pedido por Miguel el 2026-08-28, y con razón: emitir le pide el
+  `preview` al **servidor**, así que emitiría el modelo guardado y no el que se está viendo —
+  y al volver, la pantalla se remonta y recarga del backend, o sea que lo editado no se
+  ignora, **se pierde**. Hasta ese día eso lo advertía un renglón de texto chico debajo de un
+  botón verde grande, que es poca defensa para una diferencia entre lo que se ve y lo que se
+  emite; en un celular, ninguna. Es el mismo criterio que puso a la confirmación en una ruta
+  aparte: cuando la consecuencia es irreversible, la garantía es estructural y no un cartel
+  que hay que leer.
+  - **Se compara contra el formulario tal como está guardado, serializando los dos.** El
+    original se guarda al cargar —el **mismo** objeto sembrado, no otra pasada de
+    `fromTemplate`, porque `newLine` numera las `key` con un contador que avanza y dos
+    siembras nunca son iguales— y se reemplaza por lo enviado después de cada PATCH exitoso.
+    Deshacer a mano lo que uno cambió vuelve a habilitar emitir, que es lo correcto: ahí ya no
+    hay nada que guardar ni que descartar.
 - **No es un `window.confirm`.** Hay que mostrar la letra, el destinatario y el importe exacto,
   y eso no entra en un diálogo del sistema — que además bloquea el hilo, no se puede estilar, y
   queda suprimido si el usuario marcó "no mostrar más". Mismo criterio que el borrado de las

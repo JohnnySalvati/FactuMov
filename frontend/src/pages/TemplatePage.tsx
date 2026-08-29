@@ -54,6 +54,9 @@ function TemplateScreen({ id }: { id: string }) {
   // formulario ya sembrado con él, y eso sería un `setState` derivado colgado de un efecto.
   // Cargarlo acá deja una sola fuente para el estado del formulario.
   const [form, setForm] = useState<TemplateForm>()
+  // El formulario tal como está guardado en el servidor. Es contra esto que se decide si hay
+  // cambios pendientes, y es a esto que vuelve "Descartar cambios".
+  const [savedForm, setSavedForm] = useState<TemplateForm>()
   const [loadError, setLoadError] = useState<string>()
 
   useEffect(() => {
@@ -61,7 +64,14 @@ function TemplateScreen({ id }: { id: string }) {
     api
       .get<InvoiceTemplate>(`/invoice-templates/${id}`)
       .then((template) => {
-        if (!cancelled) setForm(fromTemplate(template))
+        if (cancelled) return
+        // **El mismo objeto para los dos**, no dos `fromTemplate(template)`. `newLine` le pone
+        // a cada línea una `key` de un contador que avanza, así que dos siembras del mismo
+        // modelo dan formularios con claves distintas y la comparación diría "hay cambios"
+        // desde el primer render.
+        const seeded = fromTemplate(template)
+        setForm(seeded)
+        setSavedForm(seeded)
       })
       .catch((caught: unknown) => {
         if (!cancelled) {
@@ -92,12 +102,38 @@ function TemplateScreen({ id }: { id: string }) {
     setSaved(false)
     try {
       await api.patch<InvoiceTemplate>(`/invoice-templates/${id}`, toPayload(form))
+      // Lo que se acaba de mandar pasa a ser lo guardado, y con eso vuelve a aparecer
+      // "Emitir esta factura". No se resiembra con la respuesta del PATCH: daría claves de
+      // línea nuevas y dejaría el formulario marcado como cambiado apenas se guardó.
+      setSavedForm(form)
       setSaved(true)
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.detail : 'No se pudo guardar.')
     } finally {
       setBusy(false)
     }
+  }
+
+  /**
+   * ¿Hay algo distinto de lo guardado?
+   *
+   * Se compara serializando y no campo por campo: `TemplateForm` son strings, enums y un
+   * array de líneas, todos literales con las claves siempre en el mismo orden, así que
+   * `JSON.stringify` es determinista acá. Una comparación a mano habría que acordarse de
+   * ampliarla cada vez que el formulario gane un campo — y olvidarse significaría volver a
+   * ofrecer emitir sobre cambios que se van a perder, que es justo el bug que esto cierra.
+   *
+   * Vuelve a dar `false` si el usuario deshace lo que hizo a mano: eso es correcto, porque en
+   * ese caso ya no hay nada que guardar ni que descartar.
+   */
+  const dirty =
+    form !== undefined && savedForm !== undefined && JSON.stringify(form) !== JSON.stringify(savedForm)
+
+  function discard() {
+    setForm(savedForm)
+    setError(undefined)
+    // El cartel de "Guardado." habla de un guardado que no ocurrió en este ciclo de edición.
+    setSaved(false)
   }
 
   return (
@@ -133,17 +169,39 @@ function TemplateScreen({ id }: { id: string }) {
 
       {form !== undefined && (
         <div className="card stack">
-          {/* Emitir es un link a otra pantalla y no un botón acá, y no es por prolijidad: es
-              lo único que separa "guardar cambios" de un acto irreversible contra ARCA. Dos
-              botones pegados en un celular es un dedo mal apoyado y una factura de verdad.
-              La pantalla de confirmación muestra letra, destinatario e importe. */}
-          <Link className="button-link" to={`/modelos/${id}/emitir`}>
-            Emitir esta factura
-          </Link>
-          <p className="totals-note" style={{ margin: 0 }}>
-            Te muestra qué se va a emitir antes de pedirle el CAE a ARCA. Si cambiaste algo,
-            guardá primero: se emite el modelo tal como está guardado.
-          </p>
+          {dirty ? (
+            <>
+              {/* Con cambios sin guardar, emitir **no se ofrece**. La pantalla de emisión le
+                  pide el `preview` al servidor, así que emitiría el modelo guardado y no lo
+                  que se está viendo; y al volver, esta pantalla se remonta y recarga del
+                  backend, o sea que lo editado no se ignora: se pierde. Hasta el 2026-08-28
+                  eso lo advertía un renglón de texto chico debajo de un botón verde grande,
+                  que es poca defensa para una diferencia entre lo que se ve y lo que se
+                  emite — y en un celular, ninguna. */}
+              <button type="button" className="secondary" onClick={discard} disabled={busy}>
+                Descartar cambios
+              </button>
+              <p className="totals-note" style={{ margin: 0 }}>
+                Tenés cambios sin guardar. Se emite el modelo <strong>tal como está
+                guardado</strong>, así que para emitir hay que resolverlos antes: guardalos
+                con "Guardar cambios" o descartalos acá.
+              </p>
+            </>
+          ) : (
+            <>
+              {/* Emitir es un link a otra pantalla y no un botón acá, y no es por prolijidad:
+                  es lo único que separa "guardar cambios" de un acto irreversible contra
+                  ARCA. Dos botones pegados en un celular es un dedo mal apoyado y una factura
+                  de verdad. La pantalla de confirmación muestra letra, destinatario e
+                  importe. */}
+              <Link className="button-link" to={`/modelos/${id}/emitir`}>
+                Emitir esta factura
+              </Link>
+              <p className="totals-note" style={{ margin: 0 }}>
+                Te muestra qué se va a emitir antes de pedirle el CAE a ARCA.
+              </p>
+            </>
+          )}
         </div>
       )}
     </div>
