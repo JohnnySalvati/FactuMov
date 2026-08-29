@@ -28,6 +28,8 @@ from factumov.schemas.fiscal_identity import (
     FiscalIdentityLookup,
     FiscalIdentityRead,
     FiscalIdentityUpdate,
+    PointOfSaleRead,
+    PointsOfSale,
 )
 from factumov.services import arca, notifications, padron, wsfe
 from factumov.services.rate_limit import RateLimiter
@@ -64,6 +66,13 @@ FiscalIdentityDep = Annotated[FiscalIdentity, Depends(get_fiscal_identity_or_404
 # sigue siendo un techo bajo —la delegación no cambia varias veces por hora— y deja lugar para
 # que el chequeo automático no le coma el turno al botón.
 _VERIFY_DELEGATION_LIMITER = RateLimiter(limit=30, window_seconds=60 * 60)
+
+# La lista de puntos de venta sale a la misma llamada de WSFE, pero con su propio presupuesto.
+# Compartir el de arriba haría que armar modelos —donde el editor consulta cada vez que se
+# cambia de identidad fiscal— le comiera los turnos a la verificación de delegación, que es la
+# que desbloquea al usuario nuevo. Sesenta por hora alcanza de sobra: el editor cachea la
+# respuesta por identidad, así que una sesión normal gasta uno por CUIT.
+_POINTS_OF_SALE_LIMITER = RateLimiter(limit=60, window_seconds=60 * 60)
 
 
 @router.get("", response_model=list[FiscalIdentityRead])
@@ -170,7 +179,12 @@ def delete_fiscal_identity(
         raise HTTPException(status_code=409, detail="No se puede eliminar, existen asociaciones")
 
 
-def _ask_arca(fiscal_identity: FiscalIdentity, db: SessionDep, user_id: str) -> DelegationCheck:
+def _ask_arca(
+    fiscal_identity: FiscalIdentity,
+    db: SessionDep,
+    user_id: str,
+    limiter: RateLimiter = _VERIFY_DELEGATION_LIMITER,
+) -> DelegationCheck:
     """Le pregunta a ARCA si FactuMov puede emitir por este CUIT, y traduce el fallo a un 502.
 
     El commit cierra la transacción del request *antes* de la llamada SOAP, que puede tardar
@@ -180,7 +194,7 @@ def _ask_arca(fiscal_identity: FiscalIdentity, db: SessionDep, user_id: str) -> 
     `join_transaction_mode="create_savepoint"` del fixture de tests revertiría al savepoint y se
     llevaría puestas las filas que el test armó.
     """
-    enforce_rate_limit(_VERIFY_DELEGATION_LIMITER, user_id)
+    enforce_rate_limit(limiter, user_id)
 
     tax_id = fiscal_identity.tax_id
     db.commit()
@@ -317,3 +331,37 @@ def claim_delegation(
             user.email,
         )
     return status
+
+
+@router.get("/{fiscal_identity_id}/points-of-sale", response_model=PointsOfSale)
+def list_points_of_sale(
+    fiscal_identity: FiscalIdentityDep, db: SessionDep, user: CurrentUserDep
+) -> PointsOfSale:
+    """Los puntos de venta que ARCA tiene dados de alta para este CUIT.
+
+    Existe por una sola razón: **el usuario no puede saber qué número poner**. El punto de
+    venta lo da de alta él en ARCA, no en FactuMov, y hasta ahora el editor de modelos se lo
+    pedía escrito con un `1` de default — o sea, el default estaba mal para todo el mundo menos
+    para quien tuviera justo el punto de venta 1. Con esto el campo se elige de una lista que
+    dice la verdad.
+
+    **Es la misma llamada que la verificación de delegación** (`FEParamGetPtosVenta`, ver
+    `services/wsfe.py`), leída entera en vez de solo mirarle los errores.
+
+    **GET y no POST**, al revés que `verify-delegation`: acá no se escribe nada. La tentación
+    de sellar `delegation_verified_at` de paso —la información está, sale gratis— se descarta
+    por lo mismo que se documenta allá: un GET que escribe es algo que un proxy o el prefetch
+    del navegador pueden repetir solos.
+
+    **200 con `granted=False`** cuando falta la delegación, y **200 con `points` vacío** cuando
+    la delegación está pero el CUIT no tiene ningún punto de venta. Las dos son respuestas, no
+    errores, y la pantalla las explica distinto. **502** cuando no se pudo preguntar.
+    """
+    check = _ask_arca(fiscal_identity, db, str(user.id), limiter=_POINTS_OF_SALE_LIMITER)
+    return PointsOfSale(
+        granted=check.granted,
+        points=[
+            PointOfSaleRead(number=point.number, emission_type=point.emission_type)
+            for point in check.points_of_sale
+        ],
+    )

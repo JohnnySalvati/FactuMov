@@ -45,16 +45,45 @@ EMPTY_RESULT_CODES = {602}
 
 
 @dataclass(frozen=True)
+class PointOfSale:
+    """Un punto de venta dado de alta en ARCA para el CUIT representado.
+
+    El número es el dato que el usuario no tiene forma de adivinar: lo da de alta en ARCA y
+    después la app se lo pide escrito. Traerlo de acá es la diferencia entre elegir de una
+    lista y acertar un número.
+
+    `emission_type` viaja para mostrarlo al lado del número —ARCA distingue CAE de CAEA, y un
+    CUIT puede tener puntos de venta de los dos tipos— pero **no se filtra por él**: el
+    vocabulario exacto de ese campo depende del régimen con el que se dio de alta el punto, y
+    descartar por un valor que no conocemos escondería un punto de venta que sí sirve. Mejor
+    ofrecerlo y que ARCA rechace al emitir, que es un error claro, antes que no ofrecerlo y
+    que el usuario no entienda por qué falta.
+    """
+
+    number: int
+    emission_type: str
+
+
+@dataclass(frozen=True)
 class DelegationCheck:
     """El resultado de preguntarle a ARCA si la delegación está otorgada.
 
     `granted=False` no es un error: es una de las dos respuestas esperadas, y la que recibe
     todo usuario que todavía no entró a ARCA a autorizarnos. Los errores de verdad —ARCA
     caído, certificado mal configurado— suben como `ArcaError` y terminan en un 502.
+
+    Trae además los puntos de venta porque **la sonda ya los devuelve**: `FEParamGetPtosVenta`
+    contesta la lista completa, y hasta ahora solo se miraba si había venido un error. Es la
+    misma llamada, el mismo ticket y la misma cuota contra ARCA: parsear el payload sale gratis
+    y evita una segunda ida a la red para preguntar algo que ya nos dijeron.
     """
 
     granted: bool
     message: str | None = None
+    # Vacío cuando la delegación no está —ARCA no contesta datos de un CUIT que no nos
+    # autorizó— y también cuando el contribuyente todavía no dio de alta ninguno (código 602).
+    # Los dos casos son "no hay lista para ofrecer", que es lo que la pantalla necesita saber.
+    points_of_sale: tuple[PointOfSale, ...] = ()
 
 
 def _errors(response: Any) -> list[Any]:
@@ -75,6 +104,8 @@ def check_delegation(tax_id: str) -> DelegationCheck:
 
     El `Auth.Cuit` es el CUIT **representado**, no el del certificado. Esa brecha es toda la
     delegación: con el mismo ticket, ARCA acepta unos CUIT y rechaza otros.
+
+    Devuelve además **los puntos de venta que la sonda trajo** — ver `DelegationCheck`.
     """
     ticket = arca.get_access_ticket(SERVICE)
     settings = arca.get_arca_settings()
@@ -91,7 +122,7 @@ def check_delegation(tax_id: str) -> DelegationCheck:
 
     errors = _errors(response)
     if not errors:
-        return DelegationCheck(granted=True)
+        return DelegationCheck(granted=True, points_of_sale=_points_of_sale(response))
 
     codes = {int(error.Code) for error in errors}
     detail = " / ".join(f"{error.Code}: {error.Msg}" for error in errors)
@@ -104,6 +135,41 @@ def check_delegation(tax_id: str) -> DelegationCheck:
     # Cualquier otro código es algo que no sabemos leer. Contestar `granted=False` haría que
     # el usuario reintentara para siempre una delegación que quizás ya otorgó.
     raise WsfeError(f"WSFE contestó un error inesperado: {detail}")
+
+
+def _points_of_sale(response: Any) -> tuple[PointOfSale, ...]:
+    """Lee `ResultGet.PtoVenta` y deja solo los puntos de venta que hoy pueden emitir.
+
+    Se descartan dos cosas, y las dos por el mismo motivo —ofrecerlas sería ofrecer algo que
+    va a fallar recién al pedir el CAE—:
+
+    - **`Bloqueado = "S"`**: el punto de venta existe pero ARCA lo tiene inhabilitado.
+    - **`FchBaja` con valor**: el punto de venta fue dado de baja. ARCA lo sigue listando con
+      la fecha en que dejó de servir, y el campo llega como cadena vacía, `NULL` o `None`
+      cuando el punto sigue vigente.
+
+    Tolerante con lo que no sabe leer: un punto de venta cuyo número no es un entero se saltea
+    en vez de romper la consulta entera. Esto alimenta un desplegable, no una validación — un
+    dato ilegible tiene que costar un renglón de menos en la lista, no un 502.
+    """
+    result = getattr(response, "ResultGet", None)
+    if result is None:
+        return ()
+
+    points = []
+    for entry in getattr(result, "PtoVenta", None) or []:
+        if str(getattr(entry, "Bloqueado", "") or "").upper() == "S":
+            continue
+        discharge = str(getattr(entry, "FchBaja", "") or "").strip()
+        if discharge and discharge.upper() != "NULL":
+            continue
+        try:
+            number = int(entry.Nro)
+        except (AttributeError, TypeError, ValueError):
+            continue
+        points.append(PointOfSale(number=number, emission_type=str(entry.EmisionTipo or "")))
+
+    return tuple(sorted(points, key=lambda point: point.number))
 
 
 # --- Emisión ------------------------------------------------------------------------------

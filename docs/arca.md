@@ -131,6 +131,32 @@ en el cwd de un contenedor no coordina eso, y encima no sobrevive al deploy.
   2026-08-27 eso tiene consecuencias y no es solo una advertencia — ver *Delegar tiene dos
   partes*.
 
+### `GET /fiscal-identities/{id}/points-of-sale` (2026-08-29)
+- **Existe porque el usuario no puede saber qué número poner.** El punto de venta se da de
+  alta en ARCA, no en FactuMov, y el editor de modelos se lo pedía escrito con un `1` de
+  default: acertaba solo por casualidad y, al parecer un valor ya elegido, hacía que ni se lo
+  mirara. El que emitía con el punto de venta 5 se enteraba recién al pedir el CAE.
+- **Es la misma llamada que `verify-delegation`**, leída entera. `FEParamGetPtosVenta`
+  siempre devolvió la lista completa en `ResultGet.PtoVenta`; hasta ahora solo se le miraban
+  los errores. Por eso los puntos de venta viajan adentro de `DelegationCheck`: parsear el
+  payload de una llamada que ya se hacía no cuesta ni un ticket ni una ida a la red más.
+- **Se descartan los bloqueados (`Bloqueado = "S"`) y los dados de baja (`FchBaja` con
+  valor).** Ofrecerlos sería ofrecer un rechazo al pedir el CAE. `FchBaja` llega vacío de tres
+  formas —`""`, `None` y `"NULL"`— y las tres significan que sigue vigente.
+- **No se filtra por `EmisionTipo`.** El vocabulario exacto de ese campo depende del régimen
+  con el que se dio de alta el punto de venta; descartar por un valor que no conocemos
+  escondería uno que sí sirve. Viaja para mostrarlo al lado del número y desempatar.
+- **Un número ilegible se saltea, no rompe la consulta.** Esto alimenta un desplegable: un
+  dato que no se entiende tiene que costar un renglón de menos, no un 502.
+- **Es GET y no POST**, al revés que `verify-delegation`, porque no escribe nada. Sellar
+  `delegation_verified_at` de paso —la información está, sale gratis— se descartó por lo
+  mismo que se documenta arriba: un GET con efectos lo repite solo un prefetch.
+- **200 con `granted=false`** cuando falta la delegación y **200 con `points` vacío** cuando
+  la delegación está pero el CUIT no tiene ninguno dado de alta. Son dos respuestas distintas
+  y la pantalla las explica distinto; el 502 queda para "no se pudo preguntar".
+- **Limitador propio, 60 por hora.** Compartir el de `verify-delegation` haría que armar
+  modelos le comiera los turnos a la verificación, que es la que desbloquea al usuario nuevo.
+
 ### `GET /customers/lookup/{tax_id}`
 - **No escribe nada.** Igual que `POST /invoice-templates/import`, devuelve una propuesta que
   el usuario confirma en el editor. Dar de alta acá convertiría una consulta en un efecto

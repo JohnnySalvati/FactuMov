@@ -151,6 +151,26 @@ export interface DelegationStatus {
   delegate_tax_id: string | null
 }
 
+/** Un punto de venta habilitado en ARCA. Espejo de `PointOfSaleRead`. */
+export interface PointOfSale {
+  number: number
+  /** "CAE", "CAEA"… la etiqueta con la que ARCA lo dio de alta. */
+  emission_type: string
+}
+
+/**
+ * La respuesta de `GET /fiscal-identities/{id}/points-of-sale`. Espejo de `PointsOfSale`.
+ *
+ * `granted: false` significa que falta la delegación, no que no haya puntos de venta: sin
+ * delegación ARCA directamente no contesta datos de ese CUIT. Y `granted: true` con `points`
+ * vacío significa que la delegación está pero el contribuyente no dio de alta ninguno todavía.
+ * Son dos cosas distintas y se le explican distinto al usuario.
+ */
+export interface PointsOfSale {
+  granted: boolean
+  points: PointOfSale[]
+}
+
 export interface Customer {
   id: string
   name: string

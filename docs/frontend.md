@@ -503,6 +503,38 @@ desde un iPad sin consola, no algo que va abajo del botón de emitir una factura
   desalinea del otro mientras está visible. En el celular no pasa, porque van uno abajo del
   otro.
 
+## El punto de venta se elige, no se escribe (2026-08-29)
+El campo era un `<input>` libre con `1` de default. El punto de venta lo da de alta el usuario
+en ARCA, así que el default acertaba solo por casualidad — y un default plausible es peor que
+ninguno: hace que el campo parezca resuelto y nadie lo mire. Ahora el editor le pregunta a
+ARCA cuáles tiene ese CUIT (ver *`GET /fiscal-identities/{id}/points-of-sale`*) y muestra un
+desplegable.
+
+- **`usePointsOfSale` y no `useResource`.** Ese hook es para un recurso fijo por pantalla y no
+  resetea su estado al cambiar de identidad, lo dice su propio docstring; acá el recurso *es*
+  la identidad elegida, que cambia con el selector de arriba del formulario.
+- **La respuesta se guarda en un mapa por identidad y el estado se deriva en el render.** Sale
+  gratis lo que de la otra forma hay que programar: una respuesta que llega tarde se guarda
+  bajo *su* id y no puede pisar lo que el campo muestra —no hace falta cancelar nada— y no
+  queda ningún `setState` sincrónico adentro de un efecto.
+- **El caché vive con la pantalla.** Cada consulta sale a WSFE, tarda segundos y gasta cuota
+  contra el certificado, que es uno solo para todos los usuarios. En un módulo duraría toda la
+  sesión y un punto de venta recién dado de alta no aparecería nunca; en el hook, aparece
+  volviendo a entrar al editor. Se recuerda también el fallo: reintentar por haber cambiado de
+  campo sería martillar a ARCA.
+- **Sin lista no se bloquea nada.** Los cinco estados sin desplegable —todavía no hay
+  identidad elegida, está cargando, el CUIT no tiene ninguno, falta la delegación, ARCA no
+  contestó— caen en el mismo input libre de antes. Lo único que cambia entre ellos es el texto
+  de abajo, que es lo que distingue "andá a darlo de alta en ARCA" de "esperá y probá de
+  nuevo".
+- **Se completa solo cuando hay uno, y nunca pisa lo guardado.** Con un único punto de venta no
+  hay nada que elegir; con varios, elegir por el usuario sería adivinar. Y un modelo guardado
+  con el 5 lo conserva aunque hoy ARCA ofrezca otros: se agrega como opción del desplegable
+  —si no, el `<select>` mostraría otro número sin que nadie lo haya cambiado— con un aviso de
+  que no figura en ARCA.
+- **El default de `emptyForm` pasó de `'1'` a vacío**, que es lo que permite completarlo solo
+  sin pisar nada y lo que obliga a elegir cuando hay varios.
+
 ## Sin TanStack Query y sin Tailwind
 Las dos por el mismo motivo: resuelven problemas que esta app todavía no tiene.
 

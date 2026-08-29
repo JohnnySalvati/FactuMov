@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { useNavigate } from 'react-router'
 
 import { money } from '../format'
@@ -18,6 +19,7 @@ import {
   type LineForm,
   type TemplateForm,
 } from '../forms/templateForm'
+import { usePointsOfSale, type PointsOfSaleState } from '../hooks/usePointsOfSale'
 import { Notice } from './Notice'
 import { PickerField } from './PickerField'
 
@@ -73,6 +75,10 @@ export function TemplateEditor({
   const customer = customers.find((option) => option.id === value.customer_id)
   const voucherType =
     issuer && customer ? voucherTypeFor(issuer.condicion_iva, customer.condicion_iva) : undefined
+
+  // Los puntos de venta del emisor elegido. Se piden acá y no en las pantallas porque el que
+  // sabe qué identidad fiscal está elegida en este momento es el formulario.
+  const pointsOfSale = usePointsOfSale(value.fiscal_identity_id)
 
   const sums = totals(value, voucherType)
 
@@ -157,16 +163,13 @@ export function TemplateEditor({
           </span>
         </div>
 
+        <PointOfSaleField
+          value={value.pos}
+          onChange={(pos) => patch({ pos })}
+          state={pointsOfSale}
+        />
+
         <div className="row">
-          <div className="narrow">
-            <label htmlFor="t-pos">Punto de venta</label>
-            <input
-              id="t-pos"
-              inputMode="numeric"
-              value={value.pos}
-              onChange={(event) => patch({ pos: event.target.value })}
-            />
-          </div>
           <div>
             <label htmlFor="t-concepto">Concepto</label>
             <select
@@ -299,4 +302,105 @@ export function TemplateEditor({
       )}
     </form>
   )
+}
+
+/**
+ * El punto de venta: un desplegable con lo que ARCA tiene dado de alta, y una caja de texto
+ * cuando no hay lista que ofrecer.
+ *
+ * **Era un input libre con `1` de default**, que es la peor combinación posible: el número lo
+ * da de alta el usuario en ARCA —no acá— así que no hay forma de que lo deduzca de la pantalla,
+ * y un default plausible hace que ni siquiera se pregunte cuál va. El que emite con el punto de
+ * venta 5 se enteraba recién al pedir el CAE, con un rechazo de ARCA.
+ *
+ * Los cinco estados sin lista caen todos en el mismo input libre, y eso es a propósito: no
+ * poder mostrar la lista **no puede impedir guardar un modelo**. Lo que cambia entre ellos es
+ * el texto de abajo, que es lo único que distingue "andá a darlo de alta en ARCA" de "esperá y
+ * probá de nuevo".
+ *
+ * Fuera de `TemplateEditor` pero en el mismo archivo: no lo usa nadie más, y sacarlo a su
+ * propio archivo por prolijidad dejaría el campo lejos del formulario del que es parte.
+ */
+function PointOfSaleField({
+  value,
+  onChange,
+  state,
+}: {
+  value: string
+  onChange: (pos: string) => void
+  state: PointsOfSaleState
+}) {
+  const points = state.status === 'ready' ? state.points : []
+  const onlyPoint = points.length === 1 ? points[0] : undefined
+
+  // Con un solo punto de venta no hay nada que elegir y se completa solo; con varios no se
+  // elige por el usuario, que sería adivinar cuál. **Solo toca el campo vacío**: un modelo
+  // guardado con el 5 lo conserva aunque hoy ARCA ofrezca otro, porque pisarlo cambiaría en
+  // silencio con qué numeración emite algo que ya estaba andando.
+  useEffect(() => {
+    if (value === '' && onlyPoint !== undefined) onChange(String(onlyPoint.number))
+  }, [value, onlyPoint, onChange])
+
+  if (points.length > 0) {
+    // El valor guardado puede no estar en la lista: un punto de venta dado de baja en ARCA
+    // después de que se creó el modelo, o uno que se cargó a mano cuando ARCA no contestaba.
+    // Se agrega como opción igual —si no, el `<select>` mostraría otro número sin que nadie lo
+    // haya cambiado— y el aviso explica por qué está marcado.
+    const known = points.some((point) => String(point.number) === value)
+    // El tipo de emisión solo aparece cuando desempata. Con todos iguales es ruido en un
+    // desplegable que en el celular ya está apretado.
+    const showTypes = new Set(points.map((point) => point.emission_type)).size > 1
+
+    return (
+      <div>
+        <label htmlFor="t-pos">Punto de venta</label>
+        <div className="narrow">
+          <select id="t-pos" value={value} onChange={(event) => onChange(event.target.value)}>
+            {value === '' && <option value="">Elegí uno</option>}
+            {!known && value !== '' && <option value={value}>{value}</option>}
+            {points.map((point) => (
+              <option key={point.number} value={String(point.number)}>
+                {showTypes ? `${point.number} · ${point.emission_type}` : point.number}
+              </option>
+            ))}
+          </select>
+        </div>
+        <span className="field-hint">
+          {!known && value !== ''
+            ? `El ${value} no figura entre los puntos de venta de este CUIT en ARCA. ` +
+              'Si es el que usás, revisalo allá antes de emitir.'
+            : 'Los que tenés dados de alta en ARCA para este CUIT.'}
+        </span>
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      <label htmlFor="t-pos">Punto de venta</label>
+      <div className="narrow">
+        <input
+          id="t-pos"
+          inputMode="numeric"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      </div>
+      <span className="field-hint">{HINTS[state.status]}</span>
+    </div>
+  )
+}
+
+/** El texto de abajo del campo cuando no hay lista. Uno por estado — ver `PointOfSaleField`. */
+const HINTS: Record<PointsOfSaleState['status'], string> = {
+  idle: 'Elegí desde qué identidad fiscal emitís y traemos los de ARCA.',
+  loading: 'Buscando en ARCA los puntos de venta de este CUIT…',
+  // `ready` acá es siempre la lista vacía: con puntos, el componente sale por la otra rama.
+  ready:
+    'Este CUIT no tiene ningún punto de venta dado de alta en ARCA. Dalo de alta allá y volvé ' +
+    'a entrar, o escribí el número si ya lo sabés.',
+  notDelegated:
+    'Sin la delegación no podemos preguntarle a ARCA cuáles tenés. Verificala en la identidad ' +
+    'fiscal y volvé.',
+  unavailable: 'No pudimos consultarle a ARCA cuáles tenés. Escribí el número que usás.',
 }

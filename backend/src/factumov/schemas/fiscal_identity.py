@@ -132,3 +132,33 @@ class DelegationStatus(BaseModel):
     # respuesta negativa, que es la única donde hay una instrucción que dar: cuando la
     # delegación ya está, repetir a quién había que autorizar no le sirve a la pantalla.
     delegate_tax_id: str | None = None
+
+
+class PointOfSaleRead(BaseModel):
+    """Un punto de venta habilitado en ARCA, tal como se le ofrece a la pantalla."""
+
+    number: int
+    # "CAE", "CAEA" o lo que ARCA conteste. Va como texto libre a propósito: no es un enum
+    # nuestro, es una etiqueta de ARCA que se muestra al lado del número para desempatar
+    # cuando un CUIT tiene varios puntos de venta.
+    emission_type: str
+
+
+class PointsOfSale(BaseModel):
+    """Los puntos de venta de una identidad fiscal según ARCA.
+
+    Tres respuestas distintas viajan en la misma forma, y la pantalla necesita separarlas
+    porque cada una se le explica al usuario de otra manera:
+
+    - **`granted=True` con puntos**: la lista para elegir.
+    - **`granted=True` y `points` vacío**: la delegación está pero el contribuyente todavía no
+      dio de alta ningún punto de venta en ARCA. No es un error de la app y no se arregla
+      reintentando: hay que ir a ARCA a darlo de alta.
+    - **`granted=False`**: falta la delegación, así que ARCA no contesta datos de ese CUIT.
+
+    El cuarto caso —no se pudo preguntar— no entra acá: sale como 502, igual que en
+    `verify-delegation`.
+    """
+
+    granted: bool
+    points: list[PointOfSaleRead]

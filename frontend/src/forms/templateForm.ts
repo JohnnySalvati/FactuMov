@@ -62,7 +62,11 @@ export function emptyForm(): TemplateForm {
     name: '',
     fiscal_identity_id: null,
     customer_id: null,
-    pos: '1',
+    // Vacío y no `'1'`. Un default plausible es peor que ninguno acá: el punto de venta lo da
+    // de alta el usuario en ARCA, así que `'1'` acertaba solo por casualidad y, al parecer un
+    // valor ya elegido, hacía que ni se lo mirara. Vacío, el campo se completa solo cuando ARCA
+    // informa uno solo, y cuando hay varios obliga a elegir — ver `PointOfSaleField`.
+    pos: '',
     concepto: Concepto.products,
     lines: [newLine()],
   }
@@ -184,6 +188,7 @@ export function validate(form: TemplateForm): string | undefined {
   if (form.name.trim() === '') return 'Poné un nombre para reconocer el modelo.'
   if (form.fiscal_identity_id === null) return 'Elegí desde qué identidad fiscal emitís.'
   if (form.customer_id === null) return 'Elegí a quién le facturás.'
+  if (form.pos.trim() === '') return 'Elegí el punto de venta.'
   if (!Number.isInteger(Number(form.pos)) || Number(form.pos) < 1) {
     return 'El punto de venta es un número entero mayor a cero.'
   }
