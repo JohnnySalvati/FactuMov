@@ -543,6 +543,34 @@ button.mic[aria-pressed='true'] {
   color: var(--danger);
 }
 
+/* La traza del motor de voz, mientras el dictado sea un spike. Se va con él. */
+.mic-trace {
+  margin-top: 0.4rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.mic-trace summary {
+  min-height: var(--touch);
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.mic-trace ol {
+  margin: 0;
+  padding-left: 1.2rem;
+  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+  /* Una traza larga no puede estirar la página: el `overflow-x: hidden` del body la
+     escondería en vez de dejarla leer. */
+  overflow-x: auto;
+}
+
+.mic-trace li {
+  margin-bottom: 0.15rem;
+  white-space: nowrap;
+}
+
 /* --- Pantalla ancha ----------------------------------------------------------------- */
 /*
  * 700px: el ancho a partir del cual dos campos conviven en un renglón sin quedar apretados.

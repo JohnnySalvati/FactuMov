@@ -94,6 +94,22 @@ export function DictateDate({ id, label, value, min, max, hint, onChange }: Prop
           </span>
         )}
       </p>
+      {/* La traza del motor, mientras esto sea un spike.
+          En el iPad no hay consola que abrir desde Windows —la inspección remota de Safari
+          pide una Mac—, así que si el dictado no anda la única pista posible es que la
+          pantalla cuente qué eventos llegaron. Va en un `<details>` cerrado para que no
+          estorbe a quien solo quiere emitir, y **se va con el spike**: el día que el dictado
+          sea una funcionalidad, esto no va en la pantalla de emitir una factura. */}
+      {speech.trace.length > 0 && (
+        <details className="mic-trace">
+          <summary>Detalle del dictado ({speech.trace.length})</summary>
+          <ol>
+            {speech.trace.map((entry, index) => (
+              <li key={index}>{entry}</li>
+            ))}
+          </ol>
+        </details>
+      )}
     </div>
   )
 }
