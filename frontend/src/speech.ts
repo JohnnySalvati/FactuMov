@@ -89,16 +89,46 @@ const NUMERIC = /\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b/
 /** Un día suelto: "el quince", "el 31". */
 const BARE_DAY = /\b(\d{1,2})\b/
 
+/** Las fechas que se dicen sin nombrar nada: "hoy", "fin de mes". */
+const RELATIVE = /\bhoy\b|\bayer\b|\banteayer\b|\bmanana\b|\bfin (?:de|del) mes\b|\bultimo dia\b/
+
+/**
+ * ¿El texto dice **de qué mes** habla?
+ *
+ * Lo pregunta `commands.ts` para el caso "desde el 1 hasta el 31 de agosto", donde una de las
+ * dos puntas del período nombra el mes y la otra no. La que no lo nombra tiene que tomarlo de
+ * la que sí — resuelta por su cuenta caería en el mes más cercano a hoy, que el 28 de agosto
+ * es septiembre, y el período saldría al revés.
+ *
+ * "Hoy" y "fin de mes" cuentan como que lo dicen: no nombran un mes pero tampoco dejan nada
+ * librado al contexto, ya son una fecha entera.
+ */
+export function mentionsMonth(heard: string): boolean {
+  const text = normalizeSpoken(heard)
+  return (
+    new RegExp(`\\b(?:${MONTH_ALTERNATION})\\b`).test(text) ||
+    NUMERIC.test(text) ||
+    RELATIVE.test(text)
+  )
+}
+
 const MS_PER_DAY = 86_400_000
 
 /**
  * Deja el texto en minúsculas, sin acentos y con los números en dígitos.
  *
+ * Se exporta porque `commands.ts` necesita **la misma** normalización antes de partir la
+ * frase en cláusulas: si buscara "desde" sobre el texto crudo, no lo encontraría en un motor
+ * que devuelve "Desde" con mayúscula, y el nombre del modelo que quedara de un lado se
+ * compararía contra los nombres guardados con otro criterio que el de acá. Es idempotente
+ * —minúsculas, acentos y numerales ya convertidos no cambian— así que volver a pasarla sobre
+ * un pedazo ya normalizado, como hace `parseSpokenDate` con cada cláusula, no cuesta nada.
+ *
  * Los acentos se sacan con `NFD` + borrar los diacríticos, y no con una tabla de reemplazos:
  * lo que llega del reconocedor puede venir acentuado o no según el motor, y comparar contra
  * "diciembre" tiene que funcionar igual en los dos casos.
  */
-function normalize(heard: string): string {
+export function normalizeSpoken(heard: string): string {
   let text = heard
     .toLowerCase()
     .normalize('NFD')
@@ -170,7 +200,7 @@ function fullYear(spoken: string): number {
  * "el 31" se puedan probar sin depender del día en que se corra la prueba.
  */
 export function parseSpokenDate(heard: string, today: Date): string | undefined {
-  const text = normalize(heard)
+  const text = normalizeSpoken(heard)
   if (text === '') return undefined
 
   // Se trunca a medianoche local antes de hacer cuentas: el `preview` y el `<input type="date">`

@@ -543,32 +543,18 @@ button.mic[aria-pressed='true'] {
   color: var(--danger);
 }
 
-/* La traza del motor de voz, mientras el dictado sea un spike. Se va con él. */
-.mic-trace {
-  margin-top: 0.4rem;
-  font-size: 0.78rem;
-  color: var(--muted);
+/* El micrófono del comando hablado no acompaña a ningún campo: es la acción de la pantalla,
+   así que ocupa el ancho como cualquier otro botón de la app y dice qué hace. */
+button.mic.wide {
+  width: 100%;
+  min-width: 0;
+  padding: 0.6rem 1rem;
+  font-size: 1rem;
+  font-weight: 600;
 }
 
-.mic-trace summary {
-  min-height: var(--touch);
-  display: flex;
-  align-items: center;
-  cursor: pointer;
-}
-
-.mic-trace ol {
-  margin: 0;
-  padding-left: 1.2rem;
-  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
-  /* Una traza larga no puede estirar la página: el `overflow-x: hidden` del body la
-     escondería en vez de dejarla leer. */
-  overflow-x: auto;
-}
-
-.mic-trace li {
-  margin-bottom: 0.15rem;
-  white-space: nowrap;
+.voice-command {
+  margin-bottom: 1rem;
 }
 
 /* --- Pantalla ancha ----------------------------------------------------------------- */

@@ -19,11 +19,11 @@ interface Props {
 /**
  * Un campo de fecha con un micrófono al lado.
  *
- * **Es un spike**: el punto es averiguar si el reconocimiento de voz del navegador anda en el
- * celular —y sobre todo en iOS con la app instalada desde la pantalla de inicio, que es el
- * caso principal— antes de construirle nada encima. Por eso empieza por las fechas y no por
- * un comando hablado: es el único campo editable de la pantalla de emisión, y tipear una
- * fecha en el selector nativo de un celular es justo lo que más molesta.
+ * Fue por dónde empezó el dictado, y no por un comando hablado: es el único campo editable de
+ * la pantalla de emisión, y tipear una fecha en el selector nativo de un celular es justo lo
+ * que más molesta. Cerrado el spike —abre y entrega en iPad, Android y computadora—, el
+ * comando existe y vive en `DictateCommand`; esto quedó como lo que corrige a mano una fecha
+ * que el comando no dijo o entendió distinto.
  *
  * **El micrófono llena el campo y nada más.** No emite, no manda el formulario y no toca
  * ningún otro campo. Emitir le pide el CAE a ARCA y no se puede deshacer, así que lo que la
@@ -94,22 +94,6 @@ export function DictateDate({ id, label, value, min, max, hint, onChange }: Prop
           </span>
         )}
       </p>
-      {/* La traza del motor, mientras esto sea un spike.
-          En el iPad no hay consola que abrir desde Windows —la inspección remota de Safari
-          pide una Mac—, así que si el dictado no anda la única pista posible es que la
-          pantalla cuente qué eventos llegaron. Va en un `<details>` cerrado para que no
-          estorbe a quien solo quiere emitir, y **se va con el spike**: el día que el dictado
-          sea una funcionalidad, esto no va en la pantalla de emitir una factura. */}
-      {speech.trace.length > 0 && (
-        <details className="mic-trace">
-          <summary>Detalle del dictado ({speech.trace.length})</summary>
-          <ol>
-            {speech.trace.map((entry, index) => (
-              <li key={index}>{entry}</li>
-            ))}
-          </ol>
-        </details>
-      )}
     </div>
   )
 }

@@ -1,5 +1,5 @@
 import { useCallback, useState, type FormEvent } from 'react'
-import { Link, Navigate, useNavigate, useParams } from 'react-router'
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router'
 
 import { ApiError, api } from '../api/client'
 import type { EmitRequest, Invoice, InvoicePreview } from '../api/types'
@@ -30,6 +30,12 @@ import { useResource } from '../hooks/useResource'
  * casi siempre; correrla existe para el papel que tiene que decir otra cosa —se facturó el
  * viernes y se cargó el lunes— y ARCA la admite dentro de una ventana de pocos días. Los
  * extremos los da el `preview` para que el campo no ofrezca una fecha que el servidor rechaza.
+ *
+ * **Las cuatro fechas pueden llegar dictadas desde la grilla**, colgadas de la query
+ * (`?fecha=&desde=&hasta=&vence=`). Es la mitad de "emitir alquiler desde el 1 de agosto":
+ * `commands.ts` arma la ruta y esta pantalla la lee. Lo que el comando **no** cambia es que
+ * esta pantalla exista y que el botón lo apriete el dedo — la voz llena el formulario, nada
+ * más.
  */
 export function EmitPage() {
   const { id } = useParams()
@@ -46,6 +52,20 @@ function defaultPeriod() {
   }
 }
 
+/**
+ * Una fecha que llegó por la query, si de verdad es una fecha.
+ *
+ * La query la escribe `emitPath` con lo que entendió el dictado, pero también la puede
+ * escribir cualquiera a mano: sin esta verificación, `?fecha=mañana` entraría tal cual al
+ * `<input type="date">`, que lo muestra vacío, y el campo quedaría en blanco sin explicación.
+ * La forma alcanza —que el día exista lo verificó `parseSpokenDate`, y el rango lo verifica el
+ * backend.
+ */
+function spokenDate(params: URLSearchParams, key: string): string | undefined {
+  const value = params.get(key)
+  return value !== null && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : undefined
+}
+
 function EmitScreen({ id }: { id: string }) {
   const fetcher = useCallback(
     () => api.get<InvoicePreview>(`/invoice-templates/${id}/preview`),
@@ -54,11 +74,31 @@ function EmitScreen({ id }: { id: string }) {
   const preview = useResource(fetcher)
   const navigate = useNavigate()
 
-  const [period, setPeriod] = useState(defaultPeriod)
-  // `undefined` = el usuario no la tocó, o sea que vale la que propone el preview. No se
-  // inicializa con `isoDate(new Date())` aunque daría lo mismo: la fecha que se va a declarar
-  // tiene una sola fuente, y es la misma que calculó los extremos de la ventana.
-  const [chosenDate, setChosenDate] = useState<string>()
+  const [params] = useSearchParams()
+  const spoken = {
+    date: spokenDate(params, 'fecha'),
+    from_date: spokenDate(params, 'desde'),
+    to_date: spokenDate(params, 'hasta'),
+    due_date: spokenDate(params, 'vence'),
+  }
+  const dictated = Object.values(spoken).some((value) => value !== undefined)
+
+  // Lo dictado pisa al default campo por campo y no en bloque: "emitir alquiler vence el 10"
+  // dice una sola de las tres fechas del período, y las otras dos siguen siendo el mes en
+  // curso. Es un inicializador perezoso, así que la query se lee una vez y después el estado
+  // es del usuario — si corrige un campo a mano, un re-render no se lo pisa de vuelta.
+  const [period, setPeriod] = useState(() => {
+    const fallback = defaultPeriod()
+    return {
+      from_date: spoken.from_date ?? fallback.from_date,
+      to_date: spoken.to_date ?? fallback.to_date,
+      due_date: spoken.due_date ?? fallback.due_date,
+    }
+  })
+  // `undefined` = el usuario no la tocó ni la dictó, o sea que vale la que propone el preview.
+  // No se inicializa con `isoDate(new Date())` aunque daría lo mismo: la fecha que se va a
+  // declarar tiene una sola fuente, y es la misma que calculó los extremos de la ventana.
+  const [chosenDate, setChosenDate] = useState<string | undefined>(spoken.date)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
 
@@ -123,6 +163,16 @@ function EmitScreen({ id }: { id: string }) {
               <dd className="amount">{money.format(Number(data.total))}</dd>
             </div>
           </dl>
+
+          {/* Que las fechas hayan venido dictadas **se dice**. La pantalla es idéntica con
+              hoy puesto por default que con una fecha que entendió el micrófono, y son dos
+              cosas distintas: una la eligió la app y la otra la entendió de una frase. Si
+              entendió mal, este renglón es lo que manda a mirar los campos antes de apretar. */}
+          {dictated && (
+            <p className="totals-note" style={{ margin: 0 }}>
+              Las fechas de abajo las puso el dictado. Revisalas antes de emitir.
+            </p>
+          )}
 
           <DictateDate
             id="date"

@@ -2,6 +2,7 @@ import { useCallback } from 'react'
 
 import { api } from '../api/client'
 import type { InvoiceTemplate } from '../api/types'
+import { DictateCommand } from '../components/DictateCommand'
 import { Notice } from '../components/Notice'
 import { TileGrid } from '../components/TileGrid'
 import { useResource } from '../hooks/useResource'
@@ -25,6 +26,15 @@ export function TemplatesPage() {
 
       <Notice kind="error">{error}</Notice>
       {loading && !data && <p className="muted">Cargando…</p>}
+
+      {/* El comando hablado va **arriba de la grilla y solo si hay modelos**: sin ninguno
+          cargado no hay nada que nombrar, y ofrecer un micrófono que solo puede contestar "no
+          existe" es peor que no ofrecerlo. */}
+      {data && data.length > 0 && (
+        <DictateCommand
+          templates={data.map((template) => ({ id: template.id, name: template.name }))}
+        />
+      )}
 
       {data && (
         <TileGrid

@@ -7,8 +7,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
  * `MediaRecorder`, subir el audio y transcribirlo en el backend: anda parejo en todos lados,
  * pero cuesta por minuto, agrega un endpoint y suma latencia. Esto es gratis, no toca el
  * servidor y ya está instalado. Lo que se paga a cambio es que el soporte no es parejo — de
- * ahí `supported`, de ahí `trace`, y de ahí que este hook sea un spike y no todavía una
- * funcionalidad.
+ * ahí `supported`, y de ahí que esto naciera como un spike. **El spike cerró el 2026-08-28:**
+ * abre y entrega en iPad, en Android y en la computadora, así que el dictado dejó de ser una
+ * prueba y pasó a ser una funcionalidad.
  *
  * En Chrome y en Safari el audio **sale del dispositivo**: lo transcriben los servidores de
  * Google y de Apple. No es distinto de dictarle al teclado del sistema, pero conviene tenerlo
@@ -33,14 +34,6 @@ interface SpeechRecognitionLike {
   onresult: ((event: SpeechRecognitionEvent) => void) | null
   onerror: ((event: SpeechRecognitionErrorEvent) => void) | null
   onend: (() => void) | null
-  onstart: (() => void) | null
-  onaudiostart: (() => void) | null
-  onsoundstart: (() => void) | null
-  onspeechstart: (() => void) | null
-  onspeechend: (() => void) | null
-  onsoundend: (() => void) | null
-  onaudioend: (() => void) | null
-  onnomatch: (() => void) | null
 }
 
 type SpeechRecognitionConstructor = new () => SpeechRecognitionLike
@@ -72,12 +65,20 @@ const Recognition: SpeechRecognitionConstructor | undefined =
  * Sin estos dos relojes el usuario se queda con el micrófono abierto hasta que se acuerda de
  * apagarlo a mano, que es la peor forma posible de fallar.
  *
- * Primero `stop()`, que le pide al motor que **finalice y entregue** lo que venía escuchando;
- * si ni eso lo cierra, `abort()`, que corta a lo bruto. Los dos números son generosos a
- * propósito: dictar "treinta y uno de agosto" y dudar en el medio tiene que entrar.
+ * `QUIET_AFTER_MS` **se rearma con cada resultado**, así que mide silencio y no duración
+ * total. Era un plazo fijo desde el arranque mientras esto solo dictaba una fecha —"treinta y
+ * uno de agosto" entra en nueve segundos con tiempo de sobra—, pero un comando completo
+ * ("emitir alquiler mensual desde el 1 de agosto hasta el 31, vence el 10 de septiembre") no
+ * entra, y el plazo fijo cortaba al usuario en la mitad de la frase. Los parciales llegan
+ * mientras se habla, así que rearmarlo con cada uno es lo que distingue "todavía está
+ * hablando" de "se calló".
+ *
+ * `GIVE_UP_AFTER_MS` es absoluto y no se rearma, porque es justamente la red contra el caso en
+ * que el motor no emite nada: es lo bruto después de lo prolijo — primero `stop()`, que le
+ * pide al motor que **finalice y entregue**; si ni eso lo cierra, `abort()`.
  */
-const FINALIZE_AFTER_MS = 9_000
-const GIVE_UP_AFTER_MS = 14_000
+const QUIET_AFTER_MS = 8_000
+const GIVE_UP_AFTER_MS = 30_000
 
 /**
  * Los códigos del navegador, en castellano y diciendo qué hacer.
@@ -115,20 +116,11 @@ export interface SpeechInput {
   /** "Terminé de hablar": finaliza y entrega. No es lo mismo que abandonar. */
   stop: () => void
   start: () => void
-  /**
-   * Qué eventos emitió el motor, con el momento en que llegaron.
-   *
-   * **Es la razón de ser del spike.** En el iPad no hay consola que mirar desde Windows —la
-   * inspección remota de Safari pide una Mac—, así que la única forma de saber dónde muere el
-   * dictado es que la pantalla lo cuente. Con la traza se distingue "el micrófono nunca se
-   * abrió" de "se abrió y no detectó voz" de "detectó voz y el servicio no devolvió nada", que
-   * son tres problemas distintos con el mismo síntoma.
-   */
-  trace: string[]
 }
 
 /**
- * `onHeard` recibe el texto crudo, sin interpretar. Interpretarlo es de `parseSpokenDate`.
+ * `onHeard` recibe el texto crudo, sin interpretar. Interpretarlo es de `parseSpokenDate` y de
+ * `parseSpokenCommand`.
  *
  * Se guarda en una ref y no en las dependencias de `start`: el que llama la va a definir en
  * línea, así que cambia de identidad en cada render, y con eso en el `useCallback` `start`
@@ -138,7 +130,6 @@ export interface SpeechInput {
 export function useSpeechInput(onHeard: (heard: string) => void): SpeechInput {
   const [listening, setListening] = useState(false)
   const [error, setError] = useState<string>()
-  const [trace, setTrace] = useState<string[]>([])
   const recognition = useRef<SpeechRecognitionLike>(null)
   const heardCallback = useRef(onHeard)
   const timers = useRef<number[]>([])
@@ -179,22 +170,18 @@ export function useSpeechInput(onHeard: (heard: string) => void): SpeechInput {
   const start = useCallback(() => {
     if (Recognition === undefined || recognition.current !== null) return
 
-    const startedAt = Date.now()
-    const log = (event: string) =>
-      setTrace((entries) => [...entries, `${((Date.now() - startedAt) / 1000).toFixed(1)}s  ${event}`])
-
     // Una instancia nueva por dictado, en vez de una sola guardada y reusada. Reusarla es
     // donde los navegadores se portan distinto: llamar `start()` sobre una que todavía no
     // terminó tira `InvalidStateError`, y el final no llega siempre por el mismo evento.
     // Creándola acá, cada dictado empieza sin estado heredado del anterior.
     const current = new Recognition()
     current.lang = 'es-AR'
-    // Un solo tramo: esto dicta un campo, no transcribe una conversación.
+    // Un solo tramo: esto dicta un campo o un comando, no transcribe una conversación.
     current.continuous = false
     // **Los parciales sí, aunque solo interese el final.** Safari en iOS puede cerrar la
     // sesión sin emitir nunca un resultado final; guardando el último parcial queda algo que
     // entregar en `onend` en vez de nada. En Chrome no cambia el resultado: llega el final y
-    // ese es el que gana.
+    // ese es el que gana. Son además los que rearman el reloj del silencio.
     current.interimResults = true
     current.maxAlternatives = 1
 
@@ -209,26 +196,24 @@ export function useSpeechInput(onHeard: (heard: string) => void): SpeechInput {
       heardCallback.current(best)
     }
 
-    current.onstart = () => log('start — el motor arrancó')
-    current.onaudiostart = () => log('audiostart — el micrófono está abierto')
-    current.onsoundstart = () => log('soundstart — entra sonido')
-    current.onspeechstart = () => log('speechstart — lo reconoce como voz')
-    current.onspeechend = () => log('speechend — dejó de detectar voz')
-    current.onsoundend = () => log('soundend')
-    current.onaudioend = () => log('audioend — se cerró el micrófono')
-    current.onnomatch = () => log('nomatch — escuchó algo y no lo entendió')
+    /** El reloj del silencio, de cero. Se llama al arrancar y con cada parcial. */
+    const armQuiet = () => {
+      // Solo el primero de los dos: el de `GIVE_UP` es absoluto y rearmarlo lo volvería
+      // infinito, que es justo el caso contra el que existe.
+      if (timers.current[0] !== undefined) window.clearTimeout(timers.current[0])
+      timers.current[0] = window.setTimeout(() => current.stop(), QUIET_AFTER_MS)
+    }
 
     current.onresult = (event) => {
       const result = event.results[event.results.length - 1]
       const heard = result?.[0]?.transcript
       if (heard === undefined) return
       best = heard
-      log(`result ${result?.isFinal === true ? '(final)' : '(parcial)'}: "${heard}"`)
+      armQuiet()
       if (result?.isFinal === true) deliver()
     }
 
     current.onerror = (event) => {
-      log(`error: ${event.error}`)
       setError(describe(event.error))
     }
 
@@ -236,17 +221,13 @@ export function useSpeechInput(onHeard: (heard: string) => void): SpeechInput {
     // único lugar por el que pasan los tres, así que es donde se suelta la instancia — y
     // donde se entrega el último parcial si nunca llegó un final.
     current.onend = () => {
-      log('end')
       clearTimers()
       deliver()
       recognition.current = null
       setListening(false)
     }
 
-    // La traza y el error se limpian **antes** de arrancar: si se hiciera después, el reset
-    // podría pisar lo que ya escribió un evento temprano.
     setError(undefined)
-    setTrace([])
 
     try {
       current.start()
@@ -254,7 +235,6 @@ export function useSpeechInput(onHeard: (heard: string) => void): SpeechInput {
       // iOS puede rechazar el `start()` sin emitir ningún evento — típicamente cuando el
       // contexto no es seguro. Sin este `catch` el botón se queda prendido para siempre y no
       // dice nada.
-      log('start() tiró una excepción')
       setError('No se pudo abrir el micrófono.')
       return
     }
@@ -262,14 +242,8 @@ export function useSpeechInput(onHeard: (heard: string) => void): SpeechInput {
     recognition.current = current
     setListening(true)
     timers.current = [
-      window.setTimeout(() => {
-        log(`sin cerrarse a los ${FINALIZE_AFTER_MS / 1000}s — pidiendo finalizar`)
-        current.stop()
-      }, FINALIZE_AFTER_MS),
-      window.setTimeout(() => {
-        log(`sigue abierto a los ${GIVE_UP_AFTER_MS / 1000}s — cortando`)
-        current.abort()
-      }, GIVE_UP_AFTER_MS),
+      window.setTimeout(() => current.stop(), QUIET_AFTER_MS),
+      window.setTimeout(() => current.abort(), GIVE_UP_AFTER_MS),
     ]
   }, [clearTimers])
 
@@ -277,5 +251,5 @@ export function useSpeechInput(onHeard: (heard: string) => void): SpeechInput {
   // callback de un componente desmontado. Acá sí `abort`: nadie espera un resultado.
   useEffect(() => cancel, [cancel])
 
-  return { supported: Recognition !== undefined, listening, error, start, stop, trace }
+  return { supported: Recognition !== undefined, listening, error, start, stop }
 }

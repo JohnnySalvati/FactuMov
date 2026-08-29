@@ -109,5 +109,8 @@ Y dos cosas que la emisión dejó anotadas y no son unidades todavía:
   equivocada del receptor en cada factura. Sin revisar.
 - **Ninguna pantalla usa `/invoices` para reemitir el mes siguiente.** Hoy se vuelve al
   modelo, que es correcto, pero "emitir igual que el mes pasado" es el gesto que más se va a
-  repetir.
-
+  repetir. **El comando hablado (2026-08-28) resuelve la mitad**: desde la grilla se dice
+  "emitir alquiler mensual desde el 1 de agosto hasta el 31" y la app abre la confirmación con
+  todo puesto, sin buscar la tarjeta ni cargar fechas a mano. Lo que sigue faltando es la otra
+  mitad, la que no hace falta dictar: partir de lo que se emitió el mes pasado. Ver *Frontend →
+  Dictado por voz*.

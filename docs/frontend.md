@@ -291,62 +291,108 @@ Dos detalles que van con esto:
   vacío siguen siendo del backend y siguen significando lo que significaban; esto es una tercera
   cosa —el archivo no se pudo leer— y se contesta antes de salir a la red.
 
-## Dictar la fecha por voz (2026-08-28) — spike
-Un micrófono al lado de cada campo de fecha de `/modelos/:id/emitir`. **Es un spike, no una
-funcionalidad terminada**: existe para averiguar si el reconocimiento de voz del navegador
-anda en el celular —y sobre todo en iOS con la app instalada desde la pantalla de inicio, que
-es el caso principal— antes de construirle nada encima. Son tres archivos:
-`hooks/useSpeechInput.ts` (abrir el micrófono), `speech.ts` (interpretar lo que se escuchó) y
-`components/DictateDate.tsx` (el campo con el botón y el estado).
+## Dictado por voz: las fechas y el comando de emitir (2026-08-28)
+Un micrófono al lado de cada campo de fecha de `/modelos/:id/emitir`, y un botón "Emitir por
+voz" arriba de la grilla de modelos que entiende **"emitir alquiler mensual desde el 1 de
+agosto hasta el 31, vence el 10 de septiembre"**. Son cuatro archivos:
+`hooks/useSpeechInput.ts` (abrir el micrófono), `speech.ts` (de lo que se escuchó a una
+fecha), `commands.ts` (de lo que se escuchó a un comando) y los dos componentes,
+`DictateDate` y `DictateCommand`.
+
+**Nació como spike y el spike cerró el mismo día**: existía para averiguar si el
+reconocimiento de voz del navegador anda en el celular —y sobre todo en iOS con la app
+instalada desde la pantalla de inicio, que es el caso principal— antes de construirle nada
+encima. Anda en iPad, en Android y en la computadora, así que el comando hablado, que era el
+paso siguiente, se construyó encima. Con eso se fue también la traza de eventos que mostraba
+la pantalla mientras duró la prueba (`.mic-trace`): era una herramienta para diagnosticar
+desde un iPad sin consola, no algo que va abajo del botón de emitir una factura.
 
 - **Web Speech API y no un servicio de transcripción propio.** La alternativa era grabar con
   `MediaRecorder`, subir el audio y transcribirlo en el backend: anda parejo en todos lados,
   pero cuesta por minuto, agrega un endpoint y suma latencia. El API del navegador es gratis,
   no toca el servidor y ya está instalado; lo que se paga es que el soporte no es parejo, y
-  eso es justamente lo que el spike va a medir. **El audio sale del dispositivo** —lo
-  transcriben los servidores de Google y de Apple—, igual que dictándole al teclado del
-  sistema, pero conviene tenerlo escrito antes de que alguien dicte el nombre de un cliente.
-- **Empieza por las fechas y no por un comando hablado** ("emitir igual que el mes pasado")
-  porque las fechas son el único campo editable de esa pantalla —el total sale del `preview`
-  del backend— y porque cargar una fecha en el selector nativo de un celular es lo que más
-  molesta. El comando hablado es el paso siguiente, y necesita que este ande primero.
-- **Una gramática cerrada y no un LLM.** El vocabulario de una fecha entra en un archivo:
-  "hoy", "ayer", "el 15", "quince de agosto", "fin de mes", "15/8/26". Un modelo entendería
-  que le hablen suelto, pero cuesta por request, agrega un segundo y puede devolver una fecha
-  que nadie dijo, sobre un campo que termina impreso en un comprobante fiscal.
-- **El micrófono llena el campo y nada más: no emite.** Emitir le pide el CAE a ARCA y no se
-  puede deshacer, así que lo que la voz hace es dejar el formulario listo con lo que entendió
-  escrito en pantalla; el botón lo aprieta el dedo. Con eso, entender mal es una molestia y no
-  una factura equivocada. De ahí también el `type="button"` del micrófono: el default de un
-  `<button>` adentro de un `<form>` es `submit`, y ese `submit` emite.
+  eso es lo que el spike midió. **El audio sale del dispositivo** —lo transcriben los
+  servidores de Google y de Apple—, igual que dictándole al teclado del sistema, pero conviene
+  tenerlo escrito antes de que alguien dicte el nombre de un cliente.
+- **Una gramática cerrada y no un LLM.** El vocabulario entra en un archivo: "hoy", "ayer",
+  "el 15", "quince de agosto", "fin de mes", "15/8/26", más los verbos y las cuatro palabras
+  que abren una cláusula de fecha. Un modelo entendería que le hablen suelto, pero cuesta por
+  request, agrega un segundo y puede devolver una fecha —o un modelo— que nadie dijo, sobre un
+  comprobante fiscal.
+- **Ni el micrófono ni el comando emiten.** Emitir le pide el CAE a ARCA y no se puede
+  deshacer, así que lo que la voz hace es dejar el formulario listo con lo que entendió escrito
+  en pantalla; el botón lo aprieta el dedo. El comando ahorra la parte reversible del camino
+  —encontrar la tarjeta entre veinte, entrar, tocar "Emitir" y cargar tres fechas en el
+  selector nativo del celular— y termina en la misma pantalla de confirmación de siempre, que
+  muestra letra, destinatario e importe. Con eso, entender mal es una molestia y no una factura
+  equivocada. De ahí también el `type="button"` de los micrófonos: el default de un `<button>`
+  adentro de un `<form>` es `submit`, y ese `submit` emite.
+- **Las fechas dictadas viajan en la query, no en el estado del router**
+  (`?fecha=&desde=&hasta=&vence=`). El estado de `navigate` se pierde al recargar y la pantalla
+  volvería a los defaults sin decir nada; en la URL sobreviven y se pueden corregir a mano. La
+  pantalla de emisión valida la **forma** de lo que le llega —que el día exista ya lo verificó
+  `parseSpokenDate`, y el rango lo verifica el backend— y **avisa que esas fechas las puso el
+  dictado**: con hoy puesto por default se ve igual que con una fecha entendida de una frase, y
+  son dos cosas distintas.
 - **No entender es una respuesta, y se muestra.** `parseSpokenDate` devuelve `undefined` y el
-  campo dice qué se escuchó y que no salió una fecha. El peor final posible es que el botón no
+  campo dice qué se escuchó y que no salió una fecha; el comando distingue cuatro finales —no
+  es un comando, no hay un modelo con ese nombre, hay más de uno, y no se entendió la fecha de
+  tal palabra— porque los cuatro se arreglan distinto. El peor final posible es que el botón no
   haga nada visible: el usuario no sabe si el micrófono no escuchó, si entendió otra cosa o si
   la app se colgó. Por el mismo motivo los códigos de error del navegador se traducen uno por
-  uno — "no se escuchó nada" se arregla hablando de nuevo y "no diste permiso" se arregla en
-  la configuración.
-- **`parseSpokenDate` es puro y recibe `today` por parámetro.** El micrófono solo se puede
-  probar hablándole a un celular; si la interpretación viviera adentro del componente, también
-  habría que hablarle al celular para saber si "treinta y uno de agosto" cae en el día
-  correcto. Separadas, lo único que se prueba a mano es que el micrófono abra. El `today`
-  inyectado es lo que hace que "ayer" no dependa del día en que se corra la prueba.
+  uno — "no se escuchó nada" se arregla hablando de nuevo y "no diste permiso" se arregla en la
+  configuración.
+- **Empatar no es elegir.** Si lo que se dijo coincide con dos modelos se muestran los dos y el
+  usuario repite con el nombre completo. Adivinar llevaría a la pantalla de confirmación del
+  modelo equivocado, con el nombre correcto de otro cliente escrito arriba del botón. Por lo
+  mismo el buscador tiene tres pasadas separadas —nombre exacto, nombre contenido, y todas las
+  palabras en cualquier orden— y gana la primera que encuentre algo: así "alquiler" encuentra a
+  "Alquiler" aunque exista también "Alquiler cochera".
+- **El período se lee junto: la punta que no nombra el mes lo toma de la otra.** "Desde el 1
+  hasta el 31 de agosto" es como se habla, y cada punta resuelta por su cuenta no puede acertar
+  — `parseSpokenDate` no ve más que "el 1" y le pone el mes más cercano a hoy, que el 28 de
+  agosto es septiembre: el período saldría del 1 de septiembre al 31 de agosto, al revés y sin
+  que nada lo dijera. Corre solo sobre `desde`/`hasta`, que son las únicas dos fechas que forman
+  un par: "vence el 10" dicho el 28 de agosto es el 10 de septiembre aunque el período facturado
+  sea agosto. Y si ninguna de las dos nombró el mes y el período igual queda invertido, **las
+  dos vuelven a "no se entendió"**: un período dado vuelta que la app corrige sola es una
+  factura de servicios declarada con otro período, y eso lo lee ARCA.
+- **El vocabulario de las cláusulas es corto a propósito.** Cada palabra que abre una cláusula
+  es una palabra que deja de poder estar en el nombre de un modelo, porque corta la frase. Por
+  eso están "fecha", "desde", "hasta" y "vence" y no está "al", que aparece en "Servicio al
+  cliente" — aunque "del 1 al 31" sea como se habla.
+- **La última vez que se dijo una fecha gana.** Repetir una palabra clave es como se corrige
+  hablando: "desde el 1, no, desde el 2".
+- **`parseSpokenDate` y `parseSpokenCommand` son puros y reciben `today` por parámetro.** El
+  micrófono solo se puede probar hablándole a un celular; si la interpretación viviera adentro
+  del componente, también habría que hablarle al celular para saber si "treinta y uno de agosto"
+  cae en el día correcto. Separadas, lo único que se prueba a mano es que el micrófono abra. El
+  `today` inyectado es lo que hace que "ayer" no dependa del día en que se corra la prueba.
 - **Rechaza el 31 de febrero.** `new Date(2026, 1, 31)` no falla: devuelve el 3 de marzo en
-  silencio. Sin la verificación, dictar una fecha imposible cargaría una plausible y
-  equivocada, que es peor que no entender nada.
-- **El año que no se dijo es el que deja la fecha más cerca de hoy.** Se nota una vez por año
-  y es justo cuando importa: "31 de diciembre" dictado el 2 de enero es del año pasado. Mismo
+  silencio. Sin la verificación, dictar una fecha imposible cargaría una plausible y equivocada,
+  que es peor que no entender nada.
+- **El año que no se dijo es el que deja la fecha más cerca de hoy.** Se nota una vez por año y
+  es justo cuando importa: "31 de diciembre" dictado el 2 de enero es del año pasado. Mismo
   criterio sobre el mes cuando solo se dijo el día.
 - **Los números hablados se pasan a dígitos antes de buscar la fecha**, porque los motores no
   coinciden: Chrome en Android devuelve "15 de agosto" y Safari en iOS "quince de agosto".
-  Normalizando primero hay una sola forma de fecha que reconocer en vez de dos.
-- **Sin banco de pruebas en el frontend.** Los casos de `parseSpokenDate` se corrieron con
-  `esbuild` + `node` desde el scratchpad (25 casos, todos en verde) en vez de sumar `vitest`:
-  es la misma decisión que TanStack Query y Tailwind. Revisar cuando haya una segunda función
-  pura que valga la pena fijar.
-- **Pendiente de la prueba en el celular**, que es para lo que existe todo esto: si el
-  `webkitSpeechRecognition` de iOS no abre en la PWA instalada, el camino es (c) —grabar y
-  transcribir en el backend— o directamente el dictado del teclado del sistema, que ya
-  funciona hoy sin escribir una línea.
+  Normalizando primero hay una sola forma de fecha que reconocer en vez de dos. La misma
+  normalización parte la frase del comando, así que el nombre del modelo se compara con el mismo
+  criterio con el que se leyó.
+- **El reloj que cierra el micrófono mide silencio, no duración total.** Safari en iPad abre el
+  micrófono y no lo cierra nunca (visto el 2026-08-28 en producción), así que hay dos relojes: a
+  los 8 segundos **sin resultados** se pide `stop()` —finalizar y entregar— y a los 30 absolutos
+  se corta con `abort()`. El primero se rearma con cada parcial: era un plazo fijo desde el
+  arranque mientras esto dictaba una fecha, pero un comando entero no entra en nueve segundos y
+  el plazo fijo cortaba al usuario en la mitad de la frase. El segundo no se rearma nunca,
+  porque es justamente la red contra el caso en que el motor no emite nada.
+- **`stop()` y no `abort()` cuando el usuario dice que terminó.** En iOS el motor no entrega
+  nada hasta que se le pide finalizar, así que `abort` garantizaba el síntoma reportado:
+  micrófono abierto, cuadrado apretado, nada capturado.
+- **Sin banco de pruebas en el frontend.** Los casos de `parseSpokenDate` y de `commands.ts` se
+  corren con `esbuild` + `node` desde el scratchpad (33 casos, todos en verde) en vez de sumar
+  `vitest`: es la misma decisión que TanStack Query y Tailwind. Revisar cuando esta gramática
+  vuelva a crecer — es la candidata más clara a necesitarlo.
 - **Rugosidad conocida:** en pantalla ancha, "Período desde" y "Hasta" comparten un `.row` con
   `align-items: flex-end`, así que si se dicta en uno de los dos el mensaje de estado lo
   desalinea del otro mientras está visible. En el celular no pasa, porque van uno abajo del
