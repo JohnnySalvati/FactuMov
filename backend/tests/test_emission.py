@@ -71,7 +71,8 @@ def rejected(code=10016, message="El numero de comprobante ya fue registrado"):
 def ticket(monkeypatch):
     """Un TA ya emitido, sin tocar la base ni la red."""
     monkeypatch.setattr(
-        arca, "get_access_ticket", lambda service: arca.AccessTicket(token="tk", sign="sg")
+        arca, "get_access_ticket",
+        lambda service, max_age=None: arca.AccessTicket(token="tk", sign="sg"),
     )
 
 

@@ -1,10 +1,14 @@
 """El rechequeo periódico de las delegaciones que están esperando una aceptación nuestra.
 
 Existe por la asimetría que define toda esta parte del proyecto: **el usuario nos avisa que
-delegó, pero nadie nos avisa cuando la delegación empieza a funcionar.** El paso que falta —
-aceptar la designación en ARCA— lo hace una persona con Clave Fiscal en una página que ningún
-web service expone, así que no hay evento, no hay webhook y no hay nada que escuchar. Lo único
-que se puede hacer es volver a preguntar.
+delegó, pero nadie nos avisa cuando la delegación empieza a funcionar.** Los dos pasos que
+faltan —aceptar la designación y pasarle el servicio a nuestro certificado— los hace una
+persona con Clave Fiscal en dos páginas que ningún web service expone, así que no hay evento,
+no hay webhook y no hay nada que escuchar. Lo único que se puede hacer es volver a preguntar.
+
+Y volver a preguntar **con un ticket reciente**, que no es lo mismo: un TA lleva la lista de
+relaciones congelada en el momento en que se emitió, así que repreguntar con el mismo ticket es
+repetir la pregunta anterior. Ver `RECHECK_TICKET_MAX_AGE`.
 
 Sin esto, el usuario que avisó queda apretando el botón a ciegas: hizo su parte, le dijimos que
 espere, y no tiene forma de saber cuándo terminó la espera salvo reintentar. Con esto se entera
@@ -38,6 +42,20 @@ logger = logging.getLogger(__name__)
 # la espera del usuario en unos siete de promedio y cuesta cuatro llamadas por hora **por
 # identidad pendiente**, que en el caso normal son cero.
 RECHECK_INTERVAL_SECONDS = 15 * 60
+
+# Cuán viejo puede ser el ticket con el que se repregunta. No es una constante de ARCA sino el
+# techo de cuánto puede durar una respuesta desactualizada: el TA lleva la lista de relaciones
+# tal como estaba al emitirse, así que sin esto el barrido pasa hasta doce horas repreguntando
+# cuatro veces por hora con la garantía de recibir siempre lo mismo. Justo el caso que se está
+# esperando —el contribuyente ya delegó, o nosotros ya completamos nuestra parte— es el que un
+# ticket viejo no puede ver.
+#
+# **Cuesta un login a WSAA por barrido, no uno por identidad**: el TA es del certificado y lo
+# comparten todas. Sea una pendiente o cincuenta, el techo son veinticuatro pedidos por día.
+# Una hora, y no los quince minutos del barrido, porque la espera que importa no es la del
+# reintento sino la de la persona: una hora de más en un trámite que ya viene de días es
+# invisible, y veinticuatro logins diarios contra noventa y seis no lo son.
+RECHECK_TICKET_MAX_AGE = datetime.timedelta(hours=1)
 
 # Después de este tiempo se deja de repreguntar sola. Un aviso de hace un mes que sigue sin
 # verificar no se va a arreglar preguntando cuatro veces por hora para siempre: o el usuario se
@@ -115,7 +133,9 @@ def recheck_pending() -> int:
 
         for identity, user_email in _pending(db):
             try:
-                check = wsfe.check_delegation(identity.tax_id)
+                check = wsfe.check_delegation(
+                    identity.tax_id, ticket_max_age=RECHECK_TICKET_MAX_AGE
+                )
             except ArcaError:
                 # `exception` y no un log a secas: sin el traceback, un barrido que no verifica
                 # nada es indistinguible de uno donde no había nada que verificar.

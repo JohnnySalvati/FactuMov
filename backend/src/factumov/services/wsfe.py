@@ -93,7 +93,9 @@ def _errors(response: Any) -> list[Any]:
     return list(errors.Err or [])
 
 
-def check_delegation(tax_id: str) -> DelegationCheck:
+def check_delegation(
+    tax_id: str, ticket_max_age: datetime.timedelta | None = None
+) -> DelegationCheck:
     """¿ARCA acepta que FactuMov actúe por `tax_id` en WSFE?
 
     La sonda es `FEParamGetPtosVenta` y no `FECompUltimoAutorizado`, que es lo que Balance360
@@ -106,8 +108,15 @@ def check_delegation(tax_id: str) -> DelegationCheck:
     delegación: con el mismo ticket, ARCA acepta unos CUIT y rechaza otros.
 
     Devuelve además **los puntos de venta que la sonda trajo** — ver `DelegationCheck`.
+
+    `ticket_max_age` existe porque el "no" de esta función caduca sin que nadie avise: el TA
+    lleva la lista de relaciones congelada en el momento en que se emitió, así que preguntar
+    con un ticket viejo es preguntar por el pasado. Quien llama sabe cuánta desactualización
+    tolera —el barrido, una hora; alguien que acaba de apretar el botón, mucho menos— y por
+    eso la política se pasa desde afuera en vez de fijarse acá. Ver
+    `arca.get_access_ticket`.
     """
-    ticket = arca.get_access_ticket(SERVICE)
+    ticket = arca.get_access_ticket(SERVICE, max_age=ticket_max_age)
     settings = arca.get_arca_settings()
 
     try:

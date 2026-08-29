@@ -243,12 +243,17 @@ def make_arca_ticket(
     token=None,
     sign=None,
     expires_at=None,
+    issued_at=None,
 ):
     """Una fila de `arca_tickets`. Es la única tabla sin dueño: el ticket es del certificado.
 
     `expires_at` por default a doce horas, que es lo que dura un TA de verdad. Los tests del
     vencimiento lo pasan en el pasado, que es más simple que parchear un reloj — el mismo
     truco que `make_user_session`.
+
+    `issued_at` por default a ahora, o sea recién emitido. Los tests de la edad lo pasan en el
+    pasado **dejando `expires_at` donde está**, que es justo la combinación que importa: un
+    ticket vigente y viejo a la vez, que es el que miente sobre las relaciones.
     """
     n = next(_sequence)
     ticket = ArcaTicket(
@@ -257,6 +262,7 @@ def make_arca_ticket(
         token=token or f"token{n}",
         sign=sign or f"sign{n}",
         expires_at=expires_at or datetime.now(UTC) + timedelta(hours=12),
+        issued_at=issued_at or datetime.now(UTC),
     )
     db.add(ticket)
     db.flush()

@@ -1,5 +1,6 @@
 import logging
 import uuid
+from datetime import timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
@@ -179,6 +180,18 @@ def delete_fiscal_identity(
         raise HTTPException(status_code=409, detail="No se puede eliminar, existen asociaciones")
 
 
+# Cuán viejo puede ser el ticket con el que se le pregunta a ARCA por este click. Mucho más
+# exigente que el del barrido, y por una razón de uso: acá hay alguien que acaba de terminar el
+# trámite y aprieta el botón para saber si quedó. Contestarle que no con la foto de las
+# relaciones de hace una hora sería mentirle en el único momento en que está mirando.
+#
+# Cinco minutos y no cero: apretar el botón dos veces seguidas, o dos identidades verificadas
+# una atrás de la otra, no tienen por qué costar dos logins a WSAA. El techo de gasto real lo
+# pone el rate limiter de acá arriba, que ya cuenta por usuario justamente porque la cuota de
+# ARCA es del certificado y es de todos.
+VERIFY_TICKET_MAX_AGE = timedelta(minutes=5)
+
+
 def _ask_arca(
     fiscal_identity: FiscalIdentity,
     db: SessionDep,
@@ -200,7 +213,7 @@ def _ask_arca(
     db.commit()
 
     try:
-        return wsfe.check_delegation(tax_id)
+        return wsfe.check_delegation(tax_id, ticket_max_age=VERIFY_TICKET_MAX_AGE)
     except ArcaError:
         # El `logger.exception` no es decorativo: es la **única** forma de saber por qué falló.
         # El detalle no puede ir en la respuesta —no le dice nada al usuario y filtra cómo

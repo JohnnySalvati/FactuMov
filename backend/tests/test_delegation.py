@@ -18,8 +18,10 @@ from requests.exceptions import ConnectionError as RequestsConnectionError
 from zeep.exceptions import Fault
 
 from factumov.exceptions import ArcaError, WsfeError
+from factumov.routers.fiscal_identity import VERIFY_TICKET_MAX_AGE
 from factumov.services import arca, wsfe
 from factumov.services import email as email_service
+from factumov.services.delegation_watch import RECHECK_TICKET_MAX_AGE
 from tests.conftest import FALLBACK_DELEGATE_TAX_ID
 from tests.factories import make_fiscal_identity
 
@@ -41,7 +43,8 @@ UNEXPECTED = SimpleNamespace(
 def ticket(monkeypatch):
     """Un TA ya emitido, sin tocar la base ni la red."""
     monkeypatch.setattr(
-        arca, "get_access_ticket", lambda service: arca.AccessTicket(token="tk", sign="sg")
+        arca, "get_access_ticket",
+        lambda service, max_age=None: arca.AccessTicket(token="tk", sign="sg"),
     )
 
 
@@ -148,6 +151,30 @@ def test_verify_delegation_stamps_the_row_when_arca_says_yes(
     assert response.json()["delegation_verified_at"] is not None
     db.refresh(fiscal_identity)
     assert fiscal_identity.delegation_verified_at is not None
+
+
+def test_verify_delegation_asks_with_a_fresh_ticket(
+    client, fiscal_identity, wsfe_returns, monkeypatch
+):
+    """El click exige un ticket casi nuevo, mucho más que el barrido.
+
+    Del otro lado del botón hay alguien que acaba de hacer el trámite en ARCA y quiere saber
+    si quedó. Contestarle con la lista de relaciones que el TA congeló hace horas es
+    responderle sobre un momento anterior al que está preguntando.
+    """
+    asked = []
+
+    def get_access_ticket(service, max_age=None):
+        asked.append(max_age)
+        return arca.AccessTicket(token="tk", sign="sg")
+
+    monkeypatch.setattr(arca, "get_access_ticket", get_access_ticket)
+    wsfe_returns(NOT_DELEGATED)
+
+    verify(client, fiscal_identity)
+
+    assert asked == [VERIFY_TICKET_MAX_AGE]
+    assert VERIFY_TICKET_MAX_AGE < RECHECK_TICKET_MAX_AGE
 
 
 def test_verify_delegation_answers_200_when_the_delegation_is_missing(

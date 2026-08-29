@@ -2,9 +2,10 @@
 
 Nada de esto sale a la red. Lo que se ejercita es lo que se puede romper sin que ARCA se
 entere: el XML que se firma, la lectura del certificado, el parseo de la respuesta y —lo más
-importante— que el ticket no se pida dos veces cuando ya hay uno vigente. Pedirlo de más no
-falla lento: WSAA se **niega** a emitir uno nuevo mientras el anterior viva, así que el
-segundo pedido es un error y la app queda afuera de ARCA hasta doce horas.
+importante— que el ticket no se pida dos veces cuando ya hay uno vigente, y que sí se pida
+cuando el que hay quedó viejo. Pedirlo de más gasta una cuota de WSAA que es del certificado y
+por lo tanto de todos los usuarios; pedirlo de menos hace que la app conteste sobre las
+relaciones de hace horas — ver docs/arca.md → *El ticket viejo miente*.
 
 La conexión de verdad contra homologación es una prueba manual y no un test: depende de un
 certificado que no está en el repo y de que ARCA esté levantado.
@@ -187,6 +188,68 @@ def test_get_access_ticket_renews_a_ticket_about_to_expire(arca_db, monkeypatch)
     monkeypatch.setattr(arca, "request_ticket", lambda service: issued("nuevo"))
 
     assert arca.get_access_ticket("wsfe").token == "nuevo"
+
+
+def test_get_access_ticket_renews_a_ticket_older_than_max_age(arca_db, monkeypatch):
+    """Vigente pero viejo: se pide uno nuevo igual.
+
+    Es el caso que motiva todo el parámetro. El ticket de abajo le sirve a ARCA —le quedan
+    once horas— y sin embargo no sirve para *esta* pregunta: lleva la lista de relaciones tal
+    como estaba hace dos horas, y lo que se está averiguando es si esa lista cambió.
+    """
+    make_arca_ticket(arca_db, token="viejo", issued_at=datetime.now(UTC) - timedelta(hours=2))
+    monkeypatch.setattr(arca, "request_ticket", lambda service: issued("nuevo"))
+
+    assert arca.get_access_ticket("wsfe", max_age=timedelta(hours=1)).token == "nuevo"
+
+
+def test_get_access_ticket_reuses_a_ticket_within_max_age(arca_db, monkeypatch):
+    """Y adentro de la ventana no se pide nada: si no, cada consulta costaría un login."""
+    make_arca_ticket(
+        arca_db, token="reciente", sign="firma", issued_at=datetime.now(UTC) - timedelta(minutes=5)
+    )
+    monkeypatch.setattr(
+        arca, "request_ticket", lambda service: pytest.fail("no tenía que pedir un ticket nuevo")
+    )
+
+    ticket = arca.get_access_ticket("wsfe", max_age=timedelta(hours=1))
+
+    assert ticket == arca.AccessTicket(token="reciente", sign="firma")
+
+
+def test_get_access_ticket_without_max_age_reuses_an_old_ticket(arca_db, monkeypatch):
+    """Sin `max_age` la edad no se mira: el resto de la app quiere el ticket mientras valga.
+
+    Emitir por cada factura un TA nuevo sería gastar la cuota de WSAA —que es del
+    certificado, o sea de todos— para volver a leer algo que no cambió.
+    """
+    make_arca_ticket(arca_db, token="viejo", issued_at=datetime.now(UTC) - timedelta(hours=11))
+    monkeypatch.setattr(
+        arca, "request_ticket", lambda service: pytest.fail("no tenía que pedir un ticket nuevo")
+    )
+
+    assert arca.get_access_ticket("wsfe").token == "viejo"
+
+
+def test_renewing_stamps_when_it_was_issued(arca_db, monkeypatch):
+    """El ticket nuevo queda marcado como recién emitido, o el próximo `max_age` lo tiraría.
+
+    Sin esta marca el `issued_at` se quedaría en el de la fila vieja y cada consulta con
+    `max_age` pediría otro TA: un login por pregunta, que es lo contrario de lo que el
+    parámetro busca.
+    """
+    make_arca_ticket(arca_db, token="viejo", issued_at=datetime.now(UTC) - timedelta(hours=5))
+    monkeypatch.setattr(arca, "request_ticket", lambda service: issued("nuevo"))
+
+    arca.get_access_ticket("wsfe", max_age=timedelta(hours=1))
+
+    # La marca la pone `func.now()`, o sea el reloj de Postgres al abrir la transacción, que no
+    # es el mismo instante que el `datetime.now()` de este proceso — y por unos microsegundos
+    # puede quedar detrás. El margen de un minuto es para eso: lo que se afirma es que la fila
+    # quedó marcada como recién emitida en vez de conservar la fecha vieja.
+    (row,) = stored_tickets(arca_db)
+    assert row.token == "nuevo"
+    assert row.issued_at > datetime.now(UTC) - timedelta(minutes=1)
 
 
 def test_renewing_replaces_the_row_instead_of_adding_one(arca_db, monkeypatch):

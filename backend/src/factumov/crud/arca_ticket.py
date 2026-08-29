@@ -17,24 +17,32 @@ from factumov.models.arca_ticket import ArcaTicket
 EXPIRY_MARGIN = timedelta(minutes=5)
 
 
-def get_valid(db: Session, env: str, service: str) -> ArcaTicket | None:
-    """El ticket vigente, o None si no hay o si está por vencer.
+def get_valid(
+    db: Session, env: str, service: str, max_age: timedelta | None = None
+) -> ArcaTicket | None:
+    """El ticket vigente, o None si no hay, si está por vencer o si es más viejo que `max_age`.
 
     La comparación de vencimiento se hace en SQL, igual que en `user_session`: una sola fuente
     de verdad para "ahora", y sin el `TypeError` de comparar un datetime naive con uno aware
     que `DateTime(timezone=True)` deja servido.
+
+    **`max_age` es una edad y no una fecha de corte**, por lo mismo: calcular "hace una hora"
+    en Python metería el reloj de la app en una comparación que hasta ahora resolvía sola la
+    base. Con `func.now() - max_age` los dos lados de las dos condiciones se leen del mismo
+    reloj.
+
+    Un ticket puede estar vigente y ser viejo al mismo tiempo, y esa es toda la razón por la
+    que este parámetro existe: la vigencia dice si ARCA lo va a aceptar, la edad dice si lo
+    que lleva adentro sigue siendo cierto. Ver `services/arca.get_access_ticket`.
     """
-    return (
-        db.execute(
-            select(ArcaTicket).where(
-                ArcaTicket.env == env,
-                ArcaTicket.service == service,
-                ArcaTicket.expires_at > func.now() + EXPIRY_MARGIN,
-            )
-        )
-        .scalars()
-        .first()
-    )
+    conditions = [
+        ArcaTicket.env == env,
+        ArcaTicket.service == service,
+        ArcaTicket.expires_at > func.now() + EXPIRY_MARGIN,
+    ]
+    if max_age is not None:
+        conditions.append(ArcaTicket.issued_at > func.now() - max_age)
+    return db.execute(select(ArcaTicket).where(*conditions)).scalars().first()
 
 
 def lock(db: Session, key: int) -> None:
@@ -72,5 +80,9 @@ def upsert(
     ticket.token = token
     ticket.sign = sign
     ticket.expires_at = expires_at
+    # `func.now()` y no `datetime.now()`: es el mismo reloj contra el que `get_valid` compara
+    # la edad después. Con el de la app, un contenedor corrido unos segundos alcanzaría para
+    # que un ticket recién emitido se lea como viejo, o al revés.
+    ticket.issued_at = func.now()
     db.flush()
     return ticket

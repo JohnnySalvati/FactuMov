@@ -21,7 +21,11 @@ from requests.exceptions import ConnectionError as RequestsConnectionError
 
 from factumov import database
 from factumov.services import arca
-from factumov.services.delegation_watch import CLAIM_MAX_AGE_DAYS, recheck_pending
+from factumov.services.delegation_watch import (
+    CLAIM_MAX_AGE_DAYS,
+    RECHECK_TICKET_MAX_AGE,
+    recheck_pending,
+)
 from tests.factories import make_fiscal_identity
 
 OK = SimpleNamespace(Errors=None, ResultGet=SimpleNamespace(PtoVenta=[]))
@@ -35,7 +39,8 @@ NOT_DELEGATED = SimpleNamespace(
 @pytest.fixture(autouse=True)
 def ticket(monkeypatch):
     monkeypatch.setattr(
-        arca, "get_access_ticket", lambda service: arca.AccessTicket(token="tk", sign="sg")
+        arca, "get_access_ticket",
+        lambda service, max_age=None: arca.AccessTicket(token="tk", sign="sg"),
     )
 
 
@@ -79,6 +84,29 @@ def claimed(db, user_id, hours_ago=1, **kwargs):
     identity.delegation_claimed_at = datetime.now(UTC) - timedelta(hours=hours_ago)
     db.flush()
     return identity
+
+
+def test_the_sweep_refuses_to_ask_with_a_stale_ticket(db, user, arca_answers, monkeypatch):
+    """El barrido pide un ticket de menos de una hora, y no cualquiera que esté vigente.
+
+    Es lo que separa un rechequeo de una repetición: el TA lleva la lista de relaciones
+    congelada en el momento en que se emitió, así que preguntar veinte veces con el mismo
+    ticket devuelve veinte veces la misma respuesta. Justo lo que el barrido está esperando
+    —que alguien complete el trámite en ARCA— es lo que un ticket viejo no puede ver.
+    """
+    asked = []
+
+    def get_access_ticket(service, max_age=None):
+        asked.append(max_age)
+        return arca.AccessTicket(token="tk", sign="sg")
+
+    monkeypatch.setattr(arca, "get_access_ticket", get_access_ticket)
+    claimed(db, user.id)
+    arca_answers(NOT_DELEGATED)
+
+    recheck_pending()
+
+    assert asked == [RECHECK_TICKET_MAX_AGE]
 
 
 def test_a_pending_delegation_that_now_works_gets_verified(db, user, arca_answers):

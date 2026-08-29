@@ -76,10 +76,15 @@ de cuando se escribió el mail de delegación, antes de mirar Balance360.
   tocar código.
 
 ### El ticket de acceso vive en una tabla
-No en el `ticket_arca.json` del cwd que usa Balance360. **WSAA se niega a emitir un TA nuevo
-mientras el anterior siga vigente**, así que dos workers pidiendo a la vez no obtienen dos
-tickets: obtienen uno y un error, y la app queda afuera de ARCA hasta doce horas. Un archivo
-en el cwd de un contenedor no coordina eso, y encima no sobrevive al deploy.
+No en el `ticket_arca.json` del cwd que usa Balance360. Dos workers pidiendo un TA a la vez
+gastan dos veces la cuota de WSAA para quedarse con un solo ticket útil, y un archivo en el cwd
+de un contenedor no coordina eso ni sobrevive al deploy.
+
+> **Corregido el 2026-08-29.** Acá decía que WSAA *se niega* a emitir un TA nuevo mientras el
+> anterior siga vigente, y que por eso el segundo pedido dejaba a la app afuera de ARCA hasta
+> doce horas. En producción emitió uno nuevo sin problema — ver *El ticket viejo miente*. La
+> tabla sigue siendo lo correcto por las otras razones, que no dependían de aquella; lo que
+> cambia es que renovar a mano dejó de ser algo que no se puede hacer.
 
 - **`arca_tickets` es la única tabla sin `user_id`.** El ticket es del certificado, no del
   contribuyente; a quién representa se decide por llamada.
@@ -377,6 +382,52 @@ traslada ese permiso al certificado. De ahí que el 600 diga literalmente `Valid
   nombra el error fácil de cometer, que es dejar el propio CUIT como Representante.
 - **Sigue sin poder automatizarse.** Igual que la aceptación, es Clave Fiscal y una página que
   ningún web service expone. Lo que cambia es que ahora el mail lo dice completo.
+
+### El ticket viejo miente (2026-08-29)
+Tercera vuelta con `27177624441`, el mismo día que la anterior. Con el paso 3 hecho —el
+Administrador de Relaciones contestaba `La autorizacion: (20182810674-FactuMov)-27177624441-
+ws://wsfe-20182810674 ya existe` al intentar rehacerlo— la app seguía diciendo que no. Esta vez
+no faltaba ningún trámite: lo viejo era el ticket.
+
+**Un TA lleva la lista de relaciones tal como estaba cuando se emitió.** El de producción se
+había emitido a las 12:12 UTC y el paso 3 se hizo a las 14:09: el 600 que la app leía era la
+respuesta correcta a la pregunta "¿estaba delegado a las 12:12?". Como el TA dura doce horas, la
+delegación recién otorgada tarda hasta doce horas en verse — y el barrido de quince minutos no
+ayuda, porque repregunta con ese mismo ticket.
+
+- **La sonda de control lo aisló en un minuto**: con `Auth.Cuit` = nuestro propio CUIT contestó
+  `granted=True` mientras el CUIT delegado daba 600. O sea que el acceso a WSFE estaba bien y el
+  problema era de ese CUIT — o del ticket.
+- **WSAA emitió un TA nuevo teniendo uno vigente**, y eso corrige una premisa que estaba escrita
+  en tres lugares. Hasta acá se daba por hecho que se negaba (`El CEE ya posee un TA valido`).
+  Con el ticket nuevo, el mismo CUIT contestó `granted=True` al instante. Es **una** observación,
+  en producción, con `wsfe`: alcanza para dejar de afirmar lo contrario, no para prometer que
+  siempre lo hace. `request_ticket` sigue tratando ese Fault como el error que puede ser.
+- **`arca_tickets.issued_at`** (migración `e5c2a9f3d418`) y **`get_access_ticket(max_age=...)`**:
+  un ticket puede estar vigente y ser viejo a la vez, y hasta ahora la tabla solo sabía lo
+  primero. La edad se compara en SQL contra `func.now()`, igual que el vencimiento, para no
+  meter el reloj de la app en la comparación.
+- **La política la fija cada llamador, no el servicio.** El click del usuario exige un ticket de
+  menos de **5 minutos** —del otro lado hay alguien que acaba de hacer el trámite y está
+  mirando—; el barrido se conforma con **una hora**. El resto de la app no pasa `max_age` y reusa
+  el ticket mientras valga, que es lo correcto para emitir una factura.
+- **Cuesta un login por barrido, no uno por identidad.** El TA es del certificado y lo comparten
+  todos los CUIT que se consulten después, así que el techo son 24 pedidos a WSAA por día haya
+  una pendiente o cincuenta. Con los quince minutos del barrido serían 96, y la diferencia no
+  compra nada: lo que se está esperando es que una persona haga un trámite.
+
+**La renovación no se ata a `delegation_claimed_at`, y esa fue la primera versión equivocada de
+este arreglo.** El aviso del usuario ocurre *antes* de nuestros dos pasos, así que un TA emitido
+en ese momento tampoco ve la delegación — y peor, quedaría marcado como más nuevo que el aviso y
+no se renovaría nunca más. El evento que habilita al CUIT no es el aviso del contribuyente sino
+**nuestro paso 3**, que ocurre en la web de ARCA sin que la app se entere. Por eso el criterio es
+la edad del ticket y no un evento: es lo único que no depende de enterarse de algo que nadie
+avisa.
+
+- **Queda una punta para más adelante**: un link "ya hice mi parte" en el mail que le llega al
+  operador cerraría la espera del todo, porque ese sí es el momento exacto. No se hizo ahora
+  porque la edad del ticket ya baja la espera de doce horas a una, y el link necesita una pantalla
+  y un token que hoy no existen.
 
 ### El estado que ARCA no publica
 `fiscal_identities.delegation_claimed_at` (migración `c8a1e4f60b92`): cuándo el usuario dijo "ya

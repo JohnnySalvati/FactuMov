@@ -7,8 +7,8 @@ Port del `services/arca.py` de Balance360, con tres cambios que no son cosmétic
    el certificado de ARCA se configura y falla por separado. Se construye adentro de las
    funciones con `lru_cache`, así un `.env` sin certificado no rompe el import del paquete.
 2. **El ticket vive en la base** (`arca_tickets`) y no en un `ticket_arca.json` del cwd. El
-   porqué está en el docstring del modelo: un solo certificado compartido por N workers, y un
-   WSAA que se niega a emitir un ticket nuevo mientras el anterior siga vigente.
+   porqué está en el docstring del modelo: un solo certificado compartido por N workers, que sin
+   coordinación gastan la cuota de WSAA de a varios para quedarse con un ticket solo.
 3. **El CUIT del certificado no es el CUIT representado.** En Balance360 coinciden —el
    certificado es del propio contribuyente—; acá el certificado es de FactuMov y representa a
    terceros. Por eso `get_certificate_tax_id()` no se usa como `Auth.Cuit`: eso lo decide cada
@@ -290,13 +290,28 @@ def _lock_key(env: str, service: str) -> int:
     return int.from_bytes(digest, "big", signed=True)
 
 
-def get_access_ticket(service: str) -> AccessTicket:
+def get_access_ticket(service: str, max_age: timedelta | None = None) -> AccessTicket:
     """El TA vigente para un servicio, renovándolo contra WSAA si hace falta.
 
+    **`max_age` pide además que el ticket sea reciente**, y no solo que esté vigente. Un TA
+    lleva adentro la lista de relaciones tal como estaba cuando se emitió: si el
+    contribuyente nos delegó —o si nosotros completamos nuestra parte del trámite— después
+    de eso, el ticket sigue siendo válido y sigue contestando que no. Nadie nos avisa cuándo
+    ocurre ese cambio, así que la única defensa es no confiar en una foto vieja cuando lo que
+    se está preguntando es justamente si la foto cambió. Sin `max_age` se reusa mientras
+    valga, que es lo que quiere el resto de la app.
+
+    Es **una edad y no una fecha**: quien llama expresa una política ("no me sirve más viejo
+    que una hora") y no una hora de reloj, y la comparación queda entera del lado de la base.
+
+    Cuesta un login a WSAA cada vez que el ticket cae afuera de `max_age`, y ese login es uno
+    solo para todos los CUIT que se consulten después: el TA es del certificado. Por eso el
+    parámetro va acá abajo y no en un "refrescá el ticket" que cada llamador invoque de a uno.
+
     Corre en **su propia sesión, con su propio commit**, desacoplada de la transacción del
-    request. Si el ticket recién emitido se perdiera en el rollback del request, WSAA no
-    emitiría otro hasta que venciera el anterior —hasta doce horas— y la app quedaría afuera
-    de ARCA sin nada roto que se pueda ver.
+    request. Un ticket recién emitido que se pierde en el rollback del request es un login
+    tirado a la basura y, sobre todo, una renovación que no queda registrada: el siguiente
+    request vuelve a pedir uno, y así con cada rollback.
 
     La renovación va detrás de un `pg_advisory_xact_lock` y no de un `SELECT ... FOR UPDATE`:
     la primera vez no hay fila que trabar, así que el FOR UPDATE no bloquearía a nadie y los N
@@ -306,15 +321,17 @@ def get_access_ticket(service: str) -> AccessTicket:
 
     # Camino rápido, sin candado: es el caso de casi todos los requests.
     with database.SessionLocal() as db:
-        cached = arca_ticket_crud.get_valid(db, env=env, service=service)
+        cached = arca_ticket_crud.get_valid(db, env=env, service=service, max_age=max_age)
         if cached is not None:
             return AccessTicket(token=cached.token, sign=cached.sign)
 
     with database.SessionLocal() as db:
         arca_ticket_crud.lock(db, key=_lock_key(env, service))
         # Segunda lectura, ya adentro del candado: mientras esperábamos, otro worker pudo
-        # haber renovado. Sin esto el candado serializa los pedidos en vez de evitarlos.
-        cached = arca_ticket_crud.get_valid(db, env=env, service=service)
+        # haber renovado. Sin esto el candado serializa los pedidos en vez de evitarlos. Con
+        # `max_age` importa el doble: dos workers que entran juntos a refrescar un ticket
+        # viejo tienen que salir con un solo login a WSAA, no con dos.
+        cached = arca_ticket_crud.get_valid(db, env=env, service=service, max_age=max_age)
         if cached is None:
             issued = request_ticket(service)
             cached = arca_ticket_crud.upsert(

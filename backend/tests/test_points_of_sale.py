@@ -42,7 +42,8 @@ NO_PTOS_VENTA = SimpleNamespace(
 @pytest.fixture(autouse=True)
 def ticket(monkeypatch):
     monkeypatch.setattr(
-        arca, "get_access_ticket", lambda service: arca.AccessTicket(token="tk", sign="sg")
+        arca, "get_access_ticket",
+        lambda service, max_age=None: arca.AccessTicket(token="tk", sign="sg"),
     )
 
 
