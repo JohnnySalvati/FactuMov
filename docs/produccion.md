@@ -72,6 +72,19 @@ ser cualquiera.
   Con los 60 s de default, un pedido de CAE lento se corta **después** de que ARCA autorizó: la
   factura existe para el fisco y el usuario ve un 504. Va también en srv-nginx, que tiene el
   suyo.
+- **`proxy_connect_timeout 3s`, y no es lo mismo que el anterior (2026-08-28).** Uno es cuánto
+  se espera la *respuesta*; este es cuánto se espera para *abrir el socket*. `app` está en la
+  misma red de Docker: conectar sale en milisegundos o no sale, porque el contenedor no está
+  escuchando. Con los 60 s de default, cada `up -d --build` deja una ventana en la que nginx no
+  puede conectarse y **cada pedido se cuelga un minuto** antes de rendirse. Pasó de verdad el
+  2026-08-28, en el deploy del spike de voz: la app venía andando —el build corre con el
+  contenedor viejo todavía arriba—, y cuando Compose recreó `app` todas las pantallas quedaron
+  en "Cargando…" cerca de un minuto y después volvieron solas. Bajarlo **no acorta la ventana**;
+  la vuelve honesta, con un 502 inmediato que la SPA ya sabe mostrar como error en vez de un
+  minuto de spinner sin ninguna pista de la causa.
+  - La ventana en sí es el precio del `up -d --build`: `docker-entrypoint.sh` corre
+    `alembic upgrade head` y recién después uvicorn. Sacarla del todo pediría dos contenedores
+    de `app` y un cambio de upstream, que para esta app es maquinaria de sobra.
 - **`try_files ... /index.html` para la SPA**, y el `index.html` con `no-cache` mientras
   `/assets/` va con `immutable` a un año. Los nombres de los assets traen el hash del
   contenido; el que los nombra no puede cachearse ni un minuto, o el navegador pide los assets
