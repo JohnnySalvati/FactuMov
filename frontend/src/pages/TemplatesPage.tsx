@@ -32,7 +32,7 @@ export function TemplatesPage() {
           existe" es peor que no ofrecerlo. */}
       {data && data.length > 0 && (
         <DictateCommand
-          templates={data.map((template) => ({ id: template.id, name: template.name }))}
+          templates={data.map(({ id, name, concepto }) => ({ id, name, concepto }))}
         />
       )}
 

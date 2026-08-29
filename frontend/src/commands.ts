@@ -11,6 +11,11 @@
  * acá hay dos cosas que entender en la misma frase, el modelo y sus fechas, así que el texto
  * se parte en cláusulas por palabras clave y cada pedazo se manda a `parseSpokenDate`.
  *
+ * La frase más corta que entiende es **"emitir alquiler de agosto"**: un modelo y un mes. Es la
+ * que más se va a decir, porque un servicio se factura por mes entero y dictar tres fechas para
+ * decir "agosto" es justo el trabajo que este comando venía a sacar. El mes no viaja resuelto
+ * desde el parser — ver `monthDates`.
+ *
  * **El comando no emite: deja lista la pantalla de confirmación.** Emitir le pide el CAE a
  * ARCA y no se puede deshacer; la voz llena el formulario y el botón lo sigue apretando el
  * dedo. Es la misma regla que ya tenía el micrófono de las fechas, y es la que hace que
@@ -20,7 +25,13 @@
  */
 
 import { isoDate } from './format'
-import { mentionsMonth, normalizeSpoken, parseSpokenDate } from './speech'
+import {
+  mentionsMonth,
+  normalizeSpoken,
+  parseSpokenDate,
+  splitMonthTail,
+  type SpokenMonth,
+} from './speech'
 
 /** Las fechas que puede llevar una emisión. Todas opcionales: lo que no se dijo no se toca. */
 export interface SpokenDates {
@@ -33,9 +44,18 @@ export interface SpokenDates {
 }
 
 export interface EmitCommand {
-  /** El nombre del modelo tal como se escuchó, ya normalizado. Puede ser `''`. */
+  /** El nombre del modelo tal como se escuchó, ya normalizado y sin el mes. Puede ser `''`. */
   name: string
   dates: SpokenDates
+  /**
+   * El mes dicho a secas, cuando la frase fue nada más que el modelo y un mes.
+   *
+   * Va aparte de `dates` y sin resolver a fechas **porque acá todavía no se sabe si
+   * corresponde**: un mes es un período, y un período solo existe en una factura de servicios.
+   * Quién es el modelo lo decide `matchTemplate`, así que la traducción de mes a las cuatro
+   * fechas la hace el que llama, con el `concepto` en la mano — ver `monthDates`.
+   */
+  month?: SpokenMonth
   /**
    * Las cláusulas de fecha que se dijeron y **no** se entendieron, por su palabra ("desde").
    *
@@ -122,9 +142,13 @@ export function parseSpokenCommand(heard: string, today: Date): EmitCommand | un
     })
   }
 
-  const name = (marks[0] === undefined ? rest : rest.slice(0, marks[0].start))
-    .replace(FILLER, '')
-    .trim()
+  // El nombre es lo que hay antes de la primera cláusula de fecha, menos el mes con el que
+  // pueda terminar: "emitir alquiler de agosto" nombra al modelo "Alquiler" y al mes agosto,
+  // y buscando "alquiler de agosto" no se encontraría ninguno. El mes se corta antes que el
+  // relleno para que "emitir el modelo alquiler de agosto" pase por las dos tijeras.
+  const spokenName = (marks[0] === undefined ? rest : rest.slice(0, marks[0].start)).trim()
+  const tail = splitMonthTail(spokenName, today)
+  const name = (tail?.rest ?? spokenName).replace(FILLER, '').trim()
 
   const dates: SpokenDates = {}
   const unclear = new Set<string>()
@@ -148,7 +172,14 @@ export function parseSpokenCommand(heard: string, today: Date): EmitCommand | un
   })
 
   resolvePeriod(dates, said, unclear)
-  return { name, dates, unclear: [...unclear] }
+  // El mes suelto vale **solo si es lo único que se dijo de fechas**. "Emitir alquiler de
+  // agosto desde el 15" mezcla las dos formas de decir lo mismo, y combinarlas daría un período
+  // mitad mes entero y mitad dictado —o dado vuelta, si el día que se dictó cae en otro mes—,
+  // que no es lo que dijo ninguna de las dos partes. Con una forma por frase, lo que no se dijo
+  // queda en el default del mes en curso, que la pantalla de emisión muestra y lee en voz alta
+  // antes de que nadie apriete nada.
+  const month = tail !== undefined && marks.length === 0 ? tail.month : undefined
+  return { name, dates, month, unclear: [...unclear] }
 }
 
 /**
@@ -211,8 +242,42 @@ function inMonthOf(iso: string, anchor: string): string | undefined {
   return date.getMonth() === month - 1 ? isoDate(date) : undefined
 }
 
-export type TemplateMatch =
-  | { kind: 'one'; id: string }
+/**
+ * Un mes dicho a secas → las cuatro fechas de una factura de servicios.
+ *
+ * **"Emitir alquiler de agosto" es como se pide una factura de servicios**, y es la frase que
+ * más se va a decir: el que factura un abono todos los meses no dicta tres fechas, dice el mes.
+ * Las cuatro salen de él con la convención de la mayoría de los servicios — el comprobante se
+ * emite el primer día, el período es el mes entero y el pago vence el 10.
+ *
+ * **El día 10 es una convención y no una cuenta**, así que se elige acá y no en el backend: es
+ * lo que propone el dictado, queda escrito en la pantalla de confirmación y se corrige con el
+ * selector si este mes vence otro día. Igual que el resto de lo dictado, nada de esto emite.
+ *
+ * Fechar el comprobante el día 1 puede caer fuera de la ventana que ARCA acepta si el mes que
+ * se dictó ya pasó hace rato — son ±10 días para servicios. **No se recorta acá a propósito**:
+ * la pantalla de emisión muestra la ventana y el backend rechaza con un 422 explicando el
+ * límite, que es preferible a emitir en silencio con una fecha que no es la que se pidió.
+ */
+export function monthDates({ year, month }: SpokenMonth): Required<SpokenDates> {
+  const day = (which: number) => isoDate(new Date(year, month - 1, which))
+  return {
+    date: day(1),
+    from_date: day(1),
+    // El día 0 del mes siguiente es el último del mes, y así no hay que saber cuál tiene 31 ni
+    // acordarse de los años bisiestos.
+    to_date: isoDate(new Date(year, month, 0)),
+    due_date: day(10),
+  }
+}
+
+export type TemplateMatch<T> =
+  /**
+   * El modelo entero y no su `id`: quien pregunta también necesita el `concepto` —para saber
+   * si el mes dictado le corresponde— y el nombre, para poder decirlo. Genérico para no atar
+   * este archivo a la forma de `InvoiceTemplate`: acá alcanza con que tenga `id` y `name`.
+   */
+  | { kind: 'one'; template: T }
   | { kind: 'none' }
   /** Más de un modelo coincide. Se devuelven los nombres para poder mostrarlos. */
   | { kind: 'many'; names: string[] }
@@ -234,14 +299,14 @@ export type TemplateMatch =
  * Las palabras de menos de tres letras se ignoran en la última pasada: "de", "la" y "el" están
  * en casi todos los nombres y harían coincidir a cualquiera con cualquiera.
  */
-export function matchTemplate(
+export function matchTemplate<T extends { id: string; name: string }>(
   spoken: string,
-  templates: ReadonlyArray<{ id: string; name: string }>,
-): TemplateMatch {
+  templates: ReadonlyArray<T>,
+): TemplateMatch<T> {
   if (spoken === '') return { kind: 'none' }
 
   const candidates = templates.map((template) => ({
-    ...template,
+    template,
     normalized: normalizeSpoken(template.name),
   }))
   const words = spoken.split(' ').filter((word) => word.length >= 3)
@@ -254,8 +319,10 @@ export function matchTemplate(
 
   for (const matches of passes) {
     const found = candidates.filter((candidate) => matches(candidate.normalized))
-    if (found.length === 1) return { kind: 'one', id: found[0]!.id }
-    if (found.length > 1) return { kind: 'many', names: found.map((candidate) => candidate.name) }
+    if (found.length === 1) return { kind: 'one', template: found[0]!.template }
+    if (found.length > 1) {
+      return { kind: 'many', names: found.map((candidate) => candidate.template.name) }
+    }
   }
   return { kind: 'none' }
 }

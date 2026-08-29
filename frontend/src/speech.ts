@@ -89,6 +89,16 @@ const NUMERIC = /\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b/
 /** Un día suelto: "el quince", "el 31". */
 const BARE_DAY = /\b(\d{1,2})\b/
 
+/**
+ * El mes con el que termina una frase: `de agosto`, `del mes de agosto`, `agosto de 2025`.
+ *
+ * El `\s` del principio es obligatorio a propósito y no un descuido — ver `splitMonthTail`.
+ */
+const MONTH_TAIL = new RegExp(
+  `\\s(?:de\\s+|del\\s+)?(?:mes\\s+(?:de\\s+|del\\s+)?)?(${MONTH_ALTERNATION})` +
+    `(?:\\s+(?:de\\s+|del\\s+)?(\\d{2,4}))?$`,
+)
+
 /** Las fechas que se dicen sin nombrar nada: "hoy", "fin de mes". */
 const RELATIVE = /\bhoy\b|\bayer\b|\banteayer\b|\bmanana\b|\bfin (?:de|del) mes\b|\bultimo dia\b/
 
@@ -110,6 +120,49 @@ export function mentionsMonth(heard: string): boolean {
     NUMERIC.test(text) ||
     RELATIVE.test(text)
   )
+}
+
+/**
+ * Un mes entero y sin día: lo que se dice cuando se factura "agosto" a secas.
+ *
+ * El mes va de 1 a 12, como se dice y no como lo numera `Date`. El corrimiento se hace una
+ * sola vez, donde se arma la fecha, en vez de acordarse de él en cada uso.
+ */
+export interface SpokenMonth {
+  year: number
+  month: number
+}
+
+/**
+ * El mes suelto con el que termina una frase, y lo que quedó adelante.
+ *
+ * Es lo que separa "alquiler" de "agosto" en **"emitir alquiler de agosto"**, la forma más
+ * corta de pedir la factura de un servicio: el mes dice el período entero y no hay que dictar
+ * tres fechas. `commands.ts` se lo pregunta al pedazo de frase que iba a ser el nombre del
+ * modelo, y por eso acá vuelve también el `rest`: el mes tiene que salir del nombre antes de
+ * ir a buscarlo, o "alquiler de agosto" no encontraría al modelo "Alquiler".
+ *
+ * **Exige un espacio antes del mes**, o sea que solo lo reconoce como cola de algo. No es un
+ * detalle de la expresión: sin eso, un modelo llamado "Enero" o "Agosto" dejaría de poder
+ * nombrarse, porque la frase entera se leería como un mes sin modelo. Con la cola obligatoria,
+ * "emitir enero" sigue siendo el modelo Enero y "emitir cuota de enero" es la cuota de ese mes.
+ *
+ * El año casi nunca se dice, y se elige con el mismo criterio que el resto del archivo: el que
+ * deja el mes más cerca de hoy. Facturar agosto el 28 de agosto y facturarlo el 5 de septiembre
+ * dan los dos 2026, y "diciembre" dicho en enero cae en el año que se fue, que es lo que se
+ * quiso decir.
+ */
+export function splitMonthTail(
+  heard: string,
+  today: Date,
+): { rest: string; month: SpokenMonth } | undefined {
+  const text = normalizeSpoken(heard)
+  const found = MONTH_TAIL.exec(text)
+  if (found === null) return undefined
+  const month = MONTHS.find(([name]) => name === found[1])?.[1]
+  if (month === undefined) return undefined
+  const year = found[2] === undefined ? nearestYear(1, month, today) : fullYear(found[2])
+  return { rest: text.slice(0, found.index), month: { year, month } }
 }
 
 const MS_PER_DAY = 86_400_000

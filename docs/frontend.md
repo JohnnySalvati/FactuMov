@@ -294,7 +294,8 @@ Dos detalles que van con esto:
 ## Dictado por voz: las fechas y el comando de emitir (2026-08-28)
 Un micrófono al lado de cada campo de fecha de `/modelos/:id/emitir`, y un botón "Emitir por
 voz" arriba de la grilla de modelos que entiende **"emitir alquiler mensual desde el 1 de
-agosto hasta el 31, vence el 10 de septiembre"**. La app escucha y **contesta hablando**.
+agosto hasta el 31, vence el 10 de septiembre"** y, más corto, **"emitir alquiler de agosto"**.
+La app escucha y **contesta hablando**.
 Son cinco archivos: `hooks/useSpeechInput.ts` (abrir el micrófono), `speech.ts` (de lo que se
 escuchó a una fecha), `commands.ts` (de lo que se escuchó a un comando), `speak.ts` (la voz de
 vuelta) y los tres componentes, `DictateDate`, `DictateCommand` y `SpeakToggle`.
@@ -348,6 +349,35 @@ desde un iPad sin consola, no algo que va abajo del botón de emitir una factura
   mismo el buscador tiene tres pasadas separadas —nombre exacto, nombre contenido, y todas las
   palabras en cualquier orden— y gana la primera que encuentre algo: así "alquiler" encuentra a
   "Alquiler" aunque exista también "Alquiler cochera".
+- **Un modelo y un mes es la frase entera** (2026-08-28). "Emitir alquiler de agosto" deja
+  cargadas las cuatro fechas: el comprobante fechado el **1**, el período del **1 al último
+  día** del mes y el pago venciendo el **10**. Es como se pide de verdad una factura de
+  servicios —un abono se factura por mes entero, nadie dicta tres fechas para decir "agosto"— y
+  es justo el trabajo que el comando venía a sacar. El día 10 es una convención y no una
+  cuenta, y por eso se elige en el cliente (`monthDates`) y no en el backend: es lo que el
+  dictado *propone*, queda escrito en la pantalla de confirmación y se corrige con el selector
+  el mes que venza otro día.
+  - **El mes solo se aplica si el modelo lleva período**, o sea si su `concepto` no es solo
+    productos — el mismo criterio que `needs_service_dates` en el backend. En un modelo de
+    productos el comando **no navega**: contesta que está cargado como productos y que no lleva
+    período. Ignorar el mes y seguir sería peor, porque esa pantalla no tiene dónde mostrarlo y
+    no habría nada raro que ver antes de apretar el botón. Por eso la grilla le pasa al comando
+    el `concepto` además del nombre, y por eso `matchTemplate` devuelve el modelo entero y no
+    su `id`.
+  - **El mes se corta del nombre antes de buscar el modelo**, o "alquiler de agosto" no
+    encontraría a "Alquiler". Y se reconoce solo como **cola** de la frase, con un espacio
+    delante obligatorio: sin eso, un modelo llamado "Enero" o "Agosto" dejaría de poder
+    nombrarse. Así "emitir enero" sigue siendo el modelo Enero y "emitir cuota de enero" es la
+    cuota de ese mes.
+  - **O un mes, o fechas sueltas, pero no las dos en la misma frase.** Si se dijo alguna
+    cláusula de fecha el mes se descarta: combinarlos daría un período mitad mes entero y mitad
+    dictado —o dado vuelta, si el día que se dictó cae en otro mes—, que no es lo que dijo
+    ninguna de las dos partes.
+  - El año casi nunca se dice y sale del mismo criterio que el resto: el que deja el mes más
+    cerca de hoy. Fechar el comprobante el día 1 puede caer fuera de la ventana de ARCA si el
+    mes que se dictó pasó hace rato (±10 días para servicios); **no se recorta**, porque la
+    pantalla muestra la ventana y el backend contesta un 422 con el límite escrito, y eso es
+    mejor que emitir en silencio con una fecha que no es la que se pidió.
 - **El período se lee junto: la punta que no nombra el mes lo toma de la otra.** "Desde el 1
   hasta el 31 de agosto" es como se habla, y cada punta resuelta por su cuenta no puede acertar
   — `parseSpokenDate` no ve más que "el 1" y le pone el mes más cercano a hoy, que el 28 de

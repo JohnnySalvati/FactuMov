@@ -1,13 +1,19 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
 
-import { emitPath, matchTemplate, parseSpokenCommand } from '../commands'
+import { needsServiceDates, type Concepto } from '../api/types'
+import { emitPath, matchTemplate, monthDates, parseSpokenCommand } from '../commands'
 import { useSpeechInput } from '../hooks/useSpeechInput'
 import { armSpeech, say } from '../speak'
 import { SpeakToggle } from './SpeakToggle'
 
 interface Props {
-  templates: ReadonlyArray<{ id: string; name: string }>
+  /**
+   * El `concepto` viaja además del nombre porque el comando decide con él: un mes dicho a
+   * secas es un período, y un período solo existe en una factura de servicios. La grilla ya lo
+   * tiene cargado, así que preguntarlo no cuesta un request.
+   */
+  templates: ReadonlyArray<{ id: string; name: string; concepto: Concepto }>
 }
 
 /**
@@ -22,6 +28,15 @@ type Outcome =
   | { kind: 'none' }
   | { kind: 'many'; names: string[] }
   | { kind: 'unclear'; labels: string[] }
+  /**
+   * Se dijo un mes, pero el modelo es de productos y una factura de productos no lleva período.
+   *
+   * **No se navega igual ignorando el mes**, que sería lo cómodo: el mes es la mitad de lo que
+   * se pidió, y la pantalla de emisión de un modelo de productos no tiene dónde mostrarlo — no
+   * habría nada raro que ver antes de apretar el botón. Contestarlo es lo que hace que se
+   * entienda que el modelo está cargado como productos, que es lo que hay que arreglar.
+   */
+  | { kind: 'month-on-products'; name: string }
 
 /**
  * Lo mismo que dice la pantalla, dicho para el oído.
@@ -45,11 +60,18 @@ function outcomeAloud(outcome: Outcome): string {
       )
     case 'unclear':
       return `No entendí la fecha de ${outcome.labels.join(', ni la de ')}.`
+    case 'month-on-products':
+      return (
+        `${outcome.name} está cargado como productos, así que no lleva período. ` +
+        'Repetí sin el mes, o cambiá el modelo a servicios.'
+      )
   }
 }
 
 /**
- * "Emitir alquiler mensual desde el 1 de agosto hasta el 31, vence el 10 de septiembre."
+ * "Emitir alquiler mensual desde el 1 de agosto hasta el 31, vence el 10 de septiembre." O,
+ * más corto y más parecido a como se pide de verdad una factura de servicios, **"emitir
+ * alquiler de agosto"**: el mes dice el período entero y las cuatro fechas salen de él.
  *
  * Vive en la grilla de modelos porque es la pantalla que se abre cien veces por semana y es
  * de donde arranca el recorrido que el comando ahorra: buscar la tarjeta entre veinte,
@@ -94,12 +116,21 @@ export function DictateCommand({ templates }: Props) {
     if (match.kind === 'none') return report({ kind: 'none' })
     if (match.kind === 'many') return report({ kind: 'many', names: match.names })
 
+    // El mes recién se puede resolver acá, que es donde se sabe de qué modelo se habla: son
+    // cuatro fechas de período y el período lo pide ARCA solo en servicios. Por eso el parser
+    // devuelve el mes crudo y la traducción ocurre después de encontrar el modelo.
+    const { month } = command
+    if (month !== undefined && !needsServiceDates(match.template.concepto)) {
+      return report({ kind: 'month-on-products', name: match.template.name })
+    }
+    const dates = month === undefined ? command.dates : monthDates(month)
+
     // **Acá no se dice nada**, aunque haya con qué: lo que se entendió lo lee la pantalla de
     // emisión, entera y recién cuando la tiene. Un resumen dicho desde acá diría solo lo que
     // se dictó —ni el emisor, ni el cliente, ni el importe, ni las fechas que la app pone
     // sola— y encima le pisaría el arranque a la lectura buena: `say` cancela lo anterior,
     // así que dos respuestas seguidas son una respuesta cortada al medio.
-    navigate(emitPath(match.id, command.dates))
+    navigate(emitPath(match.template.id, dates))
   })
 
   // Los errores del micrófono también se dicen: "no se escuchó nada" es justo el caso en que
@@ -142,8 +173,8 @@ export function DictateCommand({ templates }: Props) {
           'Decí «emitir» y el nombre del modelo.'
         ) : outcome === undefined ? (
           <>
-            Decí «emitir alquiler», y si querés agregale «con fecha ayer» o «desde el 1 de
-            agosto hasta el 31, vence el 10 de septiembre».
+            Decí «emitir alquiler de agosto» para el mes entero, o «emitir alquiler» y agregale
+            «con fecha ayer» o «desde el 1 de agosto hasta el 31, vence el 10 de septiembre».
           </>
         ) : (
           <span className="mic-error">
@@ -153,6 +184,11 @@ export function DictateCommand({ templates }: Props) {
               <>
                 Se escuchó «{heard}» y no se entendió la fecha de «
                 {outcome.labels.join('», «')}».
+              </>
+            ) : outcome.kind === 'month-on-products' ? (
+              <>
+                Se escuchó «{heard}» y «{outcome.name}» está cargado como productos, así que no
+                lleva período. Repetí sin el mes, o cambiá el modelo a servicios.
               </>
             ) : outcome.kind === 'many' ? (
               <>

@@ -238,6 +238,18 @@ export const Concepto = {
 } as const
 export type Concepto = (typeof Concepto)[keyof typeof Concepto]
 
+/**
+ * Espejo de `Concepto.needs_service_dates` del backend: período y vencimiento los pide ARCA
+ * para todo lo que no sea solo productos, "productos y servicios" incluido.
+ *
+ * Está acá y no calculado en cada pantalla porque el `preview` de emisión ya trae la respuesta
+ * del servidor (`needs_service_dates`) y este es el mismo criterio para las pantallas que
+ * todavía no lo pidieron — el comando hablado tiene que decidir con lo que hay en la grilla.
+ */
+export function needsServiceDates(concepto: Concepto): boolean {
+  return concepto !== Concepto.products
+}
+
 export const CONCEPTO_LABELS: Record<Concepto, string> = {
   [Concepto.products]: 'Productos',
   [Concepto.services]: 'Servicios',
