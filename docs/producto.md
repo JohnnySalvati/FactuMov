@@ -102,9 +102,12 @@ escrita y a la espera de que se corra su `scp.ps1`.
    Balance360 sumó `POST /api/invoices/issued` —y de paso cerró su `/api`, que estaba
    abierto—, y FactuMov, la conexión por usuario con el token cifrado, el estado de registro
    por factura y los dos reintentos. Ver [`balance360.md`](balance360.md).
-   - **Falta emitir el token en el servidor de Balance360** y pegarlo en Ajustes. Hasta que
-     eso pase, todo lo demás de FactuMov anda igual y las facturas salen con el estado en
-     `null`, que es "no entró al circuito".
+   - **Conectar es poner mail y contraseña de Balance360 en Ajustes** (2026-08-29): el token
+     lo pide FactuMov por el usuario contra `POST /api/tokens`, que Balance360 sumó junto con
+     su primer límite de intentos. Antes había que emitirlo por ssh y pegarlo, o sea que la
+     integración dependía de quien administra la VM. Mientras nadie conecte, todo lo demás de
+     FactuMov anda igual y las facturas salen con el estado en `null`, que es "no entró al
+     circuito".
 4. **Segundo layout del parser** — ver *Parser → Pendiente: un segundo layout*. No bloquea
    nada: hoy el usuario puede cargar el modelo a mano.
 5. **WhatsApp**, la otra mitad de la funcionalidad #5. Sin empezar y sin decisión tomada

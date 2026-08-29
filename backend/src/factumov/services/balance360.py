@@ -37,12 +37,18 @@ from factumov.services import secrets
 logger = logging.getLogger(__name__)
 
 # Balance360 es una app propia, no un tercero: cuando anda contesta rápido, y cuando no anda
-# no contesta nunca. Veinte segundos alcanzan de sobra y acotan lo que puede tardar el botón
-# de "probar la conexión", que es lo único que espera a esto con un usuario adelante.
+# no contesta nunca. Veinte segundos alcanzan de sobra y acotan lo que puede tardar "conectar",
+# que es lo único que espera a esto con un usuario adelante.
 TIMEOUT_SECONDS = 20
 
 # Los últimos caracteres del token que se guardan en claro para que la pantalla los muestre.
 TOKEN_HINT_LENGTH = 4
+
+# Con qué nombre queda el token del otro lado. Es lo que se ve al listar credenciales en
+# Balance360 y lo que decide cuál se revoca cuando se emite otra: emitir apaga al anterior con
+# el mismo nombre, así que este string fijo es lo que hace que reconectar reemplace en vez de
+# acumular. Cambiarlo dejaría vivo el token anterior sin que nadie lo use.
+INTEGRATION_NAME = "FactuMov"
 
 
 @dataclass(frozen=True)
@@ -82,17 +88,32 @@ def _detail(response: requests.Response) -> str:
     return f"Balance360 contestó {response.status_code}."
 
 
-def check_token(base_url: str, token: str) -> None:
-    """Prueba la credencial contra Balance360. No devuelve nada: o anda, o levanta.
+def fetch_token(base_url: str, email: str, password: str) -> str:
+    """Cambia las credenciales del usuario por un token de Balance360.
 
-    Pega a `/api/entities` porque es el endpoint autenticado más barato que hay: no escribe
-    nada, y un 200 prueba las tres cosas que importan —la dirección resuelve, el token es
-    válido y el usuario dueño del token está activo—. Un endpoint de ping dedicado sería más
-    prolijo y no probaría nada más.
+    Es lo único que hace FactuMov con esa contraseña: la manda una vez y se queda con lo que
+    vuelve. **No se guarda, no se loguea y no se le pasa a nadie más.** Guardarla sería el peor
+    de los dos mundos —la base de FactuMov pasaría a tener acceso total a la contabilidad de
+    cada usuario, y no solo el de escritura acotado del token— y además haría imposible cortar
+    la integración sin cambiar la contraseña.
+
+    Reemplaza a la pantalla que pedía pegar un token. Ese token había que emitirlo por ssh
+    contra el servidor de Balance360, así que conectar la integración dependía de quien
+    administra la VM; y lo que llegaba al portapapeles era un secreto de escritura pasando por
+    un chat o un mail. Acá el secreto viaja una vez, entre las dos apps, y lo que queda
+    guardado es una credencial que se revoca sola.
+
+    Emitir uno nuevo **apaga el anterior del otro lado**, y es lo que hace que reconectar
+    signifique reemplazar y no acumular. De la respuesta se lee solo el token: `replaced_previous`
+    viene y se ignora porque acá no cambia nada —el que se apagó es el que esta misma fila está
+    por pisar—, y mostrarlo sería contarle al usuario un detalle interno de la otra app.
     """
     try:
-        response = requests.get(
-            f"{base_url}/api/entities", headers=_headers(token), timeout=TIMEOUT_SECONDS
+        response = requests.post(
+            f"{base_url}/api/tokens",
+            json={"email": email, "password": password, "name": INTEGRATION_NAME},
+            headers={"Accept": "application/json"},
+            timeout=TIMEOUT_SECONDS,
         )
     except RequestException as error:
         raise Balance360Error(
@@ -100,13 +121,34 @@ def check_token(base_url: str, token: str) -> None:
         ) from error
 
     if response.status_code == 401:
-        # No es reintentable: el token está mal o lo revocaron, y volver a mandarlo va a dar
-        # 401 para siempre. Lo que hace falta es pegar otro.
+        # No es reintentable: mandar las mismas credenciales va a dar 401 para siempre. El
+        # mensaje es el de Balance360 —dice si la cuenta está desactivada o si las credenciales
+        # no son— y es lo único que le dice al usuario qué corregir.
+        raise Balance360Error(_detail(response), retryable=False)
+    if response.status_code == 404:
+        # La dirección contesta pero no conoce el endpoint. Es un caso propio y no "Balance360
+        # contestó 404" porque tiene una causa concreta y una salida concreta: del otro lado
+        # hay una versión anterior a este circuito, y hasta que se actualice el token se emite
+        # a mano con `create_api_token.py`.
         raise Balance360Error(
-            "Balance360 no aceptó el token. Generá uno nuevo y pegalo de nuevo.", retryable=False
+            "Esa dirección contesta, pero ese Balance360 todavía no sabe emitir tokens. "
+            "Actualizalo, o pedile a quien administra el servidor que emita uno a mano.",
+            retryable=False,
         )
     if not response.ok:
+        # El 429 entra por acá con el mensaje de Balance360, que ya dice que hay que esperar.
+        # Es reintentable a propósito: lo que hace falta es tiempo, no corregir nada.
         raise Balance360Error(_detail(response))
+
+    try:
+        body = response.json()
+    except ValueError as error:
+        raise Balance360Error("Balance360 contestó algo que no entendimos.") from error
+
+    token = body.get("token") if isinstance(body, dict) else None
+    if not isinstance(token, str) or not token:
+        raise Balance360Error("Balance360 contestó algo que no entendimos.")
+    return token
 
 
 def build_payload(invoice: Invoice) -> dict[str, Any]:

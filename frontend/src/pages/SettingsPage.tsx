@@ -6,6 +6,7 @@ import type {
   Balance360RegisterPendingResult,
   Balance360Settings,
 } from '../api/types'
+import { useAuth } from '../auth/useAuth'
 import { Notice } from '../components/Notice'
 import { formatDate } from '../format'
 import { useResource } from '../hooks/useResource'
@@ -24,9 +25,15 @@ import { useResource } from '../hooks/useResource'
  * identidades fiscales, y pedir una conexión por CUIT sería pedir N veces la misma credencial
  * para que el ruteo lo siga haciendo el CUIT igual.
  *
- * El campo del token está siempre vacío al abrir, incluso con la cuenta conectada. No es un
- * descuido: el token no vuelve nunca del backend —lo único que vuelve es su pista— así que
- * mostrarlo sería mostrar un valor falso. Lo que la pantalla dice es cuál está guardado.
+ * **Se piden mail y contraseña de Balance360, y el token no se ve nunca.** Antes había que
+ * pegar uno, que alguien tenía que emitir por ssh contra el servidor de la otra app: conectar
+ * dependía de quien administra la VM, y el secreto llegaba por chat o por mail. Ahora el
+ * backend lo pide por el usuario y guarda lo que vuelve.
+ *
+ * La contraseña vive en el estado de este componente hasta que se manda, y se borra apenas
+ * contesta el backend. No se guarda de ningún lado —ni acá, ni en la base— y por eso el
+ * formulario nunca puede mostrarla de vuelta: lo que la pantalla dice es qué token quedó
+ * puesto, con los últimos cuatro caracteres.
  */
 export function SettingsPage() {
   const fetcher = useCallback(() => api.get<Balance360Settings>('/balance360'), [])
@@ -34,8 +41,14 @@ export function SettingsPage() {
   const data = settings.data
   const connection = data?.connection ?? null
 
+  const { user } = useAuth()
+
   const [baseUrl, setBaseUrl] = useState('')
-  const [token, setToken] = useState('')
+  // El mail arranca con el de la cuenta de FactuMov porque en la práctica suele ser el mismo,
+  // pero es un valor por defecto y no un supuesto: son dos aplicaciones y dos cuentas, así que
+  // el campo se ve, se puede cambiar, y el texto de abajo aclara de cuál se trata.
+  const [email, setEmail] = useState(user?.email ?? '')
+  const [password, setPassword] = useState('')
   const [autoRegisterChoice, setAutoRegisterChoice] = useState<boolean>()
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string>()
@@ -58,11 +71,15 @@ export function SettingsPage() {
     try {
       await api.put<Balance360Settings>('/balance360', {
         base_url: url,
-        api_token: token,
+        email,
+        password,
         auto_register: autoRegister,
       })
-      setToken('')
-      setOk('Conectado. Balance360 aceptó el token.')
+      // Lo primero que pasa cuando sale bien: la contraseña se va del estado. No hace falta
+      // más —el token ya está guardado del otro lado del request— y dejarla puesta la
+      // expondría a cualquier cosa que después lea este componente.
+      setPassword('')
+      setOk('Conectado. Balance360 emitió un token para FactuMov.')
       settings.reload()
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.detail : 'No se pudo guardar la conexión.')
@@ -76,7 +93,7 @@ export function SettingsPage() {
     setOk(undefined)
     try {
       await api.delete<void>('/balance360')
-      setToken('')
+      setPassword('')
       setBaseUrl('')
       settings.reload()
     } catch (caught) {
@@ -151,7 +168,7 @@ export function SettingsPage() {
                   enteremos, así que lo único cierto es que en esa fecha funcionaba. */}
               <p className="totals-note">
                 Lo pueden haber revocado en Balance360 después de esa fecha sin que nos
-                enteremos.
+                enteremos. Si eso pasó, volvé a conectar acá abajo y se emite uno nuevo.
               </p>
             </div>
           )}
@@ -169,20 +186,35 @@ export function SettingsPage() {
             </label>
 
             <label>
-              Token de API
-              {/* `type="password"` para que no quede a la vista de nadie que mire la pantalla
-                  mientras se pega. Es un secreto que da acceso de escritura a la contabilidad. */}
+              Tu mail en Balance360
+              <input
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="vos@ejemplo.com"
+                autoComplete="off"
+                required
+              />
+            </label>
+
+            <label>
+              Tu contraseña de Balance360
+              {/* `autoComplete="off"`: es la contraseña de **otra** app, y dejar que el
+                  navegador la guarde asociada a este sitio la volvería a ofrecer en el login
+                  de FactuMov, que es donde no va. */}
               <input
                 type="password"
-                value={token}
-                onChange={(event) => setToken(event.target.value)}
-                placeholder={connection !== null ? 'Pegá uno nuevo para reemplazarlo' : 'b360_…'}
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder={connection !== null ? 'Para reemplazar el token' : ''}
                 autoComplete="off"
                 required
               />
             </label>
             <p className="totals-note" style={{ margin: 0 }}>
-              El token se genera en el servidor de Balance360, una sola vez por integración.
+              Es la cuenta con la que entrás a Balance360, que puede no ser la de acá. La
+              contraseña se usa una sola vez para pedir un token y <strong>no se guarda</strong>:
+              lo que queda guardado es el token, que podés revocar en Balance360 cuando quieras.
             </p>
 
             <label className="checkbox">
@@ -195,7 +227,7 @@ export function SettingsPage() {
             </label>
 
             <button type="submit" disabled={saving}>
-              {saving ? 'Probando el token…' : connection !== null ? 'Reemplazar' : 'Conectar'}
+              {saving ? 'Conectando…' : connection !== null ? 'Reemplazar' : 'Conectar'}
             </button>
 
             <Notice kind="error">{error}</Notice>

@@ -72,9 +72,10 @@ HMAC ya combinados y la parte que se suele hacer mal —el modo, el IV, la auten
 de nuestro lado. La clave es `SECRET_ENCRYPTION_KEY`.
 
 **Sin la variable la app arranca igual**, como con el mail: lo único que no funciona es esta
-pantalla, que lo dice antes de que alguien pegue una credencial (`available: false`). Y perder
-la clave no es una catástrofe: los tokens guardados dejan de abrirse y cada usuario pega el
-suyo de nuevo, porque es un secreto que se puede reemitir del otro lado.
+pantalla, que lo dice antes de que alguien escriba una credencial (`available: false`) — y lo
+dice antes de salir a la red, así que una contraseña que no se va a poder guardar tampoco llega
+a viajar. Y perder la clave no es una catástrofe: los tokens guardados dejan de abrirse y cada
+usuario vuelve a conectar, que emite otro y revoca el que quedó ilegible.
 
 ## El contrato
 
@@ -161,16 +162,30 @@ integración no podía sumarse a eso, así que en el mismo trabajo se agregaron 
 errores de dominio contestan JSON para `/api`: antes el 401 redirigía al login y un cliente que
 seguía el redirect veía un 200 con HTML — habría creído que registró.
 
-El token se emite a mano, del lado del servidor, con `uv run python create_api_token.py <mail>
-<nombre>`. Sale por pantalla una sola vez.
+El token **se lo emite el usuario desde FactuMov**: `POST /api/tokens` de Balance360 recibe
+mail, contraseña y un nombre, y devuelve uno nuevo. Es el único router de `/api` montado sin
+`get_api_user` —es el que autentica— y por eso es también el único de esa app con límite de
+intentos. El `create_api_token.py` sigue existiendo (`uv run python create_api_token.py <mail>
+<nombre>`) y sale por pantalla una sola vez, para emitir a mano cuando hace falta.
 
-**No caduca**: `api_tokens` no tiene expiración, solo `revoked_at`. O sea que se emite una vez
-por integración y **por base** —dev y prod son dos Postgres distintos, así que son dos tokens—
-y sigue valiendo hasta que alguien lo revoque con `revoke_api_token.py`, que sin nombre los
-lista con su `last_used_at` y con un nombre o un prefijo de id revoca ese. Solo hace falta
-reemitirlo si se filtró, si se perdió el texto plano, o si se perdió la `SECRET_ENCRYPTION_KEY`
-de acá: en ese caso el guardado deja de poder abrirse y el original ya no existe en ningún
-lado.
+Antes era el único camino, y ahí estaba el problema: conectar la integración dependía de que
+alguien entrara por ssh al servidor de Balance360, o sea de quien administra la VM y no del
+usuario que la quiere usar. Y el token, que es un secreto de escritura sobre la contabilidad,
+tenía que viajar de esa persona al usuario por algún chat o algún mail.
+
+**No caduca**: `api_tokens` no tiene expiración, solo `revoked_at`. Sigue valiendo hasta que
+alguien lo revoque con `revoke_api_token.py`, que sin nombre los lista con su `last_used_at` y
+con un nombre o un prefijo de id revoca ese. Es **por base** —dev y prod son dos Postgres
+distintos, así que son dos tokens—, y hay que reemitirlo si se filtró, si se perdió el texto
+plano, o si se perdió la `SECRET_ENCRYPTION_KEY` de acá: en ese caso el guardado deja de poder
+abrirse y el original ya no existe en ningún lado. Volver a conectar desde Ajustes hace las dos
+cosas de una.
+
+Justamente porque no caduca, **emitir uno revoca el anterior con el mismo nombre**. FactuMov
+manda siempre `"FactuMov"`, así que reconectar reemplaza en vez de acumular; sin eso, cada
+reconexión dejaría viva una credencial de escritura que no usa nadie y que nadie va a acordarse
+de apagar. Por nombre y no por usuario: apagarle todo lo que tenga emitido porque reconectó
+FactuMov le rompería las otras integraciones sin avisarle.
 
 ## La pantalla
 
@@ -182,10 +197,29 @@ celular ese mail está oculto abajo de 640px — o sea justo en el caso principa
 **El token no vuelve nunca del backend**: lo único que sale es `token_hint`, los últimos cuatro
 caracteres, que alcanzan para reconocer cuál está guardado. Un endpoint que devolviera la
 credencial completa convertiría cualquier XSS en la SPA en un robo de acceso a la contabilidad,
-y no compraría nada: quien la quiera cambiar pega una nueva.
+y no compraría nada: quien la quiera cambiar vuelve a conectar y se emite otro.
 
-**Se prueba el token antes de guardarlo.** El `PUT` pega primero a `/api/entities` de Balance360
-—el endpoint autenticado más barato, que no escribe nada— y solo si contesta escribe la fila.
-Guardar y verificar después dejaría al usuario con una conexión que la pantalla muestra como
-puesta y que falla en silencio en cada emisión; el momento de enterarse de que pegó mal el token
-es mientras lo tiene en el portapapeles.
+**Se piden mail y contraseña, no un token.** El `PUT` los cambia por un token contra
+`/api/tokens` de Balance360 y recién con lo que vuelve escribe la fila. Guardar y verificar
+después dejaría al usuario con una conexión que la pantalla muestra como puesta y que falla en
+silencio en cada emisión; acá el orden lo resuelve solo, porque lo que se guarda es el resultado
+de esa llamada.
+
+**La contraseña se usa una vez y no se guarda en ningún lado.** Ni en claro ni cifrada: no hay
+columna donde pudiera terminar. Es lo único que hace aceptable pedirla — se la cambia por una
+credencial acotada y revocable, que es exactamente el intercambio que `models/api_token.py` de
+Balance360 describe como el motivo por el que los tokens existen. Guardarla sería peor que el
+token pegado a mano: le daría a la base de FactuMov la cuenta entera de Balance360 de cada
+usuario, y cortar la integración pasaría a ser cambiar la contraseña.
+
+**Dos límites de intentos, y el que importa es el de allá.** Este endpoint está autenticado, así
+que no es un oráculo de contraseñas de FactuMov — pero sí es un intermediario para probar
+contraseñas de Balance360, así que conectar se limita a 10 por hora y por usuario. La defensa de
+verdad es la de la otra app: cinco intentos por cuarto de hora **por dirección de mail**, que es
+la clave correcta porque todos los pedidos legítimos llegan desde la misma IP, la del servidor de
+FactuMov. Con un límite por IP, el primero que se pasara dejaría afuera a todos los demás.
+
+**El 404 tiene mensaje propio.** Si la dirección contesta pero no conoce `/api/tokens`, del otro
+lado hay un Balance360 anterior a este circuito. Decir "contestó 404" mandaría a revisar una
+dirección que está bien; lo que hay que hacer es actualizar la otra app, o pedir un token a mano
+mientras tanto.

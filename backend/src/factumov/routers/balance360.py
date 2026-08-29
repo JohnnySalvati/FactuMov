@@ -34,9 +34,13 @@ router = APIRouter(
     dependencies=[Depends(get_current_user)],
 )
 
-# Guardar la conexión sale a la red para probar el token, así que se limita como todo lo que
-# gasta una conexión saliente. Por usuario y no por IP: el endpoint está autenticado.
-_CONNECT_LIMITER = RateLimiter(limit=20, window_seconds=60 * 60)
+# Conectar manda una contraseña de Balance360 a Balance360, así que este endpoint autenticado
+# es también, de hecho, un intermediario para probar contraseñas ajenas. La defensa de verdad
+# está del otro lado —cinco intentos por cuarto de hora y por mail, en `services/rate_limit.py`
+# de Balance360— y este límite es lo que evita gastársela desde acá: diez por hora alcanzan de
+# sobra para alguien que se equivocó al tipear y no para recorrer un diccionario. Por usuario y
+# no por IP: el endpoint está autenticado, así que hay alguien a quien contarle los intentos.
+_CONNECT_LIMITER = RateLimiter(limit=10, window_seconds=60 * 60)
 
 # El registro en lote pega una vez por factura pendiente. Es la operación más cara del
 # módulo y la que menos apuro tiene.
@@ -70,15 +74,24 @@ def get_settings(db: SessionDep, user: CurrentUserDep) -> Balance360Settings:
 def connect(
     data: Balance360ConnectionUpsert, db: SessionDep, user: CurrentUserDep
 ) -> Balance360Settings:
-    """Guarda la conexión, **después** de probar que el token anda.
+    """Cambia las credenciales del usuario por un token y guarda **el token**.
 
-    El orden es la decisión: primero se prueba contra Balance360 y solo si contesta se
+    El usuario pone su mail y su contraseña de Balance360 y no ve ningún token: se lo pide
+    FactuMov por él. Antes había que pegar uno emitido por ssh contra el servidor de la otra
+    app, o sea que conectar la integración dependía de quien administra la VM y el secreto
+    llegaba al usuario por algún chat.
+
+    **La contraseña muere en esta función.** Entra en el body, se la lleva `fetch_token` y no
+    queda en ninguna columna ni en ningún log; lo único que se persiste es el token que volvió,
+    cifrado. Ese es el intercambio que justifica pedirla: una credencial que se revoca sola y
+    que solo puede lo que puede la API, en lugar de una que abre la cuenta entera.
+
+    El orden sigue siendo la decisión: primero se habla con Balance360 y solo si contesta se
     escribe. Guardar y verificar después dejaría al usuario con una conexión que la pantalla
-    muestra como puesta y que falla en silencio en cada emisión — y el momento de enterarse de
-    que pegó mal el token es mientras lo tiene en el portapapeles.
+    muestra como puesta y que falla en silencio en cada emisión.
 
-    Es un PUT idempotente: reemplazar el token es la operación más frecuente de esta pantalla,
-    porque es lo que hay que hacer cuando se lo revoca del otro lado.
+    Es un PUT idempotente: volver a conectar es la operación más frecuente de esta pantalla, y
+    del otro lado emitir un token nuevo revoca el anterior de esta misma integración.
     """
     enforce_rate_limit(_CONNECT_LIMITER, str(user.id))
 
@@ -86,10 +99,12 @@ def connect(
         raise HTTPException(status_code=503, detail=_NOT_AVAILABLE_DETAIL)
 
     try:
-        balance360.check_token(data.base_url, data.api_token)
+        api_token = balance360.fetch_token(data.base_url, data.email, data.password)
     except Balance360Error as error:
-        # 502 y no 400: lo que falló es la otra app, no el request. El mensaje sí se propaga
-        # entero —es lo único que le dice al usuario si erró la dirección o el token—.
+        # 502 y no 400: lo que falló es la otra app, no el request —ni siquiera cuando la que
+        # rebota es la contraseña, porque quien la rechaza es Balance360 y no FactuMov—. El
+        # mensaje se propaga entero: es lo único que le dice al usuario si erró la dirección,
+        # las credenciales, o si tiene que esperar porque se pasó de intentos.
         raise HTTPException(status_code=502, detail=str(error)) from error
 
     try:
@@ -97,16 +112,15 @@ def connect(
             db,
             user.id,
             base_url=data.base_url,
-            encrypted_token=secrets.encrypt(data.api_token),
-            token_hint=balance360.token_hint(data.api_token),
+            encrypted_token=secrets.encrypt(api_token),
+            token_hint=balance360.token_hint(api_token),
             auto_register=data.auto_register,
         )
     except SecretsNotConfiguredError as error:
         raise HTTPException(status_code=503, detail=_NOT_AVAILABLE_DETAIL) from error
 
-    # El token acaba de contestar bien: la conexión nace verificada. `upsert` limpia
-    # `verified_at` a propósito —el token pudo haber cambiado— y acá se vuelve a poner con el
-    # dato recién comprobado.
+    # El token lo acaba de emitir Balance360 para este usuario: la conexión nace verificada.
+    # `upsert` limpia `verified_at` a propósito —el token cambió— y acá se vuelve a poner.
     connection_crud.mark_verified(db, connection)
     db.commit()
     db.refresh(connection)

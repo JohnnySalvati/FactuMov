@@ -1,9 +1,11 @@
 """Entrada y salida de la conexión con Balance360.
 
-El token entra pero **no sale nunca**: lo que vuelve es `token_hint`, los últimos caracteres,
-que alcanzan para que el usuario reconozca cuál guardó. Un endpoint que devuelva la
-credencial completa convierte cualquier XSS en la SPA en un robo de acceso a la contabilidad,
-y no compra nada: quien la quiera cambiar pega una nueva.
+Entran las credenciales del usuario en Balance360 y **no sale ninguna**. La contraseña se usa
+para pedir el token y no se guarda en ningún lado; el token se guarda cifrado y tampoco vuelve:
+lo que sale es `token_hint`, los últimos caracteres, que alcanzan para que el usuario reconozca
+cuál está puesto. Un endpoint que devolviera la credencial completa convierte cualquier XSS en
+la SPA en un robo de acceso a la contabilidad, y no compra nada: quien la quiera cambiar
+vuelve a conectar.
 """
 
 import datetime
@@ -18,11 +20,17 @@ class Balance360ConnectionUpsert(BaseModel):
     Es un PUT y no un POST + PATCH porque hay a lo sumo una conexión por usuario: el recurso
     es "mi conexión", siempre está en la misma dirección, y guardar es idempotente. Con POST
     habría que contestar 409 la segunda vez, que es exactamente lo que el usuario hace cuando
-    le reemitieron el token.
+    vuelve a conectar porque le revocaron el token del otro lado.
     """
 
     base_url: str = Field(min_length=1, max_length=200)
-    api_token: str = Field(min_length=8, max_length=200)
+    # Las credenciales del usuario **en Balance360**, que no tienen nada que ver con las de
+    # acá: son dos aplicaciones y dos cuentas, aunque la persona sea la misma y muchas veces
+    # el mail coincida.
+    email: str = Field(min_length=1, max_length=255)
+    # Viaja una vez y no se guarda. El backend la cambia por un token en el momento y se
+    # olvida de ella; no hay ninguna columna donde pudiera terminar. Ver `fetch_token`.
+    password: str = Field(min_length=1, max_length=200)
     auto_register: bool = True
 
     @field_validator("base_url")
@@ -41,17 +49,14 @@ class Balance360ConnectionUpsert(BaseModel):
             raise ValueError("La dirección tiene que empezar con http:// o https://")
         return value
 
-    @field_validator("api_token")
+    @field_validator("email")
     @classmethod
-    def _clean_api_token(cls, value: str) -> str:
-        """Sin espacios ni saltos de línea alrededor.
+    def _clean_email(cls, value: str) -> str:
+        """Sin espacios alrededor.
 
-        El token se copia de la salida de un `create_api_token.py` corrido por ssh, y ahí es
-        fácil llevarse un espacio o un `
-` de más. Del otro lado el hash no coincide y la
-        respuesta es un 401 idéntico al de un token revocado, así que la pantalla manda a
-        generar otro —y el que se pegue va a fallar igual—. Un `strip` que no se ve es más
-        barato que un mensaje que explique lo que no se ve.
+        Un mail se copia y se pega tanto como se tipea, y un espacio invisible del otro lado no
+        encuentra al usuario: la respuesta sería "mail o contraseña incorrectos" —la misma que
+        da una contraseña mal escrita— y el usuario se pondría a cambiar la que está bien.
         """
         return value.strip()
 

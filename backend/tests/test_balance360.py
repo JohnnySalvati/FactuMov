@@ -52,7 +52,17 @@ def http(monkeypatch):
     """
 
     calls = []
-    responses = {"get": FakeResponse(200, []), "post": FakeResponse(201, {})}
+    responses = {
+        "get": FakeResponse(200, []),
+        "post": FakeResponse(201, {}),
+        # Los dos POST del módulo van a URLs distintas y contestan cosas distintas, así que la
+        # respuesta se elige por el path y no hay una sola ranura para los dos: si la hubiera,
+        # un test de conexión tendría que dejar puesta una respuesta de registro y viceversa.
+        "tokens": FakeResponse(
+            201,
+            {"token": "b360_unTokenDePrueba", "name": "FactuMov", "replaced_previous": False},
+        ),
+    }
 
     def fake_get(url, headers=None, timeout=None):
         calls.append({"method": "GET", "url": url, "headers": headers or {}})
@@ -63,7 +73,7 @@ def http(monkeypatch):
 
     def fake_post(url, json=None, headers=None, timeout=None):
         calls.append({"method": "POST", "url": url, "headers": headers or {}, "json": json})
-        result = responses["post"]
+        result = responses["tokens" if url.endswith("/api/tokens") else "post"]
         if isinstance(result, Exception):
             raise result
         return result
@@ -269,65 +279,125 @@ def test_sin_conexion_los_ajustes_contestan_conexion_nula(client):
     assert response.json() == {"available": True, "connection": None}
 
 
-def test_conectar_prueba_el_token_antes_de_guardarlo(client, db, user, http):
-    response = client.put(
-        "/balance360",
-        json={"base_url": "https://balance.test/", "api_token": "b360_unTokenDePrueba"},
-    )
+CREDENTIALS = {
+    "base_url": "https://balance.test",
+    "email": "johnny@insoft.test",
+    "password": "la-de-balance360",
+}
+
+
+def test_conectar_cambia_las_credenciales_por_un_token(client, db, user, http):
+    response = client.put("/balance360", json={**CREDENTIALS, "base_url": "https://balance.test/"})
 
     assert response.status_code == 200
     (call,) = http["calls"]
-    assert call["method"] == "GET"
-    assert call["url"] == "https://balance.test/api/entities"
+    assert call["url"] == "https://balance.test/api/tokens"
+    assert call["json"] == {
+        "email": "johnny@insoft.test",
+        "password": "la-de-balance360",
+        # El nombre fijo es lo que hace que reconectar reemplace el token anterior del otro
+        # lado en vez de acumular credenciales vivas.
+        "name": "FactuMov",
+    }
     connection = db.query(Balance360Connection).one()
     assert connection.verified_at is not None
     # La barra final se normaliza al guardar, no al armar cada URL.
     assert connection.base_url == "https://balance.test"
 
 
+def test_la_contrasenia_no_queda_guardada_en_ningun_lado(client, db, http):
+    """El invariante que justifica pedirla: viaja una vez y no sobrevive al request.
+
+    Guardarla sería peor que el token pegado a mano que este circuito reemplazó — le daría a
+    la base de FactuMov la cuenta entera de Balance360 de cada usuario, y no el acceso acotado
+    y revocable de un token.
+    """
+    client.put("/balance360", json=CREDENTIALS)
+
+    connection = db.query(Balance360Connection).one()
+    assert "la-de-balance360" not in connection.encrypted_token
+    # Ni siquiera cifrada: lo que se cifra es el token, y descifrarlo tiene que dar el token.
+    assert secrets.decrypt(connection.encrypted_token) == "b360_unTokenDePrueba"
+
+
 def test_el_token_no_vuelve_nunca_en_la_respuesta(client, http):
-    response = client.put(
-        "/balance360",
-        json={"base_url": "https://balance.test", "api_token": "b360_unTokenDePrueba"},
-    )
+    response = client.put("/balance360", json=CREDENTIALS)
 
     body = response.json()
     assert "b360_unTokenDePrueba" not in response.text
+    assert "la-de-balance360" not in response.text
     assert body["connection"]["token_hint"] == "ueba"
 
 
-def test_un_token_que_balance360_no_acepta_no_se_guarda(client, db, http):
-    """Enterarse ahora, con el token en el portapapeles, y no en la próxima emisión."""
-    http["responses"]["get"] = FakeResponse(401, {"detail": "Token invalido"})
+def test_unas_credenciales_que_balance360_no_acepta_no_guardan_nada(client, db, http):
+    """Enterarse ahora, con el usuario adelante, y no en la próxima emisión."""
+    http["responses"]["tokens"] = FakeResponse(401, {"detail": "Mail o contraseña incorrectos."})
 
-    response = client.put(
-        "/balance360",
-        json={"base_url": "https://balance.test", "api_token": "b360_unTokenDePrueba"},
-    )
+    response = client.put("/balance360", json=CREDENTIALS)
 
     assert response.status_code == 502
+    assert response.json()["detail"] == "Mail o contraseña incorrectos."
     assert db.query(Balance360Connection).count() == 0
 
 
-def test_el_token_se_limpia_antes_de_probarlo(client, db, http):
-    """Un espacio de más al copiarlo del ssh da el mismo 401 que un token revocado."""
-    response = client.put(
-        "/balance360",
-        json={"base_url": "https://balance.test", "api_token": "  b360_unTokenDePrueba\n"},
+def test_un_balance360_que_todavia_no_emite_tokens_lo_dice(client, db, http):
+    """Un 404 acá no es "no existe": es una versión anterior a este circuito del otro lado.
+
+    Decir "Balance360 contestó 404" mandaría a revisar la dirección, que está bien. Lo que hay
+    que hacer es actualizar la otra app o pedir un token a mano.
+    """
+    http["responses"]["tokens"] = FakeResponse(404, None)
+
+    response = client.put("/balance360", json=CREDENTIALS)
+
+    assert response.status_code == 502
+    assert "todavía no sabe emitir tokens" in response.json()["detail"]
+    assert db.query(Balance360Connection).count() == 0
+
+
+def test_el_limite_de_intentos_del_otro_lado_llega_con_su_mensaje(client, http):
+    """El 429 de Balance360 dice que hay que esperar, y eso es lo que tiene que leer el usuario.
+
+    Traducirlo a un error propio le sacaría lo único accionable que tiene: que no hay nada que
+    corregir, que es cuestión de tiempo.
+    """
+    http["responses"]["tokens"] = FakeResponse(
+        429, {"detail": "Demasiados intentos. Probá de nuevo en un rato."}
     )
+
+    response = client.put("/balance360", json=CREDENTIALS)
+
+    assert response.status_code == 502
+    assert "Demasiados intentos" in response.json()["detail"]
+
+
+def test_conectar_muchas_veces_seguidas_se_corta_acá(client, http):
+    """Este endpoint manda una contraseña ajena a otra app, así que es también un
+    intermediario para probarlas. El límite de allá es la defensa; este evita gastársela."""
+    for _ in range(10):
+        assert client.put("/balance360", json=CREDENTIALS).status_code == 200
+
+    response = client.put("/balance360", json=CREDENTIALS)
+
+    assert response.status_code == 429
+
+
+def test_el_mail_se_limpia_antes_de_mandarlo(client, http):
+    """Un espacio invisible da el mismo "credenciales incorrectas" que una contraseña mal
+    escrita, y el usuario se pondría a cambiar la que está bien."""
+    sucio = "  johnny@insoft.test\n"
+    response = client.put("/balance360", json={**CREDENTIALS, "email": sucio})
 
     assert response.status_code == 200
     (call,) = http["calls"]
-    assert call["headers"]["Authorization"] == "Bearer b360_unTokenDePrueba"
-    assert db.query(Balance360Connection).one().token_hint == "ueba"
+    assert call["json"]["email"] == "johnny@insoft.test"
 
 
 def test_una_direccion_sin_esquema_se_rechaza_con_422(client, http):
-    response = client.put(
-        "/balance360", json={"base_url": "balance.test", "api_token": "b360_unToken"}
-    )
+    response = client.put("/balance360", json={**CREDENTIALS, "base_url": "balance.test"})
 
     assert response.status_code == 422
+    # Y sobre todo: la contraseña no llegó a salir a la red.
     assert http["calls"] == []
 
 
@@ -450,9 +520,7 @@ def test_sin_clave_de_cifrado_la_pantalla_lo_dice_en_vez_de_reventar(
     secrets._cipher.cache_clear()
 
     assert client.get("/balance360").json()["available"] is False
-    response = client.put(
-        "/balance360", json={"base_url": "https://balance.test", "api_token": "b360_unToken"}
-    )
+    response = client.put("/balance360", json=CREDENTIALS)
     assert response.status_code == 503
     assert http["calls"] == []
 
