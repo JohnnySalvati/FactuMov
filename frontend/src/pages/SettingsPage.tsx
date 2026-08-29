@@ -30,6 +30,11 @@ import { useResource } from '../hooks/useResource'
  * dependía de quien administra la VM, y el secreto llegaba por chat o por mail. Ahora el
  * backend lo pide por el usuario y guarda lo que vuelve.
  *
+ * **La dirección no se pregunta**: sale del `.env` del servidor y acá solo se muestra. Era un
+ * campo, y era una pregunta que el usuario no puede contestar —en qué host corre Balance360 lo
+ * sabe quien deployó las dos apps—; tipearla mal daba un error de red donde se esperaba uno de
+ * credenciales.
+ *
  * La contraseña vive en el estado de este componente hasta que se manda, y se borra apenas
  * contesta el backend. No se guarda de ningún lado —ni acá, ni en la base— y por eso el
  * formulario nunca puede mostrarla de vuelta: lo que la pantalla dice es qué token quedó
@@ -43,7 +48,6 @@ export function SettingsPage() {
 
   const { user } = useAuth()
 
-  const [baseUrl, setBaseUrl] = useState('')
   // El mail arranca con el de la cuenta de FactuMov porque en la práctica suele ser el mismo,
   // pero es un valor por defecto y no un supuesto: son dos aplicaciones y dos cuentas, así que
   // el campo se ve, se puede cambiar, y el texto de abajo aclara de cuál se trata.
@@ -54,13 +58,13 @@ export function SettingsPage() {
   const [error, setError] = useState<string>()
   const [ok, setOk] = useState<string>()
 
-  // La dirección arranca con la que ya está guardada, si la hay; el token nunca. Reemplazar
-  // el token es la operación más frecuente de esta pantalla —es lo que hay que hacer cuando
-  // se lo revoca del otro lado— y tener que volver a tipear la URL para eso sería fricción
-  // gratis. El `??` no alcanza: `baseUrl` es estado y no se recalcula cuando llega la carga.
-  const url = baseUrl || connection?.base_url || ''
-  // Lo mismo con la casilla: mientras el usuario no la toque, vale lo que está guardado.
+  // Mientras el usuario no toque la casilla, vale lo que está guardado. El `??` y no `||`
+  // porque `false` es un valor elegido y no un vacío.
   const autoRegister = autoRegisterChoice ?? connection?.auto_register ?? true
+  // "Disponible" es exactamente "el servidor no tiene nada que reclamar". El motivo viene del
+  // backend en vez de estar escrito acá porque es él quien sabe cuál de las dos variables del
+  // `.env` falta, y esta pantalla no tiene forma de averiguarlo.
+  const unavailable = data?.unavailable_reason ?? null
 
   async function save(event: React.FormEvent) {
     event.preventDefault()
@@ -70,7 +74,6 @@ export function SettingsPage() {
     setOk(undefined)
     try {
       await api.put<Balance360Settings>('/balance360', {
-        base_url: url,
         email,
         password,
         auto_register: autoRegister,
@@ -94,7 +97,6 @@ export function SettingsPage() {
     try {
       await api.delete<void>('/balance360')
       setPassword('')
-      setBaseUrl('')
       settings.reload()
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.detail : 'No se pudo desconectar.')
@@ -133,21 +135,18 @@ export function SettingsPage() {
       <Notice kind="error">{settings.error}</Notice>
       {settings.loading && data === undefined && <p className="muted">Cargando…</p>}
 
-      {data !== undefined && !data.available && (
-        <Notice kind="warn">
-          Este servidor no tiene configurada la integración: le falta la clave con la que se
-          cifran los tokens. Todo lo demás de FactuMov anda igual.
-        </Notice>
+      {unavailable !== null && (
+        <Notice kind="warn">{unavailable} Todo lo demás de FactuMov anda igual.</Notice>
       )}
 
-      {data !== undefined && data.available && (
+      {data !== undefined && unavailable === null && (
         <>
           {connection !== null && (
             <div className="card">
               <dl className="summary">
                 <div>
                   <dt>Conectado a</dt>
-                  <dd className="mono">{connection.base_url}</dd>
+                  <dd className="mono">{data.base_url}</dd>
                 </div>
                 <div>
                   <dt>Token</dt>
@@ -174,16 +173,13 @@ export function SettingsPage() {
           )}
 
           <form className="card stack" onSubmit={save}>
-            <label>
-              Dirección de Balance360
-              <input
-                type="url"
-                value={url}
-                onChange={(event) => setBaseUrl(event.target.value)}
-                placeholder="https://balance360.example"
-                required
-              />
-            </label>
+            {/* Sin campo para la dirección: la pone el servidor. Cuando todavía no hay
+                conexión, esta línea es lo único que dice adónde van a ir las facturas. */}
+            {connection === null && (
+              <p className="totals-note" style={{ margin: 0 }}>
+                Se conecta con <span className="mono">{data.base_url}</span>.
+              </p>
+            )}
 
             <label>
               Tu mail en Balance360

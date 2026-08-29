@@ -31,7 +31,6 @@ def upsert(
     db: Session,
     user_id: uuid.UUID,
     *,
-    base_url: str,
     encrypted_token: str,
     token_hint: str,
     auto_register: bool,
@@ -49,7 +48,6 @@ def upsert(
     if connection is None:
         connection = Balance360Connection(user_id=user_id)
         db.add(connection)
-    connection.base_url = base_url
     connection.encrypted_token = encrypted_token
     connection.token_hint = token_hint
     connection.auto_register = auto_register

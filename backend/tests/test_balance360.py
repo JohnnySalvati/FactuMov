@@ -276,18 +276,21 @@ def test_sin_conexion_los_ajustes_contestan_conexion_nula(client):
     response = client.get("/balance360")
 
     assert response.status_code == 200
-    assert response.json() == {"available": True, "connection": None}
+    assert response.json() == {
+        "base_url": "https://balance.test",
+        "unavailable_reason": None,
+        "connection": None,
+    }
 
 
 CREDENTIALS = {
-    "base_url": "https://balance.test",
     "email": "johnny@insoft.test",
     "password": "la-de-balance360",
 }
 
 
 def test_conectar_cambia_las_credenciales_por_un_token(client, db, user, http):
-    response = client.put("/balance360", json={**CREDENTIALS, "base_url": "https://balance.test/"})
+    response = client.put("/balance360", json=CREDENTIALS)
 
     assert response.status_code == 200
     (call,) = http["calls"]
@@ -301,8 +304,6 @@ def test_conectar_cambia_las_credenciales_por_un_token(client, db, user, http):
     }
     connection = db.query(Balance360Connection).one()
     assert connection.verified_at is not None
-    # La barra final se normaliza al guardar, no al armar cada URL.
-    assert connection.base_url == "https://balance.test"
 
 
 def test_la_contrasenia_no_queda_guardada_en_ningun_lado(client, db, http):
@@ -393,12 +394,48 @@ def test_el_mail_se_limpia_antes_de_mandarlo(client, http):
     assert call["json"]["email"] == "johnny@insoft.test"
 
 
-def test_una_direccion_sin_esquema_se_rechaza_con_422(client, http):
-    response = client.put("/balance360", json={**CREDENTIALS, "base_url": "balance.test"})
+def test_sin_direccion_configurada_la_pantalla_lo_dice_y_no_deja_conectar(
+    client, monkeypatch, http
+):
+    """El servidor mal configurado se cuenta antes de que nadie escriba una contraseña.
 
-    assert response.status_code == 422
-    # Y sobre todo: la contraseña no llegó a salir a la red.
+    Con la dirección vacía, conectar no puede salir bien de ninguna manera: el 503 llega sin
+    haber salido a la red, así que la contraseña ni siquiera viaja. Y el motivo nombra la
+    variable que falta, porque quien lo tiene que arreglar es quien administra el servidor.
+    """
+    monkeypatch.setenv("BALANCE360_BASE_URL", "")
+    balance360.get_client_settings.cache_clear()
+
+    settings = client.get("/balance360").json()
+    assert settings["base_url"] is None
+    assert "BALANCE360_BASE_URL" in settings["unavailable_reason"]
+
+    response = client.put("/balance360", json=CREDENTIALS)
+
+    assert response.status_code == 503
     assert http["calls"] == []
+
+
+def test_una_direccion_sin_esquema_no_se_usa(client, monkeypatch, http):
+    """Sin `http://`, `requests` no interpreta un host: el usuario vería "no pudimos
+    conectarnos" y se pondría a revisar una red que está bien."""
+    monkeypatch.setenv("BALANCE360_BASE_URL", "balance.test")
+    balance360.get_client_settings.cache_clear()
+
+    response = client.put("/balance360", json=CREDENTIALS)
+
+    assert response.status_code == 503
+    assert "http://" in response.json()["detail"]
+    assert http["calls"] == []
+
+
+def test_la_barra_final_de_la_direccion_no_duplica_la_del_path(client, monkeypatch, http):
+    monkeypatch.setenv("BALANCE360_BASE_URL", "https://balance.test/")
+    balance360.get_client_settings.cache_clear()
+
+    assert client.put("/balance360", json=CREDENTIALS).status_code == 200
+    (call,) = http["calls"]
+    assert call["url"] == "https://balance.test/api/tokens"
 
 
 def test_desconectar_no_falla_aunque_no_haya_nada_conectado(client):
@@ -519,7 +556,8 @@ def test_sin_clave_de_cifrado_la_pantalla_lo_dice_en_vez_de_reventar(
     secrets.get_secrets_settings.cache_clear()
     secrets._cipher.cache_clear()
 
-    assert client.get("/balance360").json()["available"] is False
+    reason = client.get("/balance360").json()["unavailable_reason"]
+    assert reason is not None and "SECRET_ENCRYPTION_KEY" in reason
     response = client.put("/balance360", json=CREDENTIALS)
     assert response.status_code == 503
     assert http["calls"] == []

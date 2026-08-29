@@ -109,6 +109,13 @@ Lo que no puede quedar como está:
   ningún web service. Vacío es válido y los dos quedan en el log.
 - `ARCA_ENV` va en **`prod`**, y con eso el certificado propio pasa a ser un prerrequisito
   y no una prolijidad. Ver la sección 7.
+- `BALANCE360_BASE_URL=https://balance360.insoft.net.ar` y `SECRET_ENCRYPTION_KEY`, que son la
+  integración con Balance360. Las dos vacías es válido —la app arranca igual y todo lo demás
+  anda—, y lo único que pasa es que la pantalla de Ajustes dice cuál de las dos falta. La
+  dirección la pone acá el que deploya y no el usuario: es config, no una pregunta de la app.
+  La clave se genera una vez con
+  `uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`;
+  perderla no borra nada, pero obliga a cada usuario a volver a conectar.
 
 ### 2.2 Los certificados de ARCA
 

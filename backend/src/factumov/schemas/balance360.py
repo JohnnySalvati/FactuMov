@@ -23,7 +23,6 @@ class Balance360ConnectionUpsert(BaseModel):
     vuelve a conectar porque le revocaron el token del otro lado.
     """
 
-    base_url: str = Field(min_length=1, max_length=200)
     # Las credenciales del usuario **en Balance360**, que no tienen nada que ver con las de
     # acá: son dos aplicaciones y dos cuentas, aunque la persona sea la misma y muchas veces
     # el mail coincida.
@@ -32,22 +31,6 @@ class Balance360ConnectionUpsert(BaseModel):
     # olvida de ella; no hay ninguna columna donde pudiera terminar. Ver `fetch_token`.
     password: str = Field(min_length=1, max_length=200)
     auto_register: bool = True
-
-    @field_validator("base_url")
-    @classmethod
-    def _clean_base_url(cls, value: str) -> str:
-        """Sin barra final y con esquema explícito.
-
-        La barra se saca acá y no al armar cada URL: si la normalización vive en el cliente
-        HTTP, la base guardada puede tener dos formas para la misma cosa y cualquier
-        comparación posterior miente. El esquema se exige porque `requests` sin `http://`
-        no interpreta un host, tira `MissingSchema` y el usuario vería un 500 en vez de un
-        422 que dice qué le falta a lo que pegó.
-        """
-        value = value.strip().rstrip("/")
-        if not value.startswith(("http://", "https://")):
-            raise ValueError("La dirección tiene que empezar con http:// o https://")
-        return value
 
     @field_validator("email")
     @classmethod
@@ -65,7 +48,6 @@ class Balance360ConnectionRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    base_url: str
     # Los últimos caracteres del token guardado, para poder distinguirlo de otro.
     token_hint: str
     # Cuándo Balance360 lo aceptó por última vez. `null` = nunca se pudo probar. No dice que
@@ -79,15 +61,22 @@ class Balance360ConnectionRead(BaseModel):
 class Balance360Settings(BaseModel):
     """El estado de la integración para este usuario, en un solo objeto.
 
-    Junta dos cosas de naturalezas distintas a propósito: si el **servidor** puede guardar
-    secretos (`available`, que depende del `.env` y es igual para todos) y si **este usuario**
-    conectó su cuenta. La pantalla las necesita juntas para decidir qué mostrar, y separarlas
-    en dos endpoints serían dos requests para pintar un formulario.
+    Junta dos cosas de naturalezas distintas a propósito: cómo está configurado el **servidor**
+    (la dirección y si puede guardar secretos, que salen del `.env` y son iguales para todos) y
+    si **este usuario** conectó su cuenta. La pantalla las necesita juntas para decidir qué
+    mostrar, y separarlas en dos endpoints serían dos requests para pintar un formulario.
     """
 
-    # `False` cuando falta `SECRET_ENCRYPTION_KEY`: la app anda igual, pero esta pantalla no
-    # puede guardar nada y lo dice antes de que el usuario pegue el token.
-    available: bool
+    # A qué Balance360 le habla este servidor. `None` cuando no está configurado — o sea
+    # exactamente cuando `unavailable_reason` habla de la dirección. Sale acá porque el
+    # usuario ya no la elige y sigue teniendo derecho a ver dónde va a quedar su factura.
+    base_url: str | None
+    # Qué le falta al servidor para que la integración se pueda usar; `None` si no le falta
+    # nada. Es el motivo y no un `available: bool` porque las dos causas posibles —la
+    # dirección y la clave de cifrado— se arreglan en lugares distintos del `.env`, y un
+    # booleano dejaría al operador probando cuál de las dos era. La pantalla lee "usable" como
+    # "esto vino en `null`".
+    unavailable_reason: str | None
     # `None` = no conectado. Es un estado normal, no un error.
     connection: Balance360ConnectionRead | None
 

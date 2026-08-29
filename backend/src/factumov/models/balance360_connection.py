@@ -43,10 +43,10 @@ class Balance360Connection(Base, TimestampMixin):
     # mientras no exista el endpoint de baja de cuenta.
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), unique=True)
 
-    # De qué Balance360 se trata. Es dato de la conexión y no una constante del código porque
-    # Balance360 se autohospeda: el de InSoft, el de un contador y el de un entorno de prueba
-    # son instalaciones distintas, y la app no tiene por qué saber cuál usa cada usuario.
-    base_url: Mapped[str] = mapped_column(String(200))
+    # No hay `base_url`: la dirección del Balance360 es config del servidor
+    # (`BALANCE360_BASE_URL`) y no un dato de cada usuario. Era una columna, y era una copia
+    # del mismo valor por cada cuenta conectada: quien puede saber en qué host corre la otra
+    # app es quien deployó las dos, no la persona que aprieta "conectar".
 
     # El token de `/api`, cifrado con Fernet. 500 caracteres es holgado: el token son ~48 y
     # el sobre de Fernet lo lleva a ~180, pero el largo depende de la versión del formato y

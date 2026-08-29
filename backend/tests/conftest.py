@@ -17,6 +17,7 @@ from factumov.dependencies import SESSION_COOKIE_NAME
 from factumov.main import app
 from factumov.models.base import Base
 from factumov.services import arca as arca_service
+from factumov.services import balance360 as balance360_service
 from factumov.services import email as email_service
 from factumov.services import secrets as secrets_service
 from factumov.services.rate_limit import reset_all as reset_all_limiters
@@ -109,6 +110,27 @@ def secrets_settings(monkeypatch):
     yield
     secrets_service.get_secrets_settings.cache_clear()
     secrets_service._cipher.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def balance360_settings(monkeypatch):
+    """La dirección de Balance360, fija y desenganchada del `.env`.
+
+    Autouse por lo mismo que las otras tres: sin esto, tener o no tener `BALANCE360_BASE_URL`
+    en la máquina decide si la integración está "disponible", y media docena de tests pasan en
+    una máquina y fallan en la de al lado.
+
+    `balance.test` no existe y no importa: los tests del módulo parchean `requests`, así que
+    esta dirección solo se ejercita como string. El test que necesita el caso *sin* dirección
+    la borra con `monkeypatch.setenv` y limpia el cache.
+    """
+    monkeypatch.setitem(
+        balance360_service.Balance360ClientSettings.model_config, "env_file", None
+    )
+    monkeypatch.setenv("BALANCE360_BASE_URL", "https://balance.test")
+    balance360_service.get_client_settings.cache_clear()
+    yield
+    balance360_service.get_client_settings.cache_clear()
 
 
 # El CUIT que lleva el certificado de prueba en el `serialNumber` del subject. No es el de

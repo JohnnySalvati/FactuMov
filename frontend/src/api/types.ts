@@ -569,7 +569,6 @@ export const BALANCE360_STATUS_LABELS: Record<Balance360Status, string> = {
 /** La conexión del usuario con su Balance360. El token nunca vuelve: solo su pista. */
 export interface Balance360Connection {
   id: string
-  base_url: string
   /** Los últimos cuatro caracteres del token guardado, para poder distinguirlo de otro. */
   token_hint: string
   /**
@@ -585,17 +584,24 @@ export interface Balance360Connection {
 
 export interface Balance360Settings {
   /**
-   * Si el **servidor** puede guardar tokens. `false` cuando falta la clave de cifrado: la app
-   * anda igual y esta pantalla lo dice antes de que alguien pegue una credencial.
+   * A qué Balance360 le habla este servidor. Sale del `.env` de la app y no lo elige el
+   * usuario: quien sabe en qué host corre la otra app es quien deployó las dos.
    */
-  available: boolean
+  base_url: string | null
+  /**
+   * Qué le falta al **servidor** para que la integración se pueda usar; `null` si no le falta
+   * nada, que es la única forma que tiene esta pantalla de saber que está disponible.
+   */
+  unavailable_reason: string | null
   /** `null` = no conectado, que es un estado normal y no un error. */
   connection: Balance360Connection | null
 }
 
 export interface Balance360ConnectionUpsert {
-  base_url: string
-  api_token: string
+  /** Las credenciales del usuario **en Balance360**, que pueden no ser las de FactuMov. */
+  email: string
+  /** Viaja una vez, se cambia por un token y no se guarda en ningún lado. */
+  password: string
   auto_register: boolean
 }
 

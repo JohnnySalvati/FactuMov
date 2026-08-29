@@ -46,12 +46,6 @@ _CONNECT_LIMITER = RateLimiter(limit=10, window_seconds=60 * 60)
 # módulo y la que menos apuro tiene.
 _REGISTER_LIMITER = RateLimiter(limit=10, window_seconds=60 * 60)
 
-_NOT_AVAILABLE_DETAIL = (
-    "Este servidor no tiene configurada la integración con Balance360. "
-    "Falta la clave de cifrado de secretos."
-)
-
-
 @router.get("", response_model=Balance360Settings)
 def get_settings(db: SessionDep, user: CurrentUserDep) -> Balance360Settings:
     """Todo lo que la pantalla de ajustes necesita, en un request.
@@ -60,12 +54,13 @@ def get_settings(db: SessionDep, user: CurrentUserDep) -> Balance360Settings:
     existe igual y lo que muestra es el formulario vacío. Un 404 obligaría a la SPA a tratar
     como error el caso más común.
 
-    `available` dice si el **servidor** puede guardar un token. Va acá y no descubierto al
-    apretar "guardar" para que el formulario pueda avisar antes de que el usuario pegue una
-    credencial que no se va a poder guardar.
+    `unavailable_reason` dice qué le falta al **servidor** para que la integración se pueda
+    usar. Va acá y no descubierto al apretar "conectar" para que el formulario pueda avisar
+    antes de que el usuario escriba una contraseña que no va a llegar a ningún lado.
     """
     return Balance360Settings(
-        available=secrets.is_configured(),
+        base_url=balance360.base_url(),
+        unavailable_reason=balance360.unavailable_reason(),
         connection=connection_crud.get_for_user(db, user.id),  # type: ignore[arg-type]
     )
 
@@ -92,39 +87,54 @@ def connect(
 
     Es un PUT idempotente: volver a conectar es la operación más frecuente de esta pantalla, y
     del otro lado emitir un token nuevo revoca el anterior de esta misma integración.
+
+    **La dirección no viaja en el body**: sale de `BALANCE360_BASE_URL`. Era un campo, y era
+    una pregunta que el usuario no puede contestar; el efecto secundario que importa es que
+    un error de conexión ya no puede ser culpa de lo que tipeó.
     """
     enforce_rate_limit(_CONNECT_LIMITER, str(user.id))
 
-    if not secrets.is_configured():
-        raise HTTPException(status_code=503, detail=_NOT_AVAILABLE_DETAIL)
+    reason = balance360.unavailable_reason()
+    if reason is not None:
+        # 503 y no 400: no hay nada malo en lo que mandó el usuario, le falta algo al servidor.
+        # Y se chequea antes de salir a la red, así que una contraseña que no se va a poder
+        # guardar tampoco llega a viajar.
+        raise HTTPException(status_code=503, detail=reason)
 
     try:
-        api_token = balance360.fetch_token(data.base_url, data.email, data.password)
+        api_token = balance360.fetch_token(data.email, data.password)
     except Balance360Error as error:
         # 502 y no 400: lo que falló es la otra app, no el request —ni siquiera cuando la que
         # rebota es la contraseña, porque quien la rechaza es Balance360 y no FactuMov—. El
-        # mensaje se propaga entero: es lo único que le dice al usuario si erró la dirección,
-        # las credenciales, o si tiene que esperar porque se pasó de intentos.
+        # mensaje se propaga entero: es lo único que le dice al usuario si erró las
+        # credenciales, si tiene que esperar porque se pasó de intentos, o si del otro lado no
+        # contesta nadie.
         raise HTTPException(status_code=502, detail=str(error)) from error
 
     try:
         connection = connection_crud.upsert(
             db,
             user.id,
-            base_url=data.base_url,
             encrypted_token=secrets.encrypt(api_token),
             token_hint=balance360.token_hint(api_token),
             auto_register=data.auto_register,
         )
     except SecretsNotConfiguredError as error:
-        raise HTTPException(status_code=503, detail=_NOT_AVAILABLE_DETAIL) from error
+        # Solo si la clave se fue del entorno entre el chequeo de arriba y esta línea. Queda
+        # igual porque `secrets.encrypt` la puede levantar y un 500 acá sería mentir sobre de
+        # quién es el problema.
+        raise HTTPException(status_code=503, detail=str(error)) from error
 
     # El token lo acaba de emitir Balance360 para este usuario: la conexión nace verificada.
     # `upsert` limpia `verified_at` a propósito —el token cambió— y acá se vuelve a poner.
     connection_crud.mark_verified(db, connection)
     db.commit()
     db.refresh(connection)
-    return Balance360Settings(available=True, connection=connection)  # type: ignore[arg-type]
+    return Balance360Settings(
+        base_url=balance360.base_url(),
+        unavailable_reason=None,
+        connection=connection,  # type: ignore[arg-type]
+    )
 
 
 @router.delete("", status_code=204)

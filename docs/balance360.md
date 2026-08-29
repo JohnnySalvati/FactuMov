@@ -41,6 +41,27 @@ ausencia de valor es además lo que deja la consulta de reintentos (`PENDING` o 
 arrastrar todo el historial: sin eso, el botón de "reintentar lo que falló" sería un botón de
 "registrar retroactivamente todo lo que emití en mi vida", que es una decisión del usuario.
 
+## La dirección la pone el servidor, no el usuario
+
+`BALANCE360_BASE_URL` en el `.env`, y **ningún campo en la pantalla**. Era una columna de
+`balance360_connections` y un input del formulario, con el argumento de que Balance360 se
+autohospeda y cada usuario podría tener el suyo. En la práctica ese argumento no se sostiene:
+el que sabe en qué host corre la otra app es quien deployó las dos, no la persona que aprieta
+"conectar". Pedírsela convertía un dato de infraestructura en una pregunta de usuario, y
+equivocarse daba "no pudimos conectarnos" —un error de red— donde lo que se estaba probando
+eran unas credenciales.
+
+Guardada por usuario, además, era el mismo valor copiado tantas veces como cuentas conectadas,
+y el día que la instalación se mudara de dominio habría que corregir N filas en vez de una
+variable. Un servidor de FactuMov le habla a un Balance360; el día que eso no alcance, la
+columna vuelve y no antes.
+
+Vacía o sin esquema, la integración queda **no disponible**: la pantalla lo dice —nombrando la
+variable— antes de que nadie escriba una contraseña, igual que con la clave de cifrado. Las dos
+causas viajan juntas en `unavailable_reason`, un string en vez de un `available: bool`, porque
+se arreglan en lugares distintos del `.env` y un booleano dejaría al operador probando cuál de
+las dos faltaba.
+
 ## La conexión: una por usuario
 
 `balance360_connections` tiene un `unique` sobre `user_id`. Alcanza una porque **del otro lado
@@ -193,6 +214,10 @@ FactuMov le rompería las otras integraciones sin avisarle.
 ajustes se tocan una vez y le cobrarían ancho a las cuatro que se usan todas las semanas. Y el
 engranaje no cuelga del mail del usuario, que es donde estaría en un escritorio, porque en el
 celular ese mail está oculto abajo de 640px — o sea justo en el caso principal.
+
+La dirección se muestra pero no se edita: es lo único que le dice al usuario adónde van a ir
+sus facturas, y sin el campo el formulario quedó en tres cosas —mail, contraseña y la casilla
+de registrar al emitir—.
 
 **El token no vuelve nunca del backend**: lo único que sale es `token_hint`, los últimos cuatro
 caracteres, que alcanzan para reconocer cuál está guardado. Un endpoint que devolviera la

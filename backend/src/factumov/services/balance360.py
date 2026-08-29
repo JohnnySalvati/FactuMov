@@ -21,16 +21,17 @@ existe explota en la validación en vez de guardar otra cosa.
 import logging
 import uuid
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any
 
 import requests
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from requests.exceptions import RequestException
 from sqlalchemy.orm import Session
 
 from factumov.crud import balance360_connection as connection_crud
 from factumov.crud import invoice as invoice_crud
 from factumov.exceptions import Balance360Error, SecretDecryptionError, SecretsNotConfiguredError
-from factumov.models.balance360_connection import Balance360Connection
 from factumov.models.invoice import Invoice
 from factumov.services import secrets
 
@@ -49,6 +50,84 @@ TOKEN_HINT_LENGTH = 4
 # el mismo nombre, así que este string fijo es lo que hace que reconectar reemplace en vez de
 # acumular. Cambiarlo dejaría vivo el token anterior sin que nadie lo use.
 INTEGRATION_NAME = "FactuMov"
+
+
+class Balance360ClientSettings(BaseSettings):
+    """A qué Balance360 le habla **este servidor**.
+
+    Se llama `Client` y no a secas porque `schemas/balance360.py` ya tiene un
+    `Balance360Settings`, que es otra cosa: los ajustes del usuario que la pantalla pinta.
+    Esto es config del proceso, igual que `ArcaSettings` o `EmailSettings`.
+
+    La dirección era una columna de `balance360_connections` y un campo del formulario, y
+    estaba mal por donde se lo mire: el usuario no tiene forma de saber en qué host corre su
+    Balance360 —lo sabe quien deployó las dos apps—, tipearla mal daba un error de red en
+    lugar de uno de credenciales, y guardarla por usuario dejaba tantas copias del mismo dato
+    como cuentas conectadas. Un servidor de FactuMov habla con un Balance360; el día que eso
+    no alcance, vuelve a ser un dato de la conexión y no antes.
+    """
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    # Con esquema y sin barra final. Vacía es válido: la app arranca igual y lo único que no
+    # anda es la integración, que lo dice en la pantalla.
+    balance360_base_url: str = ""
+
+
+@lru_cache
+def get_client_settings() -> Balance360ClientSettings:
+    return Balance360ClientSettings()
+
+
+def base_url() -> str | None:
+    """La dirección configurada, normalizada, o `None` si no sirve.
+
+    La barra final se saca acá, en el único lugar que la lee, y no al armar cada URL: así
+    `f"{base_url()}/api/tokens"` no puede quedar con dos barras venga como venga la variable.
+
+    El esquema se exige en vez de completarlo: sin `http://`, `requests` no interpreta un host
+    y tira `MissingSchema`, que llegaría al usuario como "no pudimos conectarnos" y lo mandaría
+    a revisar una red que está bien. Devolver `None` lo convierte en lo que es —el servidor
+    está mal configurado— y hace que la pantalla lo diga antes de que nadie escriba una
+    contraseña.
+    """
+    value = get_client_settings().balance360_base_url.strip().rstrip("/")
+    if not value.startswith(("http://", "https://")):
+        return None
+    return value
+
+
+def unavailable_reason() -> str | None:
+    """Qué le impide a **este servidor** conectar con Balance360. `None` si puede.
+
+    Junta las dos condiciones —la dirección y la clave de cifrado— porque para la pantalla son
+    una sola pregunta: si tiene sentido mostrar el formulario. Y devuelve el motivo en vez de
+    un booleano porque las dos causas se arreglan en lugares distintos del `.env`, y un
+    "no disponible" pelado deja al operador adivinando cuál de las dos falta.
+    """
+    if not get_client_settings().balance360_base_url.strip():
+        return (
+            "Este servidor no tiene configurada la dirección de Balance360: "
+            "falta BALANCE360_BASE_URL."
+        )
+    if base_url() is None:
+        return (
+            "La dirección de Balance360 de este servidor no es válida: "
+            "BALANCE360_BASE_URL tiene que empezar con http:// o https://."
+        )
+    if not secrets.is_configured():
+        return (
+            "Este servidor no puede guardar el token de Balance360: "
+            "falta SECRET_ENCRYPTION_KEY."
+        )
+    return None
+
+
+def _require_base_url() -> str:
+    url = base_url()
+    if url is None:
+        raise Balance360Error(unavailable_reason() or "", retryable=False)
+    return url
 
 
 @dataclass(frozen=True)
@@ -88,7 +167,7 @@ def _detail(response: requests.Response) -> str:
     return f"Balance360 contestó {response.status_code}."
 
 
-def fetch_token(base_url: str, email: str, password: str) -> str:
+def fetch_token(email: str, password: str) -> str:
     """Cambia las credenciales del usuario por un token de Balance360.
 
     Es lo único que hace FactuMov con esa contraseña: la manda una vez y se queda con lo que
@@ -110,14 +189,15 @@ def fetch_token(base_url: str, email: str, password: str) -> str:
     """
     try:
         response = requests.post(
-            f"{base_url}/api/tokens",
+            f"{_require_base_url()}/api/tokens",
             json={"email": email, "password": password, "name": INTEGRATION_NAME},
             headers={"Accept": "application/json"},
             timeout=TIMEOUT_SECONDS,
         )
     except RequestException as error:
         raise Balance360Error(
-            "No pudimos conectarnos con Balance360. Revisá la dirección y que esté prendido."
+            "No pudimos conectarnos con Balance360. Puede estar apagado, o la dirección "
+            "configurada en este servidor puede estar mal."
         ) from error
 
     if response.status_code == 401:
@@ -209,12 +289,10 @@ def build_payload(invoice: Invoice) -> dict[str, Any]:
     }
 
 
-def _post(
-    connection: Balance360Connection, token: str, payload: dict[str, Any]
-) -> dict[str, Any]:
+def _post(token: str, payload: dict[str, Any]) -> dict[str, Any]:
     try:
         response = requests.post(
-            f"{connection.base_url}/api/invoices/issued",
+            f"{_require_base_url()}/api/invoices/issued",
             json=payload,
             headers=_headers(token),
             timeout=TIMEOUT_SECONDS,
@@ -278,7 +356,7 @@ def register(db: Session, invoice: Invoice) -> RegistrationResult | None:
         return None
 
     try:
-        body = _post(connection, token, build_payload(invoice))
+        body = _post(token, build_payload(invoice))
     except Balance360Error as error:
         invoice_crud.mark_balance360_failed(db, invoice, str(error))
         db.commit()

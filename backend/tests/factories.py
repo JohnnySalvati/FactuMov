@@ -332,7 +332,6 @@ def make_invoice(
 def make_balance360_connection(
     db,
     user_id,
-    base_url="https://balance.test",
     token="b360_token_de_prueba",
     auto_register=True,
     verified_at=None,
@@ -345,7 +344,6 @@ def make_balance360_connection(
     """
     connection = Balance360Connection(
         user_id=user_id,
-        base_url=base_url,
         encrypted_token=secrets_service.encrypt(token),
         token_hint=token[-4:],
         auto_register=auto_register,
