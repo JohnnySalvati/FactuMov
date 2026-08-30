@@ -12,6 +12,8 @@ import { FiscalIdentitiesPage } from './pages/FiscalIdentitiesPage'
 import { EmitPage } from './pages/EmitPage'
 import { FiscalIdentityPage } from './pages/FiscalIdentityPage'
 import { ForgotPasswordPage } from './pages/ForgotPasswordPage'
+import { HowToAcceptDelegationPage } from './pages/HowToAcceptDelegationPage'
+import { HowToDelegatePage } from './pages/HowToDelegatePage'
 import { InvoicePage } from './pages/InvoicePage'
 import { InvoicesPage } from './pages/InvoicesPage'
 import { LoginPage } from './pages/LoginPage'
@@ -45,6 +47,12 @@ export function App() {
                 lo autoriza es el token del link. Su nombre lo fija
                 `_DELEGATION_ACCEPTED_PATH` del backend. */}
             <Route path="/delegacion-aceptada" element={<DelegationAcceptedPage />} />
+            {/* Los instructivos ilustrados que linkean los mails de delegación. El primero
+                es para el contribuyente y el segundo para el operador de FactuMov; ninguno
+                pide token ni sesión —son solo capturas y texto— y sus nombres los fijan
+                `_HOW_TO_DELEGATE_PATH` y `_HOW_TO_ACCEPT_PATH` del backend. */}
+            <Route path="/como-delegar" element={<HowToDelegatePage />} />
+            <Route path="/como-aceptar-delegacion" element={<HowToAcceptDelegationPage />} />
           </Route>
 
           <Route element={<RequireAuth />}>

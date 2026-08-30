@@ -466,6 +466,21 @@ def test_the_notice_asks_for_the_second_step_too(
     assert "por cada CUIT" in body
 
 
+def test_the_notice_links_the_illustrated_guide(
+    client, fiscal_identity, wsfe_returns, operator, sent_emails
+):
+    """El paso 2 es el que se saltea, y una captura con el botón marcado es lo que lo evita.
+
+    El link a `/como-aceptar-delegacion` va antes del texto; el texto queda para tenerlo a
+    mano. Ver *Delegar tiene dos partes* en `docs/arca.md`.
+    """
+    wsfe_returns(NOT_DELEGATED)
+
+    claim(client, fiscal_identity)
+
+    assert "https://app.test/como-aceptar-delegacion" in sent_emails[0].body
+
+
 def test_only_the_first_claim_mails(client, fiscal_identity, wsfe_returns, operator, sent_emails):
     """Un usuario impaciente apretando el botón no puede convertirse en veinte mails."""
     wsfe_returns(NOT_DELEGATED)

@@ -379,7 +379,8 @@ traslada ese permiso al certificado. De ahí que el 600 diga literalmente `Valid
   tocar una línea de código.
 - **El mail al operador describía solo el paso 2**, o sea que documentaba un trámite que no
   alcanza — la causa raíz de que esto llegara a producción. Corregido: ahora lista los dos y
-  nombra el error fácil de cometer, que es dejar el propio CUIT como Representante.
+  nombra el error fácil de cometer, que es dejar el propio CUIT como Representante. Desde el
+  2026-08-30 además linkea `/como-aceptar-delegacion`, que lo muestra con una captura por paso.
 - **Sigue sin poder automatizarse.** Igual que la aceptación, es Clave Fiscal y una página que
   ningún web service expone. Lo que cambia es que ahora el mail lo dice completo.
 
@@ -469,6 +470,12 @@ delegué" con ARCA todavía diciendo que no.
 - **Una sola vez por identidad**, colgado del primer aviso. Esa unicidad es también la del
   link que lleva adentro: hay un solo token por identidad justamente porque hay un solo mail.
 - **Termina con un link** (2026-08-29) — ver abajo.
+- **Y empieza con otro** (2026-08-30): `/como-aceptar-delegacion`, el instructivo ilustrado con
+  una captura de ARCA por paso y el botón marcado. Va antes del texto porque la pantalla de ARCA
+  es críptica y el paso 2 —la relación con el **computador**— es el que se saltea. El resumen en
+  texto sigue en el cuerpo. El detalle de las dos pantallas (`/como-delegar` para el
+  contribuyente y esta) está en *Los instructivos ilustrados de la delegación* en
+  `docs/frontend.md`.
 - **Opcional y sin default.** Es el único destinatario que no sale de una fila de `users`, y una
   instalación sin operador tiene que poder arrancar. Sin él, el aviso queda en el log — misma
   política que `send_email_best_effort`, un escalón antes.

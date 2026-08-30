@@ -41,6 +41,22 @@ def test_without_a_certificate_the_mail_falls_back_to_the_setting(sent_emails):
     assert FALLBACK_DELEGATE_TAX_ID in sent_emails[0].body
 
 
+def test_the_delegation_mail_links_the_illustrated_guide(monkeypatch, sent_emails):
+    """La pantalla de ARCA es críptica: el mail linkea `/como-delegar`, con capturas.
+
+    El link va además del texto, no en su lugar: un mail que solo dice "entrá acá" no sirve
+    si el link no carga.
+    """
+    monkeypatch.setenv("APP_BASE_URL", "https://factumov.test")
+    email_module.get_email_settings.cache_clear()
+
+    notifications.send_delegation_instructions_email("ana@cucu.com")
+
+    body = sent_emails[0].body
+    assert "https://factumov.test/como-delegar" in body
+    assert "Nueva Relación" in body
+
+
 def test_the_certificate_wins_over_the_setting(sent_emails, arca_cert):
     """Si los dos están y discrepan, vale el certificado.
 

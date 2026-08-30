@@ -11,19 +11,53 @@ dependencia agregada al scaffold.
 
 
 ## Las pantallas sin sesión
-Seis, todas fuera de `RequireAuth`: `/login`, `/registro`, `/confirmar-email`,
-`/olvide-password`, `/restablecer-password` y `/delegacion-aceptada`. Las cuatro últimas
-aterrizan un link de mail o disparan uno, y **sus paths los fija el backend**
-(`_CONFIRMATION_PATH`, `_PASSWORD_RESET_PATH`, `_REGISTER_PATH` y `_DELEGATION_ACCEPTED_PATH` de
-`notifications.py`): cambiarles el nombre acá sin cambiarlo allá deja apuntando a la nada los
-mails ya enviados.
+Ocho, todas fuera de `RequireAuth`: `/login`, `/registro`, `/confirmar-email`,
+`/olvide-password`, `/restablecer-password`, `/delegacion-aceptada`, `/como-delegar` y
+`/como-aceptar-delegacion`. Todas salvo `/login` y `/registro` aterrizan un link de mail o
+disparan uno, y **sus paths los fija el backend** (`_CONFIRMATION_PATH`,
+`_PASSWORD_RESET_PATH`, `_REGISTER_PATH`, `_DELEGATION_ACCEPTED_PATH`, `_HOW_TO_DELEGATE_PATH` y
+`_HOW_TO_ACCEPT_PATH` de `notifications.py`): cambiarles el nombre acá sin cambiarlo allá deja
+apuntando a la nada los mails ya enviados.
 
-`/delegacion-aceptada` es **la única pantalla de la app que no le habla a un usuario**: la abre
-el operador desde el mail que le pide aceptar una designación en ARCA, y le contesta si con eso
-alcanzó. Va sin sesión porque la identidad fiscal que mira no es suya y nunca podría serlo — lo
-autoriza el token del link. Pregunta sola al montar, como `ConfirmEmailPage`, y deja un botón
-para volver a preguntar: el "todavía no" es el caso normal, y quien lo recibe suele tener que
-completar un paso en ARCA y reintentar. Ver *El link del mail al operador* en `docs/arca.md`.
+`/delegacion-aceptada` es **una de las tres pantallas que no le hablan a un usuario** (las
+otras dos son los instructivos de abajo): la abre el operador desde el mail que le pide
+aceptar una designación en ARCA, y le contesta si con eso alcanzó. Va sin sesión porque la
+identidad fiscal que mira no es suya y nunca podría serlo — lo autoriza el token del link.
+Pregunta sola al montar, como `ConfirmEmailPage`, y deja un botón para volver a preguntar: el
+"todavía no" es el caso normal, y quien lo recibe suele tener que completar un paso en ARCA y
+reintentar. Ver *El link del mail al operador* en `docs/arca.md`.
+
+### Los instructivos ilustrados de la delegación (2026-08-30)
+`/como-delegar` (para el contribuyente) y `/como-aceptar-delegacion` (para el operador de
+FactuMov) son pantallas largas de solo lectura: una captura de ARCA por paso, con un círculo
+rojo numerado y una flecha sobre el botón que hay que tocar. Pedido de Miguel — «la página de
+ARCA es muy críptica». Los dos mails de delegación (`send_delegation_instructions_email` y
+`send_delegation_pending_email`) las linkean; el resumen en texto sigue en el cuerpo del mail
+por si el link no carga y para el lector de pantalla.
+
+- **El texto de cada paso vive en el `<figcaption>`, no quemado en el PNG.** El círculo y la
+  flecha sí van en la imagen —son la señal—, pero lo que explica el número se corrige sin
+  volver a rasterizar y lo lee un lector de pantalla, que del dibujo no saca nada. El `alt`
+  describe qué pantalla es y no repite el epígrafe.
+- **Las capturas las genera `frontend/scripts/annotate_delegation_guide.py`**, misma dinámica
+  que `render_icons.py`: las capturas crudas de ARCA están en `scripts/guia-delegacion/` y
+  **son la fuente**, los PNG anotados salen a `public/guia-delegacion/`. Retocar un recorte o
+  mover una flecha se hace en el script y se vuelve a correr con el venv del backend (trae
+  Pillow de arrastre con WeasyPrint).
+- **Tres de las siete figuras las comparten las dos páginas** —«Nueva Relación», la lista de
+  organismos y la de servicios se recorren igual— y comparten también el número de paso, así
+  que se generan una sola vez.
+- **El instructivo del operador tiene un paso 2 con su aviso.** Aceptar la designación no
+  alcanza (ver *Delegar tiene dos partes* en `docs/arca.md`); el paso 2 —la relación con el
+  **computador** como representante, no con el CUIT— lleva un `notice warn` que explica por
+  qué, porque es el error que el mail existe para prevenir.
+- **`GuideFigure` en `components/`** y no repetido en las dos páginas: son `<figure>` +
+  `<img>` + `<figcaption>`. Sin `loading="lazy"` —las siete pesan ~180 KB juntas y una imagen
+  lazy sin dimensiones declaradas mide 0 hasta que carga, y eso descuadra el scroll.
+- **El CUIT de FactuMov (`20182810674`) va escrito en `HowToDelegatePage`**, con un comentario
+  que apunta a `ArcaSettings.arca_delegate_tax_id` del backend, que es quien lo nombra de
+  verdad en el mail leyéndolo del certificado. La SPA no tiene por dónde preguntarlo y el
+  número es "un hecho del proyecto" (ver *El CUIT de FactuMov* en `docs/arca.md`).
 
 ## Sesión
 - **No se guarda nada del lado del cliente.** La cookie es `httpOnly`, así que el JS no la

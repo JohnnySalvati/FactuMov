@@ -25,6 +25,12 @@ _REGISTER_PATH = "/registro"
 # La única pantalla de la app que no es para un usuario: donde aterriza el operador cuando dice
 # que ya aceptó la designación en ARCA.
 _DELEGATION_ACCEPTED_PATH = "/delegacion-aceptada"
+# Los instructivos ilustrados que acompañan a los dos mails de delegación. No piden token ni
+# sesión —son capturas de ARCA con los pasos numerados— y existen porque la página de ARCA es
+# críptica y el texto solo no alcanza. El primero es para el contribuyente, el segundo para el
+# operador de FactuMov. Sus nombres los reflejan las rutas de `App.tsx`.
+_HOW_TO_DELEGATE_PATH = "/como-delegar"
+_HOW_TO_ACCEPT_PATH = "/como-aceptar-delegacion"
 
 # Cuál de los dos transportes usa cada mail — la decisión está explicada en `email.py`. En
 # una línea: el mail que **es** el producto del request usa `send_email`, que levanta si no
@@ -229,6 +235,11 @@ def send_delegation_instructions_email(to: str) -> None:
     Best effort: sale después de que la confirmación ya quedó guardada. Fallar el request
     por este mail mandaría al usuario a reintentar con un token que ya se consumió, o sea a
     un 400 sobre una cuenta que en realidad quedó confirmada.
+
+    **Linkea el instructivo ilustrado** (`_HOW_TO_DELEGATE_PATH`, la pantalla
+    `/como-delegar`): la página de ARCA es críptica y los pasos en texto no alcanzan.
+    Igual van en el cuerpo, porque un mail que solo dice "entrá a este link" no sirve si el
+    link no carga y no lo lee bien un lector de pantalla.
     """
     email.send_email_best_effort(
         to=to,
@@ -236,17 +247,21 @@ def send_delegation_instructions_email(to: str) -> None:
         body=(
             "Hola,\n\n"
             "Tu cuenta ya está confirmada. Para que FactuMov pueda emitir facturas a "
-            "nombre de tu CUIT, ARCA necesita que se lo autorices vos. Es un trámite "
-            "online y se hace una sola vez por CUIT:\n\n"
-            "1. Entrá a arca.gob.ar con tu Clave Fiscal.\n"
-            "2. Abrí 'Administrador de Relaciones de Clave Fiscal'.\n"
-            "3. Elegí 'Nueva Relación' y buscá el servicio de Facturación Electrónica "
-            "(WSFE).\n"
+            "nombre de tu CUIT, ARCA necesita que lo autorices vos. Es un trámite online, "
+            "gratis, y se hace una sola vez por CUIT.\n\n"
+            "Te lo mostramos paso a paso, con una captura de cada pantalla:\n\n"
+            f"{_url(_HOW_TO_DELEGATE_PATH)}\n\n"
+            "En resumen:\n\n"
+            "1. Entrá a arca.gob.ar con tu Clave Fiscal y abrí 'Administrador de "
+            "Relaciones'.\n"
+            "2. Elegí 'Nueva Relación'. En 'Representado' dejá tu propio nombre.\n"
+            "3. En 'Servicio' buscá, dentro de ARCA -> WebServices, 'Facturación "
+            "Electrónica'.\n"
             f"4. Como representante, indicá el CUIT {arca.get_delegate_tax_id()} "
-            "(FactuMov).\n"
-            "5. Confirmá.\n\n"
-            "Después cargá tu CUIT en FactuMov: verificamos la autorización solos, no hace "
-            "falta que nos avises.\n"
+            "(FactuMov), y confirmá.\n\n"
+            "Después cargá tu CUIT en FactuMov, en 'Identidades fiscales': verificamos la "
+            "autorización solos y te avisamos por mail cuando puedas emitir. No hace falta "
+            "que nos escribas.\n"
         ),
     )
 
@@ -273,6 +288,9 @@ def send_delegation_pending_email(
     servicio, con el **computador** como representante— y hay que hacerlo por cada CUIT. Sin
     eso, una designación perfectamente aceptada sigue contestando el código 600, que es
     indistinguible de no haber hecho nada. Ver *Delegar tiene dos partes* en `docs/arca.md`.
+    Los dos pasos van también ilustrados en `/como-aceptar-delegacion` (`_HOW_TO_ACCEPT_PATH`),
+    que el cuerpo linkea antes del texto — la pantalla de ARCA es críptica y una captura con
+    el botón marcado es lo que evita el error de dejar el propio CUIT como Representante.
 
     **Termina con un link, agregado el 2026-08-29.** Los dos pasos se hacen en ARCA, que no le
     cuenta nada a nadie: hasta ahora el operador los terminaba y no tenía forma de saber si
@@ -309,8 +327,10 @@ def send_delegation_pending_email(
             f"{user_email} cargó la identidad fiscal «{identity_name}» (CUIT {tax_id}) "
             "y dice que ya nos designó como representante en ARCA. WSFE todavía no nos "
             "habilita, así que faltan DOS pasos, no uno.\n\n"
-            "Entrá a arca.gob.ar con la Clave Fiscal de FactuMov y abrí el "
-            "'Administrador de Relaciones de Clave Fiscal'.\n\n"
+            "Están los dos ilustrados, con una captura de cada pantalla de ARCA, acá:\n\n"
+            f"{_url(_HOW_TO_ACCEPT_PATH)}\n\n"
+            "En texto, para tenerlo a mano: entrá a arca.gob.ar con la Clave Fiscal de "
+            "FactuMov y abrí el 'Administrador de Relaciones de Clave Fiscal'.\n\n"
             "PASO 1 - Aceptar la designación\n"
             "  a. Entrá en 'Aceptación de Designación'.\n"
             f"  b. Aceptá la fila del representado {tax_id}, servicio Facturación "

@@ -1309,3 +1309,77 @@ button.mic.wide {
   color: var(--accent);
   border: 1px solid var(--border);
 }
+
+/* --- Instructivos ilustrados de la delegación en ARCA ------------------------------- */
+/*
+ * `/como-delegar` (contribuyente) y `/como-aceptar-delegacion` (operador): pantallas sin
+ * sesión, largas, con una captura de ARCA por paso. Los linkean los dos mails de delegación
+ * porque «la página de ARCA es muy críptica» y el texto solo no alcanza.
+ *
+ * Más anchas que el `.centered` de 380px de los formularios —una captura de un formulario de
+ * escritorio no entra ahí—, pero con tope: una línea de texto a 900px se lee mal. El círculo
+ * numerado y la flecha están en el PNG (ver `scripts/annotate_delegation_guide.py`); acá solo
+ * se maqueta el texto alrededor.
+ */
+.guide {
+  max-width: 760px;
+  margin: 1.25rem auto 0;
+  padding: 0 1rem;
+}
+
+.guide-intro {
+  color: var(--muted);
+  margin: 0 0 1.5rem;
+}
+
+/* El "Paso 1 / Paso 2" del instructivo del operador. La línea de arriba lo separa del bloque
+   anterior sin encabezar una sección nueva de página. */
+.guide h2 {
+  margin: 1.75rem 0 0.75rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.guide-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 1.75rem;
+}
+
+.guide-step p {
+  margin: 0 0 0.6rem;
+}
+
+/* El número del paso lo escribimos nosotros —no sale de un `<ol>`— para que sea exactamente
+   el del círculo rojo de la captura: algunas figuras marcan dos clics ("3–4"), así que la
+   numeración de la lista y la de los círculos se irían de sincronía. Es lo que ata el texto
+   a la imagen, así que pesa y va en el color de acento. */
+.guide-step p > strong:first-child {
+  color: var(--accent);
+  margin-right: 0.15rem;
+}
+
+.guide-figure {
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.guide-figure img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-bottom: 1px solid var(--border);
+}
+
+.guide-figure figcaption {
+  padding: 0.6rem 0.8rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.guide .notice {
+  margin-top: 1.75rem;
+}
