@@ -2,14 +2,35 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router'
 
 import { BrandMark } from './BrandMark'
 import { useAuth } from '../auth/useAuth'
-import { useSwipeNav } from '../hooks/useSwipeNav'
+import { useSwipeNav, type SwipeSection } from '../hooks/useSwipeNav'
+import { UnsavedChangesGuard } from '../unsaved/UnsavedChangesGuard'
 
 /**
  * Las cuatro secciones, **en el orden en que están en la barra de arriba**, que es el orden en
  * el que las recorre el gesto de deslizar. Si se agrega una pestaña hay que sumarla en los dos
  * lados: acá y en el `<nav>` de más abajo, que están en este mismo archivo justamente por eso.
+ *
+ * `owns` es lo que hace que el gesto también funcione **adentro** de una sección: parado en
+ * `/clientes/abc` deslizar te lleva a Identidades o al borde, igual que si estuvieras en la
+ * grilla. Las pantallas de alta (`/clientes/nuevo`, `/identidades/nueva`, `/modelos/nuevo`)
+ * quedan afuera a propósito: navegan solas al terminar y no tienen guard de cambios, así que
+ * deslizar ahí seguiría perdiendo lo tipeado sin preguntar.
  */
-const SECTION_PATHS = ['/', '/facturas', '/identidades', '/clientes']
+const SECTIONS: readonly SwipeSection[] = [
+  {
+    to: '/',
+    owns: (p) => p === '/' || (p.startsWith('/modelos/') && p !== '/modelos/nuevo'),
+  },
+  { to: '/facturas', owns: (p) => p === '/facturas' || p.startsWith('/facturas/') },
+  {
+    to: '/identidades',
+    owns: (p) => p === '/identidades' || (p.startsWith('/identidades/') && p !== '/identidades/nueva'),
+  },
+  {
+    to: '/clientes',
+    owns: (p) => p === '/clientes' || (p.startsWith('/clientes/') && p !== '/clientes/nuevo'),
+  },
+]
 
 /** El marco de las pantallas con sesión: barra arriba y `<Outlet />` para la ruta activa. */
 export function AppLayout() {
@@ -27,7 +48,7 @@ export function AppLayout() {
   // `end` la raíz haría match con todas las rutas y la pestaña quedaría prendida siempre.
   const inTemplates = pathname === '/' || pathname.startsWith('/modelos')
 
-  const { swipeProps, enterKey, enterClass } = useSwipeNav(SECTION_PATHS)
+  const { swipeProps, enterKey, enterClass } = useSwipeNav(SECTIONS)
 
   return (
     <>
@@ -80,6 +101,9 @@ export function AppLayout() {
       <div className={`app-main ${enterClass}`} key={enterKey} {...swipeProps}>
         <Outlet />
       </div>
+      {/* El cartel de "cambios sin guardar": una sola instancia para toda la app, porque
+          `useBlocker` admite un solo bloqueo a la vez. */}
+      <UnsavedChangesGuard />
     </>
   )
 }

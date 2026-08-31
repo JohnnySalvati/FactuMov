@@ -1096,6 +1096,34 @@ button.mic.wide {
   font-size: 0.9rem;
 }
 
+/* --- Cartel de cambios sin guardar -------------------------------------------------- */
+/* Reusa `.sheet-backdrop` para el fondo oscuro y el mismo posicionamiento —abajo en el
+   celular, centrado en ancho—. El cuadro es más chico que una hoja de selección: tres
+   botones y una línea de texto, no una lista que scrollea. */
+.dialog {
+  background: var(--surface);
+  width: 100%;
+  max-width: 400px;
+  border-radius: var(--radius) var(--radius) 0 0;
+  padding: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.dialog h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.dialog p {
+  margin: 0 0 0.2rem;
+}
+
+.dialog .link {
+  align-self: center;
+}
+
 /* --- Detalle del modelo -------------------------------------------------------------- */
 
 .line {
@@ -1184,6 +1212,10 @@ button.mic.wide {
   .sheet {
     max-width: 420px;
     max-height: 70vh;
+    border-radius: var(--radius);
+  }
+
+  .dialog {
     border-radius: var(--radius);
   }
 

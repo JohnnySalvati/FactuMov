@@ -291,9 +291,19 @@ que es el único lugar por el que pasan las cuatro pantallas.
   navegador manda igual el `click`. Se corta con un `onClickCapture` en el contenedor —captura,
   así baja antes de llegar al `onClick` de la tarjeta—, que es exactamente lo que ya hacía
   `useLongPress` para su propio caso.
-- **El gesto no hace nada fuera de las cuatro grillas.** Adentro de un modelo, de un cliente o
-  de la pantalla de emitir hay formularios a medio llenar, y salirse de uno con un dedo mal
-  apoyado pierde lo escrito. Se resuelve solo: `paths.indexOf(pathname)` da -1 y no hay a dónde ir.
+- **El gesto funciona también adentro de una sección** (2026-08-31). Parado en el detalle de un
+  cliente o de un modelo, deslizar lleva a la sección de al lado como si estuvieras en la grilla.
+  Cada sección declara qué rutas le pertenecen (`SwipeSection.owns` en `AppLayout`); antes el
+  gesto se rendía con `paths.indexOf(pathname) === -1`, para no salirse de un formulario a medio
+  llenar con un dedo mal apoyado. Eso ahora lo cubre el guard de *Salir de un formulario con
+  cambios sin guardar* de más abajo: si hay ediciones pendientes, el gesto navega igual y el
+  guard lo intercepta y pregunta. Las pantallas de alta (`/clientes/nuevo`, `/identidades/nueva`,
+  `/modelos/nuevo`) quedan afuera del `owns`: no tienen guard y navegan solas al terminar, así
+  que ahí deslizar seguiría perdiendo lo tipeado.
+- **Con un formulario sucio, el swipe navega sin animar.** `setEnter` remonta el contenedor de
+  `<Outlet />` por el `key`, y remontarlo se lleva puesto el estado del formulario que el usuario
+  todavía está por decidir si guarda. Así que cuando hay cambios pendientes se llama `navigate`
+  pelado y el guard hace el resto.
 - **Sin vuelta al principio.** Desde Clientes, seguir deslizando no hace nada. Con `wrap`, un
   swipe de más te manda al otro extremo de la app y el borde deja de sentirse como un borde —
   que es lo mismo que decidieron las pestañas de Android.
@@ -310,6 +320,55 @@ que es el único lugar por el que pasan las cuatro pantallas.
 la primera porque el navegador de escritorio no compite por el puntero, la segunda porque con un
 mouse el gesto sale siempre rápido. Es el ejemplo de por qué un gesto táctil no se da por
 terminado hasta tocarlo con un dedo.
+
+## Salir de un formulario con cambios sin guardar (2026-08-31)
+Editar un cliente o una identidad fiscal e irse de la pantalla —por un link, el botón "atrás", o
+el gesto de deslizar— **frena y pregunta**: *Guardar y salir*, *Salir sin guardar*, o *Seguir
+editando*. Pedido de Miguel, junto con que el botón de guardar aparezca solo cuando hay algo que
+guardar.
+
+Vive en `src/unsaved/`: el contexto (`context.ts`), el provider que envuelve al router en
+`App.tsx`, los hooks (`hooks.ts`) y el cartel (`UnsavedChangesGuard.tsx`, montado una sola vez en
+`AppLayout`). Cada pantalla de formulario llama `useRegisterUnsavedChanges(dirty, save)`; el
+guard hace el resto con `useBlocker`.
+
+- **Hubo que pasar a `createBrowserRouter`.** `useBlocker` solo existe con un router *de datos*;
+  el `<BrowserRouter><Routes>` declarativo lo tira en runtime. La migración es mecánica —las
+  rutas siguen siendo el mismo JSX vía `createRoutesFromElements`, no hay loaders ni actions, los
+  datos siguen saliendo de `useResource`—. El precio es ~16 KB gzip de react-router que antes no
+  entraban. Revisar si aparece algo más liviano.
+- **El botón "Guardar cambios" aparece solo si `dirty`, y solo en la edición.** Un formulario
+  abierto y no tocado no tiene nada que guardar, y ofrecerlo igual le pregunta al usuario si
+  quiere guardar unos cambios que no hizo. Es la misma decisión que ya tenía el editor de
+  modelos (`canSubmit`). En el alta el botón aparece siempre: todo lo que cargaste es "algo para
+  guardar". Va con un guard en el `onSubmit` además del botón ausente, porque un `<form>` se
+  envía igual con Enter.
+- **`dirty` se calcula sobre el payload normalizado**, no campo por campo. Se arma el mismo
+  objeto que se manda al backend —minúsculas en el mail, dígitos en el CUIT, CC limpio— y se lo
+  compara contra el que sale de la fila guardada. Así deshacer un cambio a mano vuelve a dar
+  `false`, y —clave— un mail que el servidor devuelve en minúsculas no queda marcado como cambio
+  después de guardar. Es el mismo problema que `TemplatePage` resuelve con `savedForm`.
+- **`save` rechaza si no se pudo guardar.** El guard lo espera: "Guardar y salir" solo navega si
+  la promesa resuelve. Si el backend contesta 409 —CUIT duplicado— el detalle queda a la vista
+  *dentro* del cartel, no tapado detrás de él. Las pantallas mantienen su `onSubmit` con
+  `.catch(() => {})` para el botón, que muestra el error en la pantalla como siempre.
+- **El alta no llega al guard.** Navega sola al terminar (`onCreated` → grilla), y meterla en el
+  flujo del blocker chocaba dos navegaciones. El alta queda cubierta por lo de siempre: si te vas
+  con la mitad cargada, se pierde — igual que antes de esta unidad. La pantalla de emisión
+  tampoco se registra: las cuatro fechas se recalculan al volver, no son "cambios para guardar"
+  (decidido con Miguel).
+- **El cartel no es un `window.confirm`.** Mismo criterio que la pantalla de emisión y el borrado
+  de tarjetas: bloquea el hilo, no se puede estilar, y en algunos navegadores queda suprimido si
+  el usuario marcó "no mostrar más". Reusa `.sheet-backdrop` para el fondo y el posicionamiento
+  —abajo en el celular, centrado en ancho— con un `.dialog` más chico que una hoja de selección.
+- **El estado transitorio del cartel ("guardando", el error) vive en un hijo con `key` en el
+  intento de navegación.** Así arranca limpio en cada bloqueo sin un efecto que lo resetee —el
+  linter marca `setState` sincrónico adentro de un efecto, y tenía razón otra vez.
+
+**Probado en el navegador el 2026-08-31**: botón que aparece/desaparece con `dirty`, cartel en
+los tres botones, en links de pestaña y en el botón "atrás", y que "Salir sin guardar" no
+persiste. El gesto de deslizar con formulario sucio no se pudo simular —necesita eventos de
+`pointerType: 'touch'`— pero llama al mismo `navigate` que la pestaña, que sí se verificó.
 
 ## El PDF que llega de la nube (2026-08-26)
 Importar una factura elegida **desde Google Drive** en el selector de Android fallaba con «No se

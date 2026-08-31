@@ -12,6 +12,7 @@ import {
   type FiscalIdentityLookup,
 } from '../api/types'
 import { Notice } from '../components/Notice'
+import { useRegisterUnsavedChanges } from '../unsaved/hooks'
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString('es-AR', {
@@ -268,20 +269,38 @@ function FiscalIdentityForm({
   const [saved, setSaved] = useState(false)
   const [busy, setBusy] = useState(false)
 
-  async function onSubmit(event: FormEvent) {
-    event.preventDefault()
-    if (busy || condicionIva === null) return
+  const body = {
+    name: name.trim(),
+    tax_id: digitsOf(taxId),
+    condicion_iva: condicionIva,
+    // Cadena vacía y "sin dato" no son lo mismo para una columna que admite NULL: mandar
+    // `""` guardaría un domicilio vacío en vez de ninguno.
+    address: address.trim() || null,
+  }
+
+  // ¿Hay algo distinto de lo guardado? Solo en la edición: en el alta no hay contra qué
+  // comparar y "Crear la identidad fiscal" aparece igual. Se compara el payload ya
+  // normalizado, así deshacer un cambio a mano —o guardar— vuelve a dar `false`.
+  const savedBody = editing
+    ? {
+        name: editing.name.trim(),
+        tax_id: editing.tax_id,
+        condicion_iva: editing.condicion_iva as CondicionIva | null,
+        address: (editing.address ?? '').trim() || null,
+      }
+    : null
+  const dirty = savedBody !== null && JSON.stringify(body) !== JSON.stringify(savedBody)
+
+  /** Guarda y **rechaza si no se pudo**: el guard de navegación lo necesita para no dejar
+   *  salir con cambios que no entraron. La edición se queda en la pantalla; el alta navega. */
+  async function persist() {
+    if (condicionIva === null) {
+      setError('Elegí la condición frente al IVA antes de guardar.')
+      throw new Error('falta condicion_iva')
+    }
     setBusy(true)
     setError(undefined)
     setSaved(false)
-    const body = {
-      name,
-      tax_id: digitsOf(taxId),
-      condicion_iva: condicionIva,
-      // Cadena vacía y "sin dato" no son lo mismo para una columna que admite NULL: mandar
-      // `""` guardaría un domicilio vacío en vez de ninguno.
-      address: address.trim() || null,
-    }
     try {
       if (editing) {
         onUpdated(await api.patch<FiscalIdentity>(`/fiscal-identities/${editing.id}`, body))
@@ -294,9 +313,25 @@ function FiscalIdentityForm({
       }
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.detail : 'No se pudo guardar.')
+      throw caught
     } finally {
       setBusy(false)
     }
+  }
+
+  // Solo la edición registra el guard; el alta navega sola y `/identidades/nueva` queda afuera
+  // del gesto de deslizar.
+  useRegisterUnsavedChanges(dirty, persist)
+
+  function onSubmit(event: FormEvent) {
+    event.preventDefault()
+    if (busy) return
+    // El guard además del botón que no está: un `<form>` se envía igual con Enter en un campo,
+    // y ese PATCH sin cambios dejaría "Guardado." sobre un guardado que no ocurrió.
+    if (editing && !dirty) return
+    void persist().catch(() => {
+      // El error ya quedó en pantalla; el `catch` es solo para no dejar una promesa colgada.
+    })
   }
 
   /**
@@ -420,9 +455,13 @@ function FiscalIdentityForm({
       <Notice kind="error">{error}</Notice>
       {saved && <Notice kind="ok">Guardado.</Notice>}
 
-      <button type="submit" disabled={busy}>
-        {busy ? 'Guardando…' : editing ? 'Guardar cambios' : 'Crear la identidad fiscal'}
-      </button>
+      {/* En la edición aparece recién cuando hay algo que guardar — misma decisión que el
+          editor de modelos. En el alta aparece siempre. */}
+      {(!editing || dirty) && (
+        <button type="submit" disabled={busy}>
+          {busy ? 'Guardando…' : editing ? 'Guardar cambios' : 'Crear la identidad fiscal'}
+        </button>
+      )}
     </form>
   )
 }

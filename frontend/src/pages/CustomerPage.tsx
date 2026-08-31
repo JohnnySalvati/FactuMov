@@ -12,6 +12,51 @@ import {
   type TaxpayerLookup,
 } from '../api/types'
 import { Notice } from '../components/Notice'
+import { useRegisterUnsavedChanges } from '../unsaved/hooks'
+
+/**
+ * Los campos tal como viajan al backend, ya normalizados. Es lo que se manda al guardar y —el
+ * mismo objeto— lo que se compara contra el cliente guardado para saber si hay cambios: así un
+ * "Foo@X.com " que el servidor devuelve como "foo@x.com" no queda marcado como cambio después
+ * de guardar.
+ */
+function toBody(fields: {
+  docType: DocType
+  docNumber: string
+  name: string
+  condicionIva: CondicionIva
+  address: string
+  email: string
+  ccEmails: string[]
+}) {
+  return {
+    name: fields.name.trim(),
+    condicion_iva: fields.condicionIva,
+    doc_type: fields.docType,
+    doc_number: fields.docNumber.replace(/\D/g, ''),
+    address: fields.address.trim() || null,
+    email: fields.email.trim().toLowerCase() || null,
+    cc_emails: cleanCcEmails(fields.ccEmails, fields.email),
+  }
+}
+
+/** Minúsculas, sin espacios, sin vacíos, sin repetir y sin el destinatario principal — la
+ *  misma limpieza que hace el backend, replicada acá para que la detección de cambios no vea
+ *  un cambio donde el servidor no guardó ninguno. */
+function cleanCcEmails(list: readonly string[], primary: string): string[] {
+  const seen = new Set<string>()
+  const main = primary.trim().toLowerCase()
+  if (main) seen.add(main)
+  const out: string[] = []
+  for (const raw of list) {
+    const address = raw.trim().toLowerCase()
+    if (address && !seen.has(address)) {
+      seen.add(address)
+      out.push(address)
+    }
+  }
+  return out
+}
 
 /**
  * Un cliente: `/clientes/nuevo` para el alta y `/clientes/:id` para la edición.
@@ -138,22 +183,30 @@ function CustomerForm({
     }
   }
 
-  async function onSubmit(event: FormEvent) {
-    event.preventDefault()
+  const body = toBody({ docType, docNumber, name, condicionIva, address, email, ccEmails })
+
+  // ¿Hay algo distinto de lo guardado? Solo tiene sentido en la edición: en el alta no hay
+  // contra qué comparar, y el botón "Crear el cliente" aparece igual. Se compara el payload
+  // ya normalizado, así deshacer un cambio a mano —o guardar— vuelve a dar `false`.
+  const savedBody = editing
+    ? toBody({
+        docType: editing.doc_type,
+        docNumber: editing.doc_number,
+        name: editing.name,
+        condicionIva: editing.condicion_iva,
+        address: editing.address ?? '',
+        email: editing.email ?? '',
+        ccEmails: editing.cc_emails,
+      })
+    : null
+  const dirty = savedBody !== null && JSON.stringify(body) !== JSON.stringify(savedBody)
+
+  /** Guarda y **rechaza si no se pudo**: el guard de navegación lo necesita para no dejar
+   *  salir con cambios que no entraron. La edición se queda en la pantalla; el alta navega. */
+  async function persist() {
     setBusy(true)
     setError(undefined)
     setSaved(false)
-    const body = {
-      name,
-      condicion_iva: condicionIva,
-      doc_type: docType,
-      doc_number: docNumber.replace(/\D/g, ''),
-      address: address.trim() || null,
-      email: email.trim() || null,
-      // El backend vuelve a limpiar (minúsculas, repetidos, el propio destinatario): acá solo
-      // se sacan los renglones que quedaron vacíos para no mandarle una dirección en blanco.
-      cc_emails: ccEmails.map((addr) => addr.trim()).filter(Boolean),
-    }
     try {
       if (editing) {
         onUpdated(await api.patch<Customer>(`/customers/${editing.id}`, body))
@@ -164,9 +217,26 @@ function CustomerForm({
       }
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.detail : 'No se pudo guardar.')
+      throw caught
     } finally {
       setBusy(false)
     }
+  }
+
+  // Solo la edición registra el guard: el alta navega sola al terminar, y `/clientes/nuevo`
+  // queda afuera del gesto de deslizar. `persist` cambia de identidad en cada tecla, pero el
+  // hook se queda con la última.
+  useRegisterUnsavedChanges(dirty, persist)
+
+  function onSubmit(event: FormEvent) {
+    event.preventDefault()
+    // El guard además del botón que no está: sin botón de submit, un `<form>` se envía igual
+    // apretando Enter en un campo, y ese PATCH sin cambios dejaría "Guardado." sobre un
+    // guardado que no ocurrió.
+    if (editing && !dirty) return
+    void persist().catch(() => {
+      // El error ya quedó en pantalla; el `catch` es solo para no dejar una promesa colgada.
+    })
   }
 
   const canLookup = isCuit(docType, docNumber.replace(/\D/g, ''))
@@ -338,9 +408,16 @@ function CustomerForm({
       <Notice kind="error">{error}</Notice>
       {saved && <Notice kind="ok">Guardado.</Notice>}
 
-      <button type="submit" disabled={busy}>
-        {busy ? 'Guardando…' : editing ? 'Guardar cambios' : 'Crear el cliente'}
-      </button>
+      {/* En la edición el botón aparece recién cuando hay algo que guardar: un formulario
+          abierto y no tocado no tiene nada que guardar, y ofrecerlo igual le pregunta al
+          usuario si quiere guardar unos cambios que no hizo. Es la misma decisión que el
+          editor de modelos. En el alta aparece siempre — todo lo que cargaste es "algo para
+          guardar". */}
+      {(!editing || dirty) && (
+        <button type="submit" disabled={busy}>
+          {busy ? 'Guardando…' : editing ? 'Guardar cambios' : 'Crear el cliente'}
+        </button>
+      )}
     </form>
   )
 }

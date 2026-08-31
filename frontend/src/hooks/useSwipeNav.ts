@@ -1,6 +1,14 @@
 import { useRef, useState, type MouseEvent, type PointerEvent } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 
+import { useUnsavedChanges } from '../unsaved/hooks'
+
+/** Una sección de la barra: a dónde va y qué rutas cuentan como "estar en ella". */
+export interface SwipeSection {
+  to: string
+  owns: (pathname: string) => boolean
+}
+
 /** Cuánto tiene que recorrer el dedo. En una pantalla de 360 px son unos 17 %: lejos de un
  *  toque mal apoyado, y cerca de la mitad de lo que se necesita para pasar de página en un
  *  lector, que es el gesto con el que se lo compara. */
@@ -23,7 +31,7 @@ const RATIO = 1.5
 type Direction = 'forward' | 'back'
 
 /**
- * Cambiar de sección deslizando el dedo, entre las rutas de `paths` y en ese orden.
+ * Cambiar de sección deslizando el dedo, entre las `sections` y en ese orden.
  *
  * **Solo con el dedo** (`pointerType === 'touch'`). Con un mouse, arrastrar sobre la página es
  * seleccionar texto, y en una pantalla grande las pestañas están siempre a la vista: el gesto
@@ -37,12 +45,20 @@ type Direction = 'forward' | 'back'
  * `wrap`, un swipe de más te manda al otro extremo de la app y el borde deja de sentirse como
  * un borde. Es lo mismo que hacen las pestañas de Android.
  *
+ * **Funciona también adentro de una sección** —parado en el detalle de un cliente o de un
+ * modelo— porque cada sección declara qué rutas le pertenecen (`owns`). Antes el gesto no
+ * hacía nada fuera de las cuatro grillas, para no salirse de un formulario a medio llenar con
+ * un dedo mal apoyado; ahora eso lo cubre el guard de cambios sin guardar: si el formulario
+ * abierto tiene ediciones pendientes, el gesto navega igual y el guard lo intercepta y
+ * pregunta. Sin cambios, sale directo.
+ *
  * Devuelve los handlers para desparramar sobre el contenedor, y el par `key`/`className` con
  * el que ese contenedor anima la entrada de la pantalla nueva.
  */
-export function useSwipeNav(paths: readonly string[]) {
+export function useSwipeNav(sections: readonly SwipeSection[]) {
   const navigate = useNavigate()
   const { pathname } = useLocation()
+  const { entry } = useUnsavedChanges()
 
   // Refs y no estado: solo se leen desde los handlers, y ninguna tiene que provocar un render.
   const start = useRef<{ x: number; y: number } | undefined>(undefined)
@@ -54,18 +70,28 @@ export function useSwipeNav(paths: readonly string[]) {
   const [enter, setEnter] = useState<{ dir: Direction; nonce: number }>()
 
   function go(step: 1 | -1) {
-    const index = paths.indexOf(pathname)
-    // -1 es una ruta que no es una sección: un modelo abierto, el editor de un cliente, la
-    // pantalla de emitir. Ahí el gesto no hace nada a propósito — son pantallas con formularios
-    // a medio llenar, y salirse de una con un dedo mal apoyado pierde lo escrito.
+    const index = sections.findIndex((section) => section.owns(pathname))
+    // -1 es una ruta sin sección: los ajustes, o el alta de un cliente/identidad/modelo, que
+    // navegan solas al terminar y quedan afuera del gesto a propósito.
     if (index === -1) return false
-    const next = paths[index + step]
+    const next = sections[index + step]
     if (next === undefined) return false
+
+    if (entry?.dirty) {
+      // Hay un formulario con cambios sin guardar. Se navega igual —el guard de `AppLayout` lo
+      // intercepta y pregunta— pero **sin** la animación: si el guard bloquea, el contenedor
+      // se remonta con la clase de entrada y deja la pantalla a medio deslizar; y remontarlo
+      // se lleva puesto el estado del formulario que el usuario todavía está por decidir si
+      // guarda.
+      navigate(next.to)
+      return true
+    }
+
     setEnter((current) => ({
       dir: step === 1 ? 'forward' : 'back',
       nonce: (current?.nonce ?? 0) + 1,
     }))
-    navigate(next)
+    navigate(next.to)
     return true
   }
 

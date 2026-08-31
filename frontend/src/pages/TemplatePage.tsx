@@ -13,6 +13,7 @@ import {
   type TemplateForm,
 } from '../forms/templateForm'
 import { useResource } from '../hooks/useResource'
+import { useRegisterUnsavedChanges } from '../unsaved/hooks'
 
 export function TemplatePage() {
   const { id } = useParams()
@@ -89,13 +90,18 @@ function TemplateScreen({ id }: { id: string }) {
   const [error, setError] = useState<string>()
   const [saved, setSaved] = useState(false)
 
+  /**
+   * Guarda el modelo y **rechaza si no se pudo** —validación o error del servidor—: el guard
+   * de navegación lo llama al salir con cambios, y necesita saber si entraron para no dejar
+   * navegar sobre lo que se perdería.
+   */
   async function save() {
     if (form === undefined) return
     const problem = validate(form)
     if (problem !== undefined) {
       setError(problem)
       setSaved(false)
-      return
+      throw new Error(problem)
     }
     setBusy(true)
     setError(undefined)
@@ -109,6 +115,7 @@ function TemplateScreen({ id }: { id: string }) {
       setSaved(true)
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.detail : 'No se pudo guardar.')
+      throw caught
     } finally {
       setBusy(false)
     }
@@ -128,6 +135,11 @@ function TemplateScreen({ id }: { id: string }) {
    */
   const dirty =
     form !== undefined && savedForm !== undefined && JSON.stringify(form) !== JSON.stringify(savedForm)
+
+  // Salir del modelo con cambios sin guardar pide confirmar —links, botón "atrás" y el gesto
+  // de deslizar—. `save` rechaza si no entró, así que "Guardar y salir" no navega sobre un
+  // error. `discard` de abajo sigue siendo la salida deliberada; esto es para la accidental.
+  useRegisterUnsavedChanges(dirty, save)
 
   function discard() {
     setForm(savedForm)
@@ -160,7 +172,9 @@ function TemplateScreen({ id }: { id: string }) {
           }}
           fiscalIdentities={identities.data ?? []}
           customers={customers.data ?? []}
-          onSubmit={save}
+          // El `catch` vacío: `save` ahora rechaza para el guard, y sin esto el submit del
+          // formulario dejaría una promesa colgada. El error ya se muestra en la pantalla.
+          onSubmit={() => void save().catch(() => {})}
           submitLabel="Guardar cambios"
           // Sin cambios no hay nada que guardar, y el botón no aparece. Es la misma decisión
           // que la de más abajo con "Emitir": la pantalla ofrece la acción que corresponde al
