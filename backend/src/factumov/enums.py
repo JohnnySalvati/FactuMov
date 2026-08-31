@@ -142,6 +142,50 @@ class CondicionIva(Enum):
     MONOTRIBUTO = 6
 
 
+class SubscriptionStatus(Enum):
+    """En qué anda la relación comercial con el usuario.
+
+    **No hay miembro `FREE`, y esa ausencia es la decisión de diseño de la tabla.** Free no es
+    un estado de la suscripción: es lo que queda cuando ninguno de estos cuatro está vigente.
+    Guardarlo como un quinto miembro haría que el plan efectivo estuviera escrito en dos
+    lugares —el estado y la fecha de vencimiento— capaces de contradecirse, que es el mismo
+    problema por el que `voucher_type` dejó de ser columna en `invoice_templates`. Acá se
+    deduce: ver `services/subscription.py`.
+
+    `PAST_DUE` no corta el acceso. Es el estado en el que queda una suscripción cuyo cobro
+    falló, y durante la gracia el usuario sigue siendo Pro: las tarjetas se vencen y se
+    reemiten todo el tiempo, y cortar al primer rechazo pierde clientes que sí querían pagar.
+
+    `CANCELED` tampoco corta el acceso por sí solo. El que da de baja el 3 y tenía pagado
+    hasta el 28 sigue siendo Pro hasta el 28: ya lo pagó. Lo que `CANCELED` significa es que
+    no se va a renovar.
+    """
+
+    TRIALING = "trialing"
+    ACTIVE = "active"
+    PAST_DUE = "past_due"
+    CANCELED = "canceled"
+
+
+class BillingInterval(Enum):
+    """Cada cuánto se cobra. `None` en la columna es el trial, que no se cobra."""
+
+    MONTHLY = "monthly"
+    YEARLY = "yearly"
+
+
+class BillingProvider(Enum):
+    """Por dónde entró la plata.
+
+    `MANUAL` es la transferencia bancaria, que se concilia a mano y solo se ofrece para el
+    plan anual: no renueva sola, así que como cobro mensual sería un recordatorio por mes y
+    una baja por olvido. `MERCADO_PAGO` es el camino normal, con débito automático.
+    """
+
+    MERCADO_PAGO = "mercado_pago"
+    MANUAL = "manual"
+
+
 class Balance360Status(Enum):
     """En qué anda la copia de una factura emitida hacia Balance360.
 

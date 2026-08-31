@@ -8,6 +8,7 @@ from factumov.models.invoice_line import InvoiceLine
 from factumov.models.invoice_template import InvoiceTemplate
 from factumov.models.invoice_template_line import InvoiceTemplateLine
 from factumov.models.password_reset import PasswordReset
+from factumov.models.subscription import Subscription
 from factumov.models.user import User
 from factumov.models.user_session import UserSession
 
@@ -22,6 +23,7 @@ __all__ = [
     "InvoiceTemplateLine",
     "InvoiceTemplate",
     "PasswordReset",
+    "Subscription",
     "User",
     "UserSession",
 ]

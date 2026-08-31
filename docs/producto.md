@@ -108,9 +108,16 @@ escrita y a la espera de que se corra su `scp.ps1`.
      integración dependía de quien administra la VM. Mientras nadie conecte, todo lo demás de
      FactuMov anda igual y las facturas salen con el estado en `null`, que es "no entró al
      circuito".
-4. **Segundo layout del parser** — ver *Parser → Pendiente: un segundo layout*. No bloquea
+4. **Monetización** — **empezada el 2026-08-31.** Free y Pro, con el Free cortado por volumen
+   (5 comprobantes por mes, 1 identidad fiscal) y 30 días de Pro de regalo al registrarse.
+   Hecho: la tabla `subscriptions`, la política en `services/subscription.py`, los dos gates
+   con su 402 y `GET /subscription`. Ver [`monetizacion.md`](monetizacion.md).
+   - **Falta lo que cobra**: el checkout y el webhook de Mercado Pago —hoy nada puede escribir
+     un `ACTIVE`—, el endpoint de baja, las pantallas del plan y los avisos del trial. El
+     detalle, en *Lo que falta* de ese archivo.
+5. **Segundo layout del parser** — ver *Parser → Pendiente: un segundo layout*. No bloquea
    nada: hoy el usuario puede cargar el modelo a mano.
-5. **WhatsApp**, la otra mitad de la funcionalidad #5. Sin empezar y sin decisión tomada
+6. **WhatsApp**, la otra mitad de la funcionalidad #5. Sin empezar y sin decisión tomada
    sobre qué proveedor.
 
 Y dos cosas que la emisión dejó anotadas y no son unidades todavía:

@@ -23,6 +23,7 @@ from factumov.exceptions import (
     DuplicateInvoiceNumberError,
     DuplicateInvoiceTemplateNameError,
     InvalidEmissionDateError,
+    PlanLimitReachedError,
     UnknownCustomerError,
     UnknownFiscalIdentityError,
     UnknownReferenceError,
@@ -37,6 +38,7 @@ from factumov.schemas.invoice_template import (
 )
 from factumov.schemas.invoice_template_draft import InvoiceTemplateDraft
 from factumov.services import balance360
+from factumov.services import subscription as subscription_service
 from factumov.services.emission import EmissionRequest, emission_date_bounds, emit
 from factumov.services.invoice_draft import build_draft
 from factumov.services.invoice_parser import parse_invoice_pdf
@@ -172,7 +174,9 @@ def delete_invoice_template(invoice_template: InvoiceTemplateDep, db: SessionDep
 
 
 @router.get("/{invoice_template_id}/preview", response_model=InvoicePreview)
-def preview_emission(invoice_template: InvoiceTemplateDep) -> InvoicePreview:
+def preview_emission(
+    invoice_template: InvoiceTemplateDep, db: SessionDep, user: CurrentUserDep
+) -> InvoicePreview:
     """Qué comprobante saldría si se emitiera este modelo ahora. **No emite nada.**
 
     Es el insumo de la pantalla de confirmación, y existe porque emitir es irreversible: el
@@ -197,11 +201,16 @@ def preview_emission(invoice_template: InvoiceTemplateDep) -> InvoicePreview:
             for line in invoice_template.lines
         ],
     )
-    blocked = (
-        _DELEGATION_MISSING_DETAIL
-        if invoice_template.fiscal_identity.delegation_verified_at is None
-        else None
-    )
+    # Dos motivos posibles de bloqueo y un solo campo, porque la pantalla muestra un aviso y
+    # no una lista: el que gana es el de la delegación, que es condición para que ese CUIT
+    # pueda emitir aunque el plan sobre. El del plan aparece cuando la delegación ya está —
+    # o sea cuando es lo único que falta.
+    if invoice_template.fiscal_identity.delegation_verified_at is None:
+        blocked = _DELEGATION_MISSING_DETAIL
+    elif not subscription_service.entitlements(db, user.id).can_emit:
+        blocked = subscription_service.invoice_limit_detail()
+    else:
+        blocked = None
     # La ventana de fechas sale de la misma función que después valida la emisión, para que el
     # campo de la pantalla no pueda ofrecer una fecha que el servidor rechaza.
     today = date.today()
@@ -249,6 +258,7 @@ def emit_invoice(
     que se suelte en el medio no serializa nada.
 
     Los errores que pueden llegar tienen remedios distintos y por eso status distintos:
+    **402** si el plan Free ya gastó su cupo del mes (pasarse a Pro, o esperar al 1°),
     **409** si falta la delegación (el usuario tiene que ir a ARCA), **409** si el número ya
     estaba tomado (una carrera que perdió: reintentar sirve), **422** si la fecha del
     comprobante está fuera de lo que ARCA acepta (cambiarla), y **502** si ARCA no contestó o
@@ -257,6 +267,16 @@ def emit_invoice(
     el log, que acá importa más que en ningún otro lado.
     """
     enforce_rate_limit(_EMIT_LIMITER, str(user.id))
+
+    # El cupo se chequea **antes** de mirar las fechas y mucho antes de salir a ARCA: es lo
+    # único de este endpoint que puede decir que no sin gastar cuota del certificado, que es
+    # una sola para todos los usuarios. El `preview` ya lo anunció en `blocked_reason`, así que
+    # llegar acá con el cupo lleno significa que alguien se saltó la pantalla — o que la gastó
+    # en otra pestaña mientras esta estaba abierta, que es el caso real que este chequeo ataja.
+    try:
+        subscription_service.check_can_emit(db, user.id)
+    except PlanLimitReachedError as error:
+        raise HTTPException(status_code=402, detail=str(error))
 
     if invoice_template.concepto.needs_service_dates and data.from_date is None:
         # El schema ya garantiza que las tres vengan juntas o ninguna; lo que falta chequear

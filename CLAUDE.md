@@ -28,6 +28,7 @@ que cambió es que ahora se puede encontrar.
 | La SPA: pantallas, gestos, CSS | [`docs/frontend.md`](docs/frontend.md) |
 | Conectar con Balance360 y registrar lo emitido | [`docs/balance360.md`](docs/balance360.md) |
 | Scoping por usuario y convenciones de test | [`docs/ownership-y-tests.md`](docs/ownership-y-tests.md) |
+| Planes, límites del Free, el trial y el cobro | [`docs/monetizacion.md`](docs/monetizacion.md) |
 | Ícono, paleta, la landing de InSoft | [`docs/marca.md`](docs/marca.md) |
 | Las decisiones del deploy | [`docs/produccion.md`](docs/produccion.md) |
 | **Cómo se deploya, paso a paso** | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) |
@@ -140,6 +141,7 @@ FactuMov/
 │   │       ├── invoice_totals.py   # neto, IVA y total según la letra
 │   │       ├── emission.py         # modelo → CAE de ARCA → Invoice guardada
 │   │       ├── balance360.py       # copia la factura emitida a Balance360
+│   │       ├── subscription.py     # la política comercial: quién es Pro y qué puede un Free
 │   │       ├── secrets.py          # cifra los secretos que hay que poder volver a leer
 │   │       └── invoice_pdf.py      # Invoice → QR + HTML + PDF (imprime las propias)
 │   └── tests/

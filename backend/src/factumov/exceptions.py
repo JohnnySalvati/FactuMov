@@ -82,6 +82,25 @@ class InvalidEmissionDateError(Exception):
     """
 
 
+class PlanLimitReachedError(Exception):
+    """Lo que se pidió está fuera de lo que el plan del usuario permite.
+
+    Una sola excepción para los dos límites del Free —los comprobantes del mes y la cantidad
+    de identidades fiscales— porque el router hace exactamente lo mismo con las dos: contestar
+    **402** con el texto que trae la excepción. Dos tipos distintos serían dos `except` que
+    levantan la misma respuesta, y la diferencia que importa —qué límite se chocó y qué hacer—
+    ya está en el mensaje, que es lo único que el usuario lee.
+
+    **402 y no 403.** El 403 dice "no tenés permiso", que acá es falso: el usuario tiene todo
+    el permiso del mundo sobre sus propios datos, lo que falta es el plan. El 402 existe
+    exactamente para esto y le deja al frontend distinguir "necesitás Pro" —que se resuelve
+    con una pantalla de suscripción— de cualquier otro rechazo sin tener que leer el texto.
+
+    No es un error del request y no se arregla mandando otra cosa: es un estado de la cuenta,
+    como `DelegationNotVerifiedError`. Por eso el mensaje siempre dice qué destraba el camino.
+    """
+
+
 class UnknownReferenceError(Exception):
     pass
 

@@ -35,6 +35,7 @@ from factumov.schemas.auth import (
 # `from ... import send_confirmation_email` la referencia se resuelve al importar y el test
 # terminaría parcheando una copia que nadie lee — mismo criterio que `MAX_UPLOAD_BYTES`.
 from factumov.services import notifications
+from factumov.services import subscription as subscription_service
 from factumov.services.email import EmailDeliveryError
 from factumov.services.rate_limit import RateLimiter
 from factumov.services.security import (
@@ -258,6 +259,11 @@ def register(
             # mandó el mail, así que acá no queda nada por hacer.
             db.rollback()
         else:
+            # El trial arranca acá, en la única rama en la que apareció una cuenta nueva. Es
+            # el mismo criterio que el aviso al operador de más abajo: un segundo registro
+            # sobre una dirección existente no es alguien registrándose, y no puede regalar
+            # treinta días más. Va antes del `_issue_confirmation` porque ese commitea.
+            subscription_service.start_trial(db, user.id)
             _issue_confirmation(db, user)
             # El aviso al operador, y **solo en esta rama**: es la única en la que apareció
             # una fila que no estaba. Un segundo registro sobre una dirección que ya existía

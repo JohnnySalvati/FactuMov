@@ -56,6 +56,7 @@ Emitir = tomar un `InvoiceTemplate`, permitir retoques, y crear una `Invoice` nu
 | `UserSession` | Sesión abierta: hash del token, vencimiento absoluto, revocación |
 | `EmailConfirmation` | Token de confirmación de email, de un solo uso |
 | `PasswordReset` | Token para elegir contraseña nueva, de un solo uso |
+| `Subscription` | El plan de la cuenta: estado, hasta cuándo llega lo pagado y el id del otro lado. **No guarda el plan efectivo** — se deduce; ver [`monetizacion.md`](monetizacion.md) |
 | `ArcaTicket` | Ticket de acceso de WSAA, por entorno y servicio. La única tabla sin dueño |
 
 ## Decisiones sobre `InvoiceTemplate` (2026-08-15)

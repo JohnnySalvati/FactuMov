@@ -345,8 +345,17 @@ def anonymous_client(_db_override):
 
 @pytest.fixture
 def user(db):
-    """El usuario detrás del fixture `client`: activo y con el email confirmado."""
-    return factories.make_user(db, email_confirmed_at=datetime.now(UTC))
+    """El usuario detrás del fixture `client`: activo, confirmado y con su trial corriendo.
+
+    La suscripción viene con él porque así sale de `POST /auth/register`: la app no puede
+    producir una cuenta sin plan, y un fixture que la produjera haría que la suite entera
+    corriera en un estado imposible — y en Free, o sea chocando los límites en tests que no
+    tienen nada que ver con el plan. Los que sí prueban el Free vencen el trial a mano; ver
+    el fixture `free_plan` de `test_subscription.py`.
+    """
+    user = factories.make_user(db, email_confirmed_at=datetime.now(UTC))
+    factories.make_subscription(db, user.id)
+    return user
 
 
 @pytest.fixture
@@ -373,8 +382,13 @@ def other_user(db):
 
     Activo y confirmado a propósito: si estuviera dado de baja, un test que espera 404
     podría estar pasando por el 401 de `get_current_user` y no por el scoping.
+
+    Con su propio trial, por lo mismo: si fuera Free, un test que le carga dos identidades
+    fiscales para probar el scoping fallaría con un 402 sobre un límite que no está probando.
     """
-    return factories.make_user(db, email_confirmed_at=datetime.now(UTC))
+    other = factories.make_user(db, email_confirmed_at=datetime.now(UTC))
+    factories.make_subscription(db, other.id)
+    return other
 
 
 @pytest.fixture

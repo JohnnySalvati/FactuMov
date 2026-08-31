@@ -22,6 +22,7 @@ from factumov.exceptions import (
     FiscalIdentityInUseError,
     InUseError,
     PadronError,
+    PlanLimitReachedError,
 )
 from factumov.models.fiscal_identity import FiscalIdentity
 from factumov.models.user import User
@@ -37,6 +38,7 @@ from factumov.schemas.fiscal_identity import (
     PointsOfSale,
 )
 from factumov.services import arca, notifications, padron, wsfe
+from factumov.services import subscription as subscription_service
 from factumov.services.rate_limit import RateLimiter
 from factumov.services.security import generate_opaque_token, hash_opaque_token
 from factumov.services.wsfe import DelegationCheck
@@ -143,6 +145,17 @@ def get_fiscal_identity(fiscal_identity: FiscalIdentityDep) -> FiscalIdentity:
 def create_fiscal_identity(
     data: FiscalIdentityCreate, db: SessionDep, user: CurrentUserDep
 ) -> FiscalIdentity:
+    """Alta de un emisor. **Multi-entidad es Pro** — ver `services/subscription.py`.
+
+    El chequeo va antes del insert y contesta 402: es un estado de la cuenta y no un problema
+    del body, así que ni el 409 de duplicado ni el 422 de validación lo describen. El PATCH no
+    lo lleva porque editar la identidad que ya se tiene no agrega ninguna.
+    """
+    try:
+        subscription_service.check_can_add_fiscal_identity(db, user.id)
+    except PlanLimitReachedError as error:
+        raise HTTPException(status_code=402, detail=str(error))
+
     try:
         fiscal_identity = fiscal_identity_crud.create(db, data, user.id)
     except DuplicateFiscalIdentityNameError:

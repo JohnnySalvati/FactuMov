@@ -25,7 +25,14 @@ import itertools
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from factumov.enums import Concepto, CondicionIva, DocType, IvaAliquot, VoucherType
+from factumov.enums import (
+    Concepto,
+    CondicionIva,
+    DocType,
+    IvaAliquot,
+    SubscriptionStatus,
+    VoucherType,
+)
 from factumov.models.arca_ticket import ArcaTicket
 from factumov.models.balance360_connection import Balance360Connection
 from factumov.models.customer import Customer
@@ -36,6 +43,7 @@ from factumov.models.invoice_line import InvoiceLine
 from factumov.models.invoice_template import InvoiceTemplate
 from factumov.models.invoice_template_line import InvoiceTemplateLine
 from factumov.models.password_reset import PasswordReset
+from factumov.models.subscription import Subscription
 from factumov.models.user import User
 from factumov.models.user_session import UserSession
 from factumov.schemas.invoice_template import InvoiceTemplateCreate
@@ -327,6 +335,43 @@ def make_invoice(
     db.add(invoice)
     db.flush()
     return invoice
+
+
+def make_subscription(
+    db,
+    user_id,
+    status=SubscriptionStatus.TRIALING,
+    current_period_end=None,
+    billing_interval=None,
+    provider=None,
+    canceled_at=None,
+):
+    """La suscripción de un usuario. Por default, el trial recién empezado.
+
+    Ese default es el estado en el que la app deja a toda cuenta nueva, así que el fixture
+    `user` lo usa tal cual y la suite entera corre como Pro — que es lo que corresponde: casi
+    ningún test de este proyecto es sobre el plan, y hacerlos correr en Free los habría hecho
+    fallar de a montones el día que se agregue un límite más.
+
+    `current_period_end` por default a treinta días adelante. Los tests del vencimiento lo
+    pasan en el pasado, que es más simple que parchear un reloj — el mismo truco que
+    `make_user_session` y `make_arca_ticket`.
+    """
+    subscription = Subscription(
+        user_id=user_id,
+        status=status,
+        current_period_end=(
+            current_period_end
+            if current_period_end is not None
+            else datetime.now(UTC) + timedelta(days=30)
+        ),
+        billing_interval=billing_interval,
+        provider=provider,
+        canceled_at=canceled_at,
+    )
+    db.add(subscription)
+    db.flush()
+    return subscription
 
 
 def make_balance360_connection(

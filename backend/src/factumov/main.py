@@ -15,6 +15,7 @@ from factumov.routers import (
     health,
     invoice,
     invoice_template,
+    subscription,
 )
 from factumov.services import delegation_watch, email
 
@@ -115,3 +116,4 @@ app.include_router(fiscal_identity.router)
 app.include_router(fiscal_identity.delegation_router)
 app.include_router(invoice.router)
 app.include_router(invoice_template.router)
+app.include_router(subscription.router)
