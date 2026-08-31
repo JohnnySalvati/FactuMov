@@ -185,13 +185,21 @@ function InvoiceScreen({ id }: { id: string }) {
             </a>
 
             {data.customer_email !== null ? (
-              <button onClick={send} disabled={sending}>
-                {sending
-                  ? 'Mandando…'
-                  : data.sent_at !== null
-                    ? 'Mandar de nuevo'
-                    : `Mandar por email a ${data.customer_email}`}
-              </button>
+              <>
+                <button onClick={send} disabled={sending}>
+                  {sending
+                    ? 'Mandando…'
+                    : data.sent_at !== null
+                      ? 'Mandar de nuevo'
+                      : `Mandar por email a ${data.customer_email}`}
+                </button>
+                {data.customer_cc_emails.length > 0 && (
+                  <p className="totals-note" style={{ margin: 0 }}>
+                    Con copia a {data.customer_cc_emails.join(', ')}.{' '}
+                    <Link to={`/clientes/${data.customer_id}`}>Editar</Link>
+                  </p>
+                )}
+              </>
             ) : (
               <Notice kind="warn">
                 Este cliente no tiene email cargado.{' '}

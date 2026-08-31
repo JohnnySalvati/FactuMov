@@ -9,6 +9,7 @@ Los textos van en español, como el resto de los strings de cara al usuario.
 """
 
 import logging
+from collections.abc import Sequence
 from urllib.parse import quote
 
 # Importado como módulo, no por nombre: `send_email` se resuelve en cada llamada, así que
@@ -199,8 +200,13 @@ def send_invoice_email(
     total: str,
     pdf: bytes,
     filename: str,
+    cc: Sequence[str] = (),
 ) -> None:
     """La factura emitida, con el PDF adjunto.
+
+    `cc` son las direcciones que el cliente tiene cargadas para recibir copia —el contador,
+    el gestor—. Van en la cabecera `Cc` y no cambian ni el asunto ni el cuerpo: el mail es el
+    mismo, solo que a más de un buzón.
 
     Usa `send_email` y no la versión best effort: este mail **es** el producto del request —
     quien apretó "Mandar por email" no pidió otra cosa— así que si no sale, el endpoint tiene
@@ -222,6 +228,7 @@ def send_invoice_email(
             "del PDF.\n"
         ),
         attachments=[email.Attachment(filename=filename, content=pdf)],
+        cc=cc,
     )
 
 

@@ -32,6 +32,8 @@ class SentEmail:
     # Lo que se adjuntó. Es una lista y no un bool porque los tests de la factura por mail
     # afirman sobre el nombre del archivo y sobre que los bytes sean un PDF de verdad.
     attachments: list = field(default_factory=list)
+    # Las direcciones en copia (CC), para los tests del envío a varios destinatarios.
+    cc: list = field(default_factory=list)
 
 
 @pytest.fixture(autouse=True)
@@ -241,8 +243,16 @@ def sent_emails(monkeypatch):
     """
     sent = []
 
-    def fake_send(to, subject, body, attachments=()):
-        sent.append(SentEmail(to=to, subject=subject, body=body, attachments=list(attachments)))
+    def fake_send(to, subject, body, attachments=(), cc=()):
+        sent.append(
+            SentEmail(
+                to=to,
+                subject=subject,
+                body=body,
+                attachments=list(attachments),
+                cc=list(cc),
+            )
+        )
 
     monkeypatch.setattr(email_service, "send_email", fake_send)
     return sent
@@ -257,7 +267,7 @@ def broken_mail(monkeypatch):
     producto del request no se pierda en silencio.
     """
 
-    def explode(to, subject, body, attachments=()):
+    def explode(to, subject, body, attachments=(), cc=()):
         raise email_service.EmailDeliveryError("no salió")
 
     monkeypatch.setattr(email_service, "send_email", explode)

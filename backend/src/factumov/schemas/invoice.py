@@ -104,6 +104,10 @@ class InvoiceRead(BaseModel):
     # el PDF ahora. Cargarlo en la ficha después de emitir alcanza para poder mandar la
     # factura — ver `models/invoice.py`.
     customer_email: str | None
+    # Las direcciones que reciben copia (CC) del envío, leídas de la ficha del cliente hoy —
+    # como `customer_email`. La pantalla las muestra al lado del botón de mandar para que se
+    # sepa a quién más le va a llegar.
+    customer_cc_emails: list[str]
     # Cuándo salió el mail con el PDF por última vez, y a qué dirección. `null` = todavía no
     # se mandó.
     sent_at: datetime.datetime | None

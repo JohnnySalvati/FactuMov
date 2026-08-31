@@ -107,6 +107,11 @@ def send_invoice(invoice: InvoiceDep, db: SessionDep, user: CurrentUserDep) -> I
     dirección se lee de la ficha del cliente en cada envío, así que volver a esta factura
     después de completarla la deja mandable.
 
+    **El CC sale de la ficha del cliente**, también en vivo: las direcciones que cargó para
+    que reciban copia (el contador, el gestor). No hay 409 si están vacías —el CC es
+    opcional— y `sent_to` sigue registrando solo el destinatario principal: a quién se copió
+    es una pregunta sobre hoy, no un hecho del envío que valga la pena congelar.
+
     El `commit` antes del envío es el de siempre: no dejar la transacción abierta durante la
     conexión SMTP.
     """
@@ -119,6 +124,11 @@ def send_invoice(invoice: InvoiceDep, db: SessionDep, user: CurrentUserDep) -> I
     address = invoice.customer_email
     if not address:
         raise HTTPException(status_code=409, detail=_NO_EMAIL_DETAIL)
+
+    # El schema del cliente ya saca del CC al destinatario principal, pero el mail pudo
+    # cambiar después de cargar el CC: filtrar acá también deja al To fuera de las copias en
+    # ese caso, sin que a nadie le llegue el mail dos veces.
+    cc = [other for other in invoice.customer_cc_emails if other != address]
 
     # El PDF se arma antes del commit porque no toca la base y porque, si fallara, no tiene
     # sentido haber cerrado la transacción para nada.
@@ -137,6 +147,7 @@ def send_invoice(invoice: InvoiceDep, db: SessionDep, user: CurrentUserDep) -> I
             total=total,
             pdf=pdf,
             filename=filename,
+            cc=cc,
         )
     except EmailDeliveryError as error:
         logger.exception("No se pudo mandar la factura %s a %s", label, address)

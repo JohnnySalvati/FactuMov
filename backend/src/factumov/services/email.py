@@ -148,12 +148,23 @@ class Attachment:
     media_type: str = "application/pdf"
 
 
-def send_email(to: str, subject: str, body: str, attachments: Sequence[Attachment] = ()) -> None:
+def send_email(
+    to: str,
+    subject: str,
+    body: str,
+    attachments: Sequence[Attachment] = (),
+    cc: Sequence[str] = (),
+) -> None:
     """Manda un mail de texto plano, con adjuntos si los hay.
 
     El default vacío es una tupla y no una lista: un mutable por default se comparte entre
     todas las llamadas, y aunque acá nadie lo modifique, es la clase de detalle que deja de
     ser inofensivo en cuanto alguien agregue una línea.
+
+    `cc` viaja solo como cabecera `Cc`: `send_message` deduce los destinatarios de las
+    cabeceras `To`/`Cc`/`Bcc` cuando no se le pasa `to_addrs`, así que agregar la cabecera
+    alcanza para que las copias se entreguen. Se omite si la lista viene vacía —una cabecera
+    `Cc:` en blanco es tan válida como fea—.
 
     La config se resuelve acá adentro y su `ValidationError` se convierte en la misma
     excepción que un servidor caído: para el que llama, "el `.env` está mal" y "el servidor
@@ -169,6 +180,8 @@ def send_email(to: str, subject: str, body: str, attachments: Sequence[Attachmen
     message = EmailMessage()
     message["From"] = settings.email_from
     message["To"] = to
+    if cc:
+        message["Cc"] = ", ".join(cc)
     message["Subject"] = subject
     message.set_content(body)
     for attachment in attachments:

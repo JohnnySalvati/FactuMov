@@ -296,6 +296,30 @@ segundo envío: `sent_at` se pisa y ya.
   "Sin verificar" de las identidades fiscales: es el único pendiente que puede tener una
   factura ya emitida, y sin eso habría que entrar a cada una para encontrar la que falta.
 
+### El CC vive en la ficha del cliente (2026-08-31, migración `c1d7e9a4b820`)
+`customers.cc_emails` es un array de Postgres con las direcciones que reciben una copia cada
+vez que se le manda una factura a ese cliente —el contador, el gestor—. El `email` sigue
+siendo el destinatario principal (el `To`); esto es solo el `Cc`.
+
+- **Se lee en vivo al enviar, igual que `email`.** A quién copiar es una pregunta sobre el
+  envío que se está por hacer, no un hecho de la emisión: por eso no se copia a la factura y
+  `sent_to` sigue registrando solo el `To`. `Invoice.customer_cc_emails` es una propiedad que
+  lee la relación, como `customer_email`.
+- **Un array y no una tabla.** Es una lista corta que se edita entera desde la ficha, no
+  tiene historia y nadie la consulta al revés. El `server_default` en `{}` deja sin CC a las
+  filas anteriores a la columna, que es la verdad.
+- **El schema limpia el CC**: minúsculas, sin espacios, sin repetidos y sin el destinatario
+  principal —copiar en `Cc` la misma dirección que va en el `To` le manda el mail dos veces—.
+  El router filtra el `To` otra vez por si el mail cambió después de cargar el CC. Tope de 5:
+  el endpoint de envío ya tiene rate limit por usuario, pero sin tope sería una forma de
+  mandar un mail a 50 buzones por factura.
+- **`send_email` agrega solo la cabecera `Cc`.** `send_message` deduce los destinatarios de
+  `To`/`Cc`/`Bcc` cuando no se le pasa `to_addrs`, así que la cabecera alcanza para que las
+  copias se entreguen.
+- **La UI del cliente es una lista de inputs, no un campo con comas.** En el celular, separar
+  direcciones con comas se escribe y se corrige mal. La pantalla de la factura muestra "con
+  copia a …" al lado del botón de mandar, para que se sepa a quién más le llega.
+
 ### `/facturas` no es la grilla de tarjetas
 Es una pila de links con tres datos por renglón: qué comprobante, a quién y por cuánto. La
 grilla existe para pantallas donde se entra a un elemento **y se lo elimina**, y donde alcanza

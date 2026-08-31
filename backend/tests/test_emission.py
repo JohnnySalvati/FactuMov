@@ -684,6 +684,45 @@ def test_send_mails_the_invoice_with_the_pdf_attached(client, emitted, sent_emai
     assert attachment.content.startswith(b"%PDF-")
 
 
+def test_send_copies_the_customers_cc_addresses(client, template, db, wsfe_calls, sent_emails):
+    """El CC sale de la ficha del cliente y se lee en vivo, como el destinatario principal."""
+    template.customer.email = "cliente@cucu.com"
+    template.customer.cc_emails = ["contador@cucu.com", "gestor@cucu.com"]
+    db.flush()
+    invoice = emit(client, template.id).json()
+
+    assert invoice["customer_cc_emails"] == ["contador@cucu.com", "gestor@cucu.com"]
+
+    client.post(f"/invoices/{invoice['id']}/send")
+
+    assert sent_emails[0].to == "cliente@cucu.com"
+    assert sent_emails[0].cc == ["contador@cucu.com", "gestor@cucu.com"]
+    # El CC no se congela en la factura: `sent_to` sigue siendo solo el To.
+    assert client.get(f"/invoices/{invoice['id']}").json()["sent_to"] == "cliente@cucu.com"
+
+
+def test_send_leaves_the_primary_address_out_of_the_cc(
+    client, template, db, wsfe_calls, sent_emails
+):
+    """Aunque el mail principal haya cambiado después de cargar el CC, no llega dos veces."""
+    template.customer.email = "cliente@cucu.com"
+    # Se guarda directo en el modelo para saltear la limpieza del schema y simular el caso
+    # en que el mail del To cambió más tarde.
+    template.customer.cc_emails = ["cliente@cucu.com", "contador@cucu.com"]
+    db.flush()
+    invoice = emit(client, template.id).json()
+
+    client.post(f"/invoices/{invoice['id']}/send")
+
+    assert sent_emails[0].cc == ["contador@cucu.com"]
+
+
+def test_a_customer_without_cc_sends_a_plain_mail(client, emitted, sent_emails):
+    client.post(f"/invoices/{emitted['id']}/send")
+
+    assert sent_emails[0].cc == []
+
+
 def test_the_subject_names_the_voucher_and_the_issuer(client, emitted, sent_emails):
     """Es lo que el destinatario ve en su lista de correo; "Factura" a secas no dice de quién."""
     client.post(f"/invoices/{emitted['id']}/send")

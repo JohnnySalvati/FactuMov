@@ -195,6 +195,9 @@ export interface Customer {
   doc_number: string
   address: string | null
   email: string | null
+  /** Direcciones que reciben una copia (CC) cada vez que se le manda una factura. El `email`
+   *  de arriba es el destinatario principal; esto es solo el CC. */
+  cc_emails: string[]
   created_at: string
   updated_at: string
 }
@@ -206,6 +209,7 @@ export interface CustomerCreate {
   doc_number: string
   address?: string | null
   email?: string | null
+  cc_emails?: string[]
 }
 
 /** Lo que el padrón de ARCA sabe de un CUIT. Es una propuesta: el backend no guardó nada. */
@@ -433,6 +437,11 @@ export interface Invoice {
    * dirección para siempre.
    */
   customer_email: string | null
+  /**
+   * Las direcciones que reciben copia (CC) del envío, leídas de la ficha del cliente hoy —
+   * como `customer_email`. Vacío si el cliente no tiene ninguna cargada.
+   */
+  customer_cc_emails: string[]
   /**
    * Cuándo salió el mail con el PDF, la última vez. `null` = todavía no se mandó.
    *

@@ -162,6 +162,47 @@ def test_doc_number_none():
         CustomerUpdate(doc_type=DocType.CUIT, doc_number=None)
 
 
+def test_cc_emails_are_normalized_and_deduped():
+    """Minúsculas, sin espacios y sin repetir el destinatario principal ni entre sí."""
+    data = CustomerCreate(
+        name="test",
+        condicion_iva=CondicionIva.INSCRIPTO,
+        doc_type=DocType.CUIT,
+        doc_number="22222222222",
+        email="  Cliente@Cucu.com ",
+        cc_emails=[" Contador@Cucu.com ", "contador@cucu.com", "cliente@cucu.com"],
+    )
+    assert data.email == "cliente@cucu.com"
+    assert data.cc_emails == ["contador@cucu.com"]
+
+
+def test_cc_emails_are_capped():
+    with pytest.raises(ValidationError):
+        CustomerCreate(
+            name="test",
+            condicion_iva=CondicionIva.INSCRIPTO,
+            doc_type=DocType.CUIT,
+            doc_number="22222222222",
+            cc_emails=[f"a{n}@cucu.com" for n in range(6)],
+        )
+
+
+def test_cc_emails_default_to_empty_and_persist(db, user):
+    customer = customer_create(db, user)
+    assert customer.cc_emails == []
+
+    customer_crud.update(
+        db, customer, CustomerUpdate(cc_emails=["gestor@cucu.com", "socio@cucu.com"])
+    )
+    assert customer.cc_emails == ["gestor@cucu.com", "socio@cucu.com"]
+
+    # `[]` explícito borra; no mencionar el campo no lo toca.
+    customer_crud.update(db, customer, CustomerUpdate(name="otro"))
+    assert customer.cc_emails == ["gestor@cucu.com", "socio@cucu.com"]
+    customer_crud.update(db, customer, CustomerUpdate(cc_emails=[]))
+    assert customer.cc_emails == []
+
+
 def test_doc_number_alone(db, user):
     customer = factories.make_customer(db, user.id)
     customer_crud.update(db, customer, CustomerUpdate(doc_type=DocType.CUIT))

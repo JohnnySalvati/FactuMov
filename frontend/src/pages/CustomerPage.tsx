@@ -89,6 +89,10 @@ function CustomerForm({
   )
   const [address, setAddress] = useState(editing?.address ?? '')
   const [email, setEmail] = useState(editing?.email ?? '')
+  // El CC de las facturas de este cliente. Una lista de inputs y no un campo con comas: en el
+  // celular, separar direcciones con comas se escribe y se corrige mal. El tope de 5 es el
+  // mismo que valida el backend.
+  const [ccEmails, setCcEmails] = useState<string[]>(editing?.cc_emails ?? [])
 
   const [error, setError] = useState<string>()
   const [lookupNote, setLookupNote] = useState<string>()
@@ -146,6 +150,9 @@ function CustomerForm({
       doc_number: docNumber.replace(/\D/g, ''),
       address: address.trim() || null,
       email: email.trim() || null,
+      // El backend vuelve a limpiar (minúsculas, repetidos, el propio destinatario): acá solo
+      // se sacan los renglones que quedaron vacíos para no mandarle una dirección en blanco.
+      cc_emails: ccEmails.map((addr) => addr.trim()).filter(Boolean),
     }
     try {
       if (editing) {
@@ -271,6 +278,53 @@ function CustomerForm({
             setAddress(event.target.value)
           }}
         />
+      </div>
+
+      <div className="stack">
+        <label htmlFor="c-cc-0">Con copia a (opcional)</label>
+        {ccEmails.map((addr, index) => (
+          // key por índice: la lista tiene uno o dos renglones y quitar uno es raro. Los
+          // inputs son controlados, así que el valor lo pone siempre React.
+          <div className="row" key={index}>
+            <input
+              id={`c-cc-${index}`}
+              type="email"
+              value={addr}
+              aria-label={`Dirección en copia ${index + 1}`}
+              onChange={(event) => {
+                edited()
+                setCcEmails(ccEmails.map((v, i) => (i === index ? event.target.value : v)))
+              }}
+            />
+            <button
+              type="button"
+              className="icon"
+              aria-label={`Quitar la dirección en copia ${index + 1}`}
+              title="Quitar"
+              onClick={() => {
+                edited()
+                setCcEmails(ccEmails.filter((_, i) => i !== index))
+              }}
+            >
+              🗑
+            </button>
+          </div>
+        ))}
+        {ccEmails.length < 5 && (
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => {
+              edited()
+              setCcEmails([...ccEmails, ''])
+            }}
+          >
+            + Agregar copia
+          </button>
+        )}
+        <span className="field-hint">
+          Cada factura que le mandes a este cliente les llega también a estas direcciones.
+        </span>
       </div>
 
       <Notice kind="error">{error}</Notice>

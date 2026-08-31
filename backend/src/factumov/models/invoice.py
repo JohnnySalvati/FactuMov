@@ -198,6 +198,17 @@ class Invoice(Base, TimestampMixin):
         return self.customer.email
 
     @property
+    def customer_cc_emails(self) -> list[str]:
+        """Las direcciones que reciben copia (CC) del envío, tal como están en la ficha hoy.
+
+        Se lee en vivo como `customer_email` y por el mismo motivo: a quién copiar es una
+        pregunta sobre el envío que se está por hacer, no un hecho de la emisión. No se
+        guarda en la factura ni forma parte de `sent_to`, que sigue siendo solo el
+        destinatario principal.
+        """
+        return self.customer.cc_emails
+
+    @property
     def label(self) -> str:
         """Cómo se nombra el comprobante en pantalla y en el nombre del archivo.
 
