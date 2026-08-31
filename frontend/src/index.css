@@ -334,6 +334,24 @@ a {
   max-width: none;
 }
 
+/* Un input con su tacho al lado —las direcciones en copia del cliente—. A diferencia de
+   `.row`, se queda horizontal también en angosto: es un campo y un ícono, no dos campos. */
+.cc-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.cc-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.cc-row button.icon {
+  flex: 0 0 auto;
+  width: auto;
+}
+
 /* --- Formularios -------------------------------------------------------------------- */
 
 label {

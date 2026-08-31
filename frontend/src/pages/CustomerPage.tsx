@@ -236,36 +236,22 @@ function CustomerForm({
         />
       </div>
 
-      <div className="row">
-        <div>
-          <label htmlFor="c-condicion">Condición frente al IVA</label>
-          <select
-            id="c-condicion"
-            value={condicionIva}
-            onChange={(event) => {
-              edited()
-              setCondicionIva(Number(event.target.value) as CondicionIva)
-            }}
-          >
-            {Object.entries(CONDICION_IVA_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label htmlFor="c-email">Email (opcional)</label>
-          <input
-            id="c-email"
-            type="email"
-            value={email}
-            onChange={(event) => {
-              edited()
-              setEmail(event.target.value)
-            }}
-          />
-        </div>
+      <div>
+        <label htmlFor="c-condicion">Condición frente al IVA</label>
+        <select
+          id="c-condicion"
+          value={condicionIva}
+          onChange={(event) => {
+            edited()
+            setCondicionIva(Number(event.target.value) as CondicionIva)
+          }}
+        >
+          {Object.entries(CONDICION_IVA_LABELS).map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
       </div>
 
       <div>
@@ -280,16 +266,32 @@ function CustomerForm({
         />
       </div>
 
+      {/* Email y CC al final, juntos: son la misma pregunta —a qué casillas se le entrega la
+          factura— y no un dato de identificación como el documento o la condición IVA. El CC
+          va pegado abajo del email porque solo tiene sentido con el email cargado. */}
       <div className="stack">
-        <label htmlFor="c-cc-0">Con copia a (opcional)</label>
+        <div>
+          <label htmlFor="c-email">Email (opcional)</label>
+          <input
+            id="c-email"
+            type="email"
+            value={email}
+            onChange={(event) => {
+              edited()
+              setEmail(event.target.value)
+            }}
+          />
+        </div>
+
         {ccEmails.map((addr, index) => (
           // key por índice: la lista tiene uno o dos renglones y quitar uno es raro. Los
           // inputs son controlados, así que el valor lo pone siempre React.
-          <div className="row" key={index}>
+          <div className="cc-row" key={index}>
             <input
               id={`c-cc-${index}`}
               type="email"
               value={addr}
+              placeholder="Con copia a…"
               aria-label={`Dirección en copia ${index + 1}`}
               onChange={(event) => {
                 edited()
@@ -310,20 +312,26 @@ function CustomerForm({
             </button>
           </div>
         ))}
+
         {ccEmails.length < 5 && (
+          // `link` y no `secondary`: un botón full-width acá se confunde con "Guardar
+          // cambios" justo debajo. Este es un "agregar un renglón más", no una acción del
+          // formulario.
           <button
             type="button"
-            className="secondary"
+            className="link"
+            style={{ alignSelf: 'flex-start' }}
             onClick={() => {
               edited()
               setCcEmails([...ccEmails, ''])
             }}
           >
-            + Agregar copia
+            + Agregar dirección en copia
           </button>
         )}
+
         <span className="field-hint">
-          Cada factura que le mandes a este cliente les llega también a estas direcciones.
+          Las direcciones en copia reciben cada factura que se le manda a este cliente.
         </span>
       </div>
 
