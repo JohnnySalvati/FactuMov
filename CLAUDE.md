@@ -126,6 +126,8 @@ FactuMov/
 │   ├── Dockerfile
 │   ├── docker-entrypoint.sh        # alembic upgrade head y después uvicorn
 │   ├── .env.example
+│   ├── scripts/
+│   │   └── mp_notify.py            # el webhook de Mercado Pago firmado, sin túnel
 │   ├── src/factumov/
 │   │   ├── main.py
 │   │   ├── database.py

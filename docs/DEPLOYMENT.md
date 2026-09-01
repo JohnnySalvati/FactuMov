@@ -187,10 +187,13 @@ En https://www.mercadopago.com.ar/developers → tu aplicación:
 1. **Credenciales → producción.** El `Access Token` va en `MERCADOPAGO_ACCESS_TOKEN`. Las de
    prueba empiezan con `TEST-` y son visualmente idénticas: con esas, el checkout se abre, se
    paga con tarjetas de prueba y no entra un peso.
-2. **Webhooks → configurar notificaciones.** La URL es
-   `https://factumov.insoft.net.ar/api/webhooks/mercado-pago`, con los eventos **Suscripciones**
-   (`subscription_preapproval`) y **Pagos de suscripción** (`subscription_authorized_payment`).
-   Los demás llegan igual y se contestan 200 sin hacer nada.
+2. **Webhooks → configurar notificaciones**, en la pestaña **Modo productivo**. La URL es
+   `https://factumov.insoft.net.ar/api/webhooks/mercado-pago` y el único evento que hay que
+   tildar es **Planes y suscripciones**, que es como el panel agrupa hoy a
+   `subscription_preapproval` y `subscription_authorized_payment` — son los dos que la app
+   atiende, y ese checkbox trae los dos. Los demás llegan igual y se contestan 200 sin hacer
+   nada. **Modo de prueba y modo productivo tienen cada uno su URL y su clave secreta**: dar de
+   alta uno no configura el otro.
 3. **La clave secreta que ese alta genera** va en `MERCADOPAGO_WEBHOOK_SECRET`, y hay que
    reiniciar el `app` para que la lea.
 

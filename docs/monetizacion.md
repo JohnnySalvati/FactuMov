@@ -392,13 +392,77 @@ proveedor y ese cobro no es de nadie; pedir el reintento lo resuelve solo.
 `transaction_amount`. Son quienes deciden cuándo vuelven a cobrar: una cuenta local solo podría
 discrepar, y discrepar acá es cortarle el acceso a alguien a quien le van a cobrar igual.
 
-### Cómo se prueba
+### Cómo se prueba (2026-09-01)
 
-El webhook lo llama Mercado Pago desde internet, así que **contra `localhost` no llega**: hace
-falta un túnel y cargar esa URL pública en el panel. Sin túnel se puede probar todo menos la
-acreditación — el checkout se crea, la pantalla redirige, y la cuenta queda como estaba porque
-nadie avisó. Y una cuenta de Mercado Pago **no se puede pagar a sí misma**: hacen falta las dos
-cuentas de prueba, una como vendedor y otra como comprador.
+El circuito entero se recorrió en desarrollo, con dinero de juguete y sin túnel. Son cinco
+cosas, y cuatro de ellas son restricciones de Mercado Pago que no se ven hasta que se choca
+contra ellas.
+
+**1. Comprador y vendedor tienen que ser los dos usuarios de prueba.** No alcanza con crear la
+aplicación en la cuenta real y usar sus credenciales `TEST-`: ahí el que cobra sigue siendo la
+cuenta real y el preapproval se rechaza con *"Both payer and collector must be real or test
+users"*. Hacen falta dos usuarios de prueba, y el token del **vendedor** sale de una aplicación
+creada desde su propia sesión (iniciar sesión en Mercado Pago con ese usuario, panel de
+desarrolladores, crear aplicación, credenciales de producción — la cuenta es ficticia, así que
+su "producción" no mueve un peso). Se crean por API con el token de la cuenta real:
+
+```bash
+curl -X POST -H "Authorization: Bearer $MERCADOPAGO_ACCESS_TOKEN" \
+     -H "Content-Type: application/json" -d '{"site_id":"MLA"}' \
+     https://api.mercadopago.com/users/test_user
+```
+
+Por API y no desde el panel porque la respuesta trae el **mail** (`test_user_<n>@testuser.com`),
+que es el dato que hace falta: `create_checkout` manda `payer_email` con la dirección de la
+cuenta de FactuMov, y Mercado Pago no deja completar el checkout con otra. O sea que la cuenta
+de FactuMov con la que se paga hay que registrarla con el mail del comprador de prueba, y
+confirmarla a mano —esa casilla no existe— con un `update users set email_confirmed_at = now()`.
+
+**2. La cuenta tiene que estar caducada, o no se cobra nada.** Con el trial vigente,
+`_free_trial_days` le pone al preapproval un `free_trial` de los días que faltaban: la
+autorización queda hecha pero el primer cobro cae recién cuando la prueba se termina, así que
+no hay ningún `authorized_payment` que mirar. Vencer la fila es lo que hace que el débito entre
+en el acto:
+
+```sql
+update subscriptions s set current_period_end = now() - interval '1 day'
+from users u where u.id = s.user_id and u.email = '<la cuenta de prueba>';
+```
+
+**3. `back_url` no acepta `localhost`.** Mercado Pago contesta *"Invalid value for back_url,
+must be a valid URL"* y el checkout ni se crea. Como el `back_url` sale de `APP_BASE_URL` (ver
+`_back_url`), hay que apuntarla a un dominio público mientras dure la prueba — sirve el de
+producción, porque el regreso no activa nada y a esa pantalla se vuelve a mano. **Acordarse de
+devolverla a `https://localhost:5173`**, o los mails de desarrollo linkean a producción.
+
+**4. El webhook no llega a `localhost`, y el túnel se puede evitar.**
+[`backend/scripts/mp_notify.py`](../backend/scripts/mp_notify.py) arma el manifiesto, lo firma
+con `MERCADOPAGO_WEBHOOK_SECRET` y postea la notificación al backend local. Lo único que
+reemplaza es el transporte: el endpoint verifica el HMAC igual que siempre y el servicio sale a
+releer el recurso a la API de Mercado Pago, así que lo que se acredita es lo que ellos informan.
+Consecuencia práctica: **el secreto no tiene que ser el de la app del vendedor de prueba** —
+alcanza con que sea el mismo de los dos lados. Solo hace falta dar de alta la URL en el panel
+el día que se quiera la entrega de verdad, y para eso sí hace falta el túnel.
+
+**5. El cobro no aparece en el momento.** La autorización se acredita enseguida, pero el
+`authorized_payment` lo genera Mercado Pago de forma asincrónica y tardó un par de minutos. Se
+lo busca así, y de ahí sale el id del segundo aviso:
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+     "https://api.mercadopago.com/authorized_payments/search?preapproval_id=<id>"
+```
+
+Con eso, la secuencia completa es: crear el checkout desde la app → pagarlo en el navegador con
+el comprador de prueba (dinero en cuenta, o una tarjeta de prueba con titular `APRO`) →
+`mp_notify.py preapproval <id>` → buscar el cobro → `mp_notify.py payment <id>`. Lo que quedó
+verificado con datos reales, además del camino feliz:
+
+| Se disparó | Contestó |
+|---|---|
+| El mismo cobro dos veces | `duplicado` — el período **no** se empujó dos meses |
+| La misma autorización dos veces | `autorizada` — reescribe lo mismo, sin efecto |
+| Una notificación con firma inventada | `401` |
 
 ### Lo que falta
 
