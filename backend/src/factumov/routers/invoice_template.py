@@ -4,6 +4,7 @@ from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile
+from sqlalchemy.orm import Session
 
 from factumov.crud import balance360_connection as balance360_connection_crud
 from factumov.crud import customer as customer_crud
@@ -80,6 +81,32 @@ def get_invoice_template_or_404(
 InvoiceTemplateDep = Annotated[InvoiceTemplate, Depends(get_invoice_template_or_404)]
 
 
+def _check_email_text_allowed(
+    db: Session,
+    user_id: uuid.UUID,
+    data: InvoiceTemplateCreate | InvoiceTemplateUpdate,
+) -> None:
+    """402 si el body trae un texto de mail y el plan no lo permite.
+
+    **Solo mira los textos que llegan con contenido.** Un body que no los trae, o que los trae
+    en `null` —lo que manda la pantalla cuando el campo quedó vacío— no pide nada: el primero
+    no toca el mail y el segundo lo devuelve al texto por default, que es justamente lo que un
+    Free puede tener. Sin esa distinción, un ex-Pro no podría guardar **ningún** cambio en un
+    modelo cuyo mail personalizó, porque el PATCH del formulario manda el objeto entero y el
+    texto vacío contaría como un intento de personalizar.
+
+    Va en el router y no en el schema por lo mismo que `check_can_emit`: es una condición de la
+    cuenta y no del body. El mismo JSON es válido o no según quién lo mande, y eso no es algo
+    que un schema pueda decidir.
+    """
+    if data.email_subject is None and data.email_body is None:
+        return
+    try:
+        subscription_service.check_can_customize_email(db, user_id)
+    except PlanLimitReachedError as error:
+        raise HTTPException(status_code=402, detail=str(error))
+
+
 @router.get("", response_model=list[InvoiceTemplateRead])
 def list_invoice_templates(db: SessionDep, user: CurrentUserDep) -> list[InvoiceTemplate]:
     return invoice_template_crud.get_all(db, user.id)
@@ -89,6 +116,7 @@ def list_invoice_templates(db: SessionDep, user: CurrentUserDep) -> list[Invoice
 def create_invoice_template(
     data: InvoiceTemplateCreate, db: SessionDep, user: CurrentUserDep
 ) -> InvoiceTemplate:
+    _check_email_text_allowed(db, user.id, data)
     try:
         invoice_template = invoice_template_crud.create(db, data, user.id)
     except UnknownCustomerError:
@@ -153,6 +181,7 @@ def update_invoice_template(
     db: SessionDep,
     user: CurrentUserDep,
 ) -> InvoiceTemplate:
+    _check_email_text_allowed(db, user.id, data)
     try:
         invoice_template = invoice_template_crud.update(db, invoice_template, data, user.id)
     except UnknownCustomerError:

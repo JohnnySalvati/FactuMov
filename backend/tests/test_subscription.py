@@ -126,20 +126,6 @@ def test_registering_twice_does_not_hand_out_a_second_trial(anonymous_client, db
 # --- El contador del mes --------------------------------------------------------------------
 
 
-@pytest.fixture
-def free_plan(db, user):
-    """Deja al usuario de `client` en Free: su trial venció ayer.
-
-    Vencerlo es más fiel que borrar la fila. La cuenta sin suscripción existe —`entitlements`
-    la trata como Free y la loguea— pero no es un estado que la app pueda producir, así que
-    probar el Free contra ella estaría probando el caso anómalo y no el que van a tener miles.
-    """
-    subscription = subscription_crud.get_for_user(db, user.id)
-    subscription.current_period_end = datetime.now(UTC) - timedelta(days=1)
-    db.flush()
-    return subscription
-
-
 def test_the_count_only_sees_this_users_invoices(db, user, other_user):
     """El scoping sale del join contra `fiscal_identities`: `invoices` no lleva `user_id`."""
     theirs = make_fiscal_identity(db, other_user.id)
@@ -183,6 +169,10 @@ def test_a_free_account_reports_both_limits(client, free_plan):
     assert body["invoices_limit"] == subscription_service.FREE_MONTHLY_INVOICES
     assert body["fiscal_identities_limit"] == subscription_service.FREE_FISCAL_IDENTITIES
     assert body["voice_enabled"] is False
+    # Lo lee el editor del modelo para ofrecer los dos campos del mail o el aviso de Pro. Qué
+    # texto sale al enviar no se decide con esto sino con el `Entitlements` del envío — ver
+    # `test_emission.py`.
+    assert body["custom_email_enabled"] is False
 
 
 def test_the_usage_counters_come_from_the_rows(client, db, user, fiscal_identity, free_plan):

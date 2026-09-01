@@ -56,6 +56,16 @@ export interface TemplateForm {
   customer_id: string | null
   pos: string
   concepto: Concepto
+  /**
+   * El asunto y el cuerpo del mail con el que se manda la factura de este modelo.
+   *
+   * **`''` acá es el `null` de la API**, o sea "mandá el mail de FactuMov". Se guardan como
+   * string y no como `string | null` por lo mismo que el resto del formulario: un `<input>`
+   * vacío no es `null`, y tener las dos formas de "no hay texto" obligaría a normalizar en
+   * cada tecla. La conversión ocurre una sola vez, en `toPayload`.
+   */
+  email_subject: string
+  email_body: string
   lines: LineForm[]
 }
 
@@ -88,6 +98,10 @@ export function emptyForm(): TemplateForm {
     // informa uno solo, y cuando hay varios obliga a elegir — ver `PointOfSaleField`.
     pos: '',
     concepto: Concepto.products,
+    // Vacíos, o sea el mail de FactuMov. Es lo que manda un modelo que nadie personalizó, y es
+    // el default correcto también para el que se importa de un PDF: `fromDraft` parte de acá.
+    email_subject: '',
+    email_body: '',
     lines: [newLine()],
   }
 }
@@ -350,6 +364,12 @@ export function toPayload(
     customer_id: form.customer_id,
     pos: Number(form.pos),
     concepto: form.concepto,
+    // El campo vacío viaja como `null` y no como `''`. Para el backend son lo mismo —el schema
+    // convierte el blanco a `null`— pero el 402 del plan se dispara sobre los textos que
+    // **llegan con contenido**, así que mandar el vacío haría que un Free chocara el límite de
+    // Pro guardando un modelo en el que no escribió ningún mail.
+    email_subject: form.email_subject.trim() || null,
+    email_body: form.email_body.trim() || null,
     // `position` no se manda: el orden del array **es** la posición, y el CRUD la asigna con
     // un `enumerate()`. Mandarla abriría la puerta a huecos, duplicados y negativos.
     lines: form.lines.map((line) => ({

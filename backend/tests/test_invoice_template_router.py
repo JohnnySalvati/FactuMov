@@ -392,3 +392,170 @@ def test_patch_into_another_users_customer_is_422(
     assert response.json()["detail"] == "Cliente desconocido"
     db.refresh(template)
     assert template.customer_id == customer.id
+
+
+# --- El texto del mail ----------------------------------------------------------------------
+#
+# El asunto y el cuerpo con los que se manda la factura emitida de este modelo. Son del plan
+# Pro, y el chequeo vive en el router y no en el schema porque es una condición de la cuenta:
+# el mismo JSON es válido o no según quién lo mande. Lo que sale al enviar lo prueba
+# `test_emission.py`; acá se fija quién puede guardarlo.
+
+
+def test_the_email_text_is_saved_and_read_back(client, fiscal_identity, customer):
+    response = client.post(
+        URL,
+        json=payload(
+            fiscal_identity.id,
+            customer.id,
+            email_subject="Tu factura del mes",
+            email_body="Hola! Te mando la factura. Cualquier cosa avisame.",
+        ),
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["email_subject"] == "Tu factura del mes"
+    assert body["email_body"] == "Hola! Te mando la factura. Cualquier cosa avisame."
+
+
+def test_a_template_without_email_text_reads_back_as_null(client, fiscal_identity, customer):
+    """`null` es "mandá el mail de FactuMov", que es lo que hacen todos los modelos de antes."""
+    body = client.post(URL, json=payload(fiscal_identity.id, customer.id)).json()
+
+    assert body["email_subject"] is None
+    assert body["email_body"] is None
+
+
+def test_a_blank_email_text_is_stored_as_no_text(client, fiscal_identity, customer):
+    """Un `<textarea>` vacío manda `""`, no `null`, y las dos cosas significan lo mismo.
+
+    Guardar el string vacío dejaría al modelo mandando facturas sin asunto y sin cuerpo, que
+    no es lo que pidió nadie: quien borra el campo está pidiendo volver al texto de la app.
+    """
+    body = client.post(
+        URL,
+        json=payload(fiscal_identity.id, customer.id, email_subject="   ", email_body=""),
+    ).json()
+
+    assert body["email_subject"] is None
+    assert body["email_body"] is None
+
+
+def test_the_email_text_is_trimmed(client, fiscal_identity, customer):
+    body = client.post(
+        URL,
+        json=payload(fiscal_identity.id, customer.id, email_subject="  Tu factura  "),
+    ).json()
+
+    assert body["email_subject"] == "Tu factura"
+
+
+def test_a_subject_over_the_column_length_is_a_422(client, fiscal_identity, customer):
+    """El tope lo pone el schema, así que el body se arma a mano.
+
+    `payload()` construye el `InvoiceTemplateCreate` y lo serializa, o sea que un asunto
+    demasiado largo explotaría en el test antes de llegar a HTTP — y lo que hay que fijar acá
+    es el 422 que ve el frontend, no la excepción de Pydantic.
+    """
+    body = payload(fiscal_identity.id, customer.id)
+    body["email_subject"] = "x" * 201
+
+    assert client.post(URL, json=body).status_code == 422
+
+
+def test_the_email_text_can_be_patched(client, db, fiscal_identity, customer):
+    template = factories.make_invoice_template(db, fiscal_identity, customer)
+
+    response = client.patch(
+        f"{URL}/{template.id}", json={"email_subject": "Otro asunto", "email_body": "Otro texto"}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["email_subject"] == "Otro asunto"
+    assert response.json()["email_body"] == "Otro texto"
+
+
+def test_clearing_the_email_text_goes_back_to_the_default(client, db, fiscal_identity, customer):
+    template = factories.make_invoice_template(
+        db, fiscal_identity, customer, email_subject="Propio", email_body="Propio"
+    )
+
+    response = client.patch(f"{URL}/{template.id}", json={"email_subject": None, "email_body": ""})
+
+    assert response.status_code == 200
+    assert response.json()["email_subject"] is None
+    assert response.json()["email_body"] is None
+
+
+def test_a_patch_that_does_not_mention_the_email_text_leaves_it_alone(
+    client, db, fiscal_identity, customer
+):
+    """`exclude_unset`: "no lo mandó" y "lo mandó en null" son cosas distintas."""
+    template = factories.make_invoice_template(
+        db, fiscal_identity, customer, email_subject="Propio", email_body="Propio"
+    )
+
+    response = client.patch(f"{URL}/{template.id}", json={"name": "Otro nombre"})
+
+    assert response.status_code == 200
+    assert response.json()["email_subject"] == "Propio"
+
+
+def test_a_free_account_cannot_write_the_email_text(
+    client, fiscal_identity, customer, free_plan
+):
+    response = client.post(
+        URL, json=payload(fiscal_identity.id, customer.id, email_body="Mi texto")
+    )
+
+    # 402 y no 403: el permiso sobre sus propios datos lo tiene, lo que falta es el plan.
+    assert response.status_code == 402
+    assert "Pro" in response.json()["detail"]
+
+
+def test_a_free_account_cannot_patch_the_email_text(
+    client, db, fiscal_identity, customer, free_plan
+):
+    template = factories.make_invoice_template(db, fiscal_identity, customer)
+
+    response = client.patch(f"{URL}/{template.id}", json={"email_body": "Mi texto"})
+
+    assert response.status_code == 402
+    db.refresh(template)
+    assert template.email_body is None
+
+
+def test_a_free_account_can_still_save_the_rest_of_the_template(
+    client, db, fiscal_identity, customer, free_plan
+):
+    """El PATCH del formulario manda el objeto entero, textos vacíos incluidos.
+
+    Sin la distinción entre "trae texto" y "lo trae vacío", un Free no podría guardar **ningún**
+    cambio de ningún modelo: cada PATCH parecería un intento de personalizar el mail.
+    """
+    template = factories.make_invoice_template(db, fiscal_identity, customer)
+
+    response = client.patch(
+        f"{URL}/{template.id}",
+        json={"name": "Otro nombre", "email_subject": None, "email_body": ""},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["name"] == "Otro nombre"
+
+
+def test_a_free_account_can_clear_a_text_it_can_no_longer_edit(
+    client, db, fiscal_identity, customer, free_plan
+):
+    """La salida del ex-Pro: borrarlo se permite siempre, porque deja el default en su lugar."""
+    template = factories.make_invoice_template(
+        db, fiscal_identity, customer, email_subject="Propio", email_body="Propio"
+    )
+
+    response = client.patch(
+        f"{URL}/{template.id}", json={"email_subject": None, "email_body": None}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["email_subject"] is None

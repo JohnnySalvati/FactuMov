@@ -121,6 +121,26 @@ class Entitlements:
         )
 
     @property
+    def custom_email_enabled(self) -> bool:
+        """El texto del mail con el que se manda la factura se escribe con el plan Pro.
+
+        Es el único derecho de esta lista que decide **dos** cosas, y por eso se consulta desde
+        dos lados: si el modelo puede guardar un texto propio (lo corta
+        `check_can_customize_email` en el router del modelo) y si ese texto se usa al mandar la
+        factura (lo mira `POST /invoices/{id}/send`).
+
+        La segunda mitad es lo que distingue este límite del de las identidades fiscales. Allá
+        el Free que fue Pro conserva las tres que cargó y las sigue usando: bajar de plan no
+        borra datos, y elegir cuál sobrevive no le corresponde a la app. Acá el dato tampoco se
+        borra —el texto queda guardado y vuelve solo si la cuenta vuelve a Pro— pero deja de
+        usarse: lo que el Free recupera es el mail por default, que es el que la app manda
+        desde siempre y dice lo mismo. La diferencia con una identidad fiscal es que ahí "dejar
+        de usarla" significaría no poder facturar con ese CUIT, y acá significa mandar el otro
+        texto.
+        """
+        return self.is_pro
+
+    @property
     def voice_enabled(self) -> bool:
         """El dictado por voz es Pro.
 
@@ -247,6 +267,26 @@ def fiscal_identity_limit_detail() -> str:
         f"Con el plan Free podés tener {FREE_FISCAL_IDENTITIES} identidad fiscal. Para "
         "facturar con varios CUIT, pasate a Pro."
     )
+
+
+def email_text_detail() -> str:
+    return (
+        "Escribir el texto del mail con el que se manda cada factura es del plan Pro. Con el "
+        "plan Free se manda el texto de FactuMov, que lleva el número del comprobante, el "
+        "emisor y el importe."
+    )
+
+
+def check_can_customize_email(db: Session, user_id: uuid.UUID) -> None:
+    """Levanta `PlanLimitReachedError` si el plan no permite escribir el texto del mail.
+
+    **Solo corta la escritura**, y lo llama el router únicamente cuando el body trae un texto:
+    borrarlo —mandarlo en `null` o en blanco— se permite siempre. Es la salida que necesita un
+    ex-Pro que quiere sacarse de encima un texto que ya no puede editar, y además nunca puede
+    empeorar nada: lo que deja en su lugar es el mail por default.
+    """
+    if not entitlements(db, user_id).custom_email_enabled:
+        raise PlanLimitReachedError(email_text_detail())
 
 
 def check_can_emit(db: Session, user_id: uuid.UUID) -> None:

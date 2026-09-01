@@ -285,6 +285,10 @@ function fromDraft(draft: InvoiceTemplateDraft): TemplateForm {
     customer_id: draft.customer_id,
     pos: draft.pos !== null ? String(draft.pos) : blank.pos,
     concepto: draft.concepto,
+    // El PDF importado no dice nada del mail con el que se mandó, así que el modelo nuevo
+    // arranca con el texto de FactuMov, igual que uno empezado en blanco.
+    email_subject: blank.email_subject,
+    email_body: blank.email_body,
     lines:
       draft.lines.length > 0
         ? draft.lines.map((line) =>

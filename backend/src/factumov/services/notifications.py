@@ -193,6 +193,33 @@ def send_password_changed_email(to: str) -> None:
     )
 
 
+def default_invoice_subject(label: str, issuer_name: str) -> str:
+    """El asunto que manda la app cuando el modelo no tiene uno propio.
+
+    Lleva el número del comprobante y la razón social del emisor porque es lo que el
+    destinatario ve en la lista de su casilla, y "Factura" a secas no le dice de quién es.
+
+    Es una función y no un f-string adentro del envío desde que el asunto se puede
+    personalizar: el default pasó a ser una de dos ramas, y una rama que no tiene nombre no se
+    puede probar ni citar desde el endpoint que elige entre las dos.
+    """
+    return f"Factura {label} de {issuer_name}"
+
+
+def default_invoice_body(label: str, issuer_name: str, total: str) -> str:
+    """El cuerpo que manda la app cuando el modelo no tiene uno propio.
+
+    Los importes llegan ya formateados: quien los sabe formatear es `invoice_pdf`, y hacerlo
+    otra vez acá sería una segunda forma de escribir el mismo número.
+    """
+    return (
+        "Hola,\n\n"
+        f"Te adjuntamos la factura {label} de {issuer_name} por $ {total}.\n\n"
+        "El comprobante está autorizado por ARCA; el CAE y su vencimiento figuran al pie "
+        "del PDF.\n"
+    )
+
+
 def send_invoice_email(
     to: str,
     label: str,
@@ -201,6 +228,8 @@ def send_invoice_email(
     pdf: bytes,
     filename: str,
     cc: Sequence[str] = (),
+    subject: str | None = None,
+    body: str | None = None,
 ) -> None:
     """La factura emitida, con el PDF adjunto.
 
@@ -212,21 +241,24 @@ def send_invoice_email(
     quien apretó "Mandar por email" no pidió otra cosa— así que si no sale, el endpoint tiene
     que decirlo. Es el mismo criterio que el mail de confirmación de cuenta.
 
-    El asunto lleva el número del comprobante y la razón social del emisor porque es lo que el
-    destinatario ve en la lista de su casilla, y "Factura" a secas no le dice de quién es.
+    `subject` y `body` son el texto propio del modelo del que salió la factura, cuando lo tiene
+    y cuando el plan lo permite. Quien decide esas dos cosas es el endpoint de envío, que es el
+    que conoce la factura y la cuenta; acá llegan resueltos, porque este módulo escribe textos
+    y no consulta planes.
 
-    Los importes llegan ya formateados: quien los sabe formatear es `invoice_pdf`, y hacerlo
-    otra vez acá sería una segunda forma de escribir el mismo número.
+    **Caen en el default por separado.** Son dos `or` y no un `if` sobre los dos juntos: el que
+    solo quiso cambiar el cuerpo conserva el asunto que arma la app, que es el que lleva el
+    número del comprobante y la razón social. `or` y no `is None` porque un texto en blanco es
+    lo mismo que ninguno — el schema ya lo convierte a `None` al guardarlo, y esto es la red
+    por si algún día entra por otro lado.
+
+    Lo que **no** cambia con un texto propio es el adjunto: el PDF va siempre. El texto
+    acompaña al comprobante, no lo reemplaza.
     """
     email.send_email(
         to=to,
-        subject=f"Factura {label} de {issuer_name}",
-        body=(
-            "Hola,\n\n"
-            f"Te adjuntamos la factura {label} de {issuer_name} por $ {total}.\n\n"
-            "El comprobante está autorizado por ARCA; el CAE y su vencimiento figuran al pie "
-            "del PDF.\n"
-        ),
+        subject=subject or default_invoice_subject(label, issuer_name),
+        body=body or default_invoice_body(label, issuer_name, total),
         attachments=[email.Attachment(filename=filename, content=pdf)],
         cc=cc,
     )

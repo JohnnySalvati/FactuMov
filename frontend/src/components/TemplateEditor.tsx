@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { useNavigate } from 'react-router'
+import { Link, useNavigate } from 'react-router'
 
 import { money } from '../format'
 import {
@@ -22,6 +22,7 @@ import {
   type TemplateForm,
 } from '../forms/templateForm'
 import { usePointsOfSale, type PointsOfSaleState } from '../hooks/usePointsOfSale'
+import { useCustomEmailEnabled } from '../subscription/useCustomEmailEnabled'
 import { Notice } from './Notice'
 import { PickerField } from './PickerField'
 
@@ -260,6 +261,8 @@ export function TemplateEditor({
         </p>
       </div>
 
+      <EmailCard value={value} onChange={patch} />
+
       <Notice kind="error">{error}</Notice>
 
       {canSubmit && (
@@ -268,6 +271,116 @@ export function TemplateEditor({
         </button>
       )}
     </form>
+  )
+}
+
+/**
+ * El mail con el que se manda la factura emitida de este modelo: asunto y cuerpo.
+ *
+ * **Vacío significa "el mail de FactuMov"**, no un mail en blanco, y por eso los dos campos
+ * van con el texto por default de placeholder en vez de sembrados con él. Sembrarlos sería
+ * convertir a todo el mundo en alguien que escribió un texto propio: el día que se corrija la
+ * redacción del mail de la app, los modelos que nunca se tocaron seguirían mandando la copia
+ * vieja. Y en el editor, la diferencia entre gris y negro es la que dice si esto es tuyo.
+ *
+ * **Es un texto fijo, sin variables**, y el placeholder lo deja a la vista: lo que se escriba
+ * sale igual en todas las facturas de este modelo. El número del comprobante, el importe y el
+ * CAE están en el PDF adjunto, que va siempre — el mail es el acompañamiento, no el
+ * comprobante. La alternativa (aceptar `{cliente}`, `{total}`) es una plantilla que hay que
+ * enseñar y que se rompe en silencio con una llave mal cerrada, sobre un mail que sale para
+ * afuera.
+ *
+ * Con el plan Free los campos se ven pero no se editan, y el aviso dice por qué. Se ven, y no
+ * se esconden, porque esconderlos deja al que no es Pro sin manera de enterarse de que esto
+ * existe — que es exactamente la información que la pantalla del plan necesita que tenga. Y si
+ * hay un texto guardado de cuando la cuenta era Pro, aparece con su aviso propio: sigue ahí,
+ * no se está usando, y se puede borrar aunque no se pueda editar.
+ *
+ * En el mismo archivo que el editor por lo mismo que `LineFields` y `PointOfSaleField`: no lo
+ * usa nadie más.
+ */
+/** El cuerpo por default, con datos de ejemplo. Es el placeholder del campo de texto. */
+const PLACEHOLDER_BODY = `Hola,
+
+Te adjuntamos la factura B 0001-00000123 de Fulano SRL por $ 42.350,00.
+
+El comprobante está autorizado por ARCA; el CAE y su vencimiento figuran al pie del PDF.`
+
+function EmailCard({
+  value,
+  onChange,
+}: {
+  value: TemplateForm
+  onChange: (changes: Partial<TemplateForm>) => void
+}) {
+  const enabled = useCustomEmailEnabled()
+  const hasOwnText = value.email_subject.trim() !== '' || value.email_body.trim() !== ''
+
+  return (
+    <div className="card stack">
+      <h2>Mail al cliente</h2>
+
+      {enabled ? (
+        <p className="field-hint" style={{ margin: 0 }}>
+          Lo que le llega al cliente cuando le mandás una factura emitida con este modelo. Si
+          los dejás vacíos mandamos el texto de FactuMov, que es el que está en gris.
+        </p>
+      ) : (
+        <Notice kind="warn">
+          Escribir el texto del mail es del plan Pro — <Link to="/plan">ver tu plan</Link>. Con
+          el plan Free se manda el texto de FactuMov, que lleva el número del comprobante, tu
+          razón social y el importe.
+        </Notice>
+      )}
+
+      <div>
+        <label htmlFor="t-email-subject">Asunto</label>
+        <input
+          id="t-email-subject"
+          maxLength={200}
+          disabled={!enabled}
+          placeholder="Factura B 0001-00000123 de Fulano SRL"
+          value={value.email_subject}
+          onChange={(event) => onChange({ email_subject: event.target.value })}
+        />
+      </div>
+
+      <div>
+        <label htmlFor="t-email-body">Texto</label>
+        <textarea
+          id="t-email-body"
+          rows={5}
+          maxLength={2000}
+          disabled={!enabled}
+          placeholder={PLACEHOLDER_BODY}
+          value={value.email_body}
+          onChange={(event) => onChange({ email_body: event.target.value })}
+        />
+        <span className="field-hint">
+          Es un texto fijo: sale igual en todas las facturas de este modelo. El número, el
+          importe y el CAE van en el PDF, que se adjunta siempre.
+        </span>
+      </div>
+
+      {!enabled && hasOwnText && (
+        <>
+          <p className="totals-note" style={{ margin: 0 }}>
+            Este texto lo escribiste cuando tenías Pro. Sigue guardado y vuelve solo si volvés
+            a Pro; mientras tanto se manda el de FactuMov.
+          </p>
+          {/* Borrarlo se permite siempre, también sin Pro: lo que deja en su lugar es el mail
+              por default, así que nunca puede empeorar nada. Es la única salida del que ya no
+              puede editarlo — el backend hace la misma distinción. */}
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => onChange({ email_subject: '', email_body: '' })}
+          >
+            Borrar el texto que tenía
+          </button>
+        </>
+      )}
+    </div>
   )
 }
 

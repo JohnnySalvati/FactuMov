@@ -17,6 +17,7 @@ primeros Pro pagando, no antes.
 | Comprobantes por mes | 5 | sin límite |
 | Identidades fiscales | 1 | sin límite |
 | Dictado por voz | no | sí |
+| Texto del mail de cada modelo | no | sí |
 | Todo lo demás | sí | sí |
 
 **El corte del Free es por volumen, no por cantidad de entidades, y esa es la decisión de
@@ -147,6 +148,23 @@ en el navegador (Web Speech API) y lo único que llega al servidor es el formula
 `voice_enabled` le dice al frontend qué *ofrecer*, no qué permitir. Y está bien: lo que la voz
 ahorra es la parte reversible del camino —llenar campos—, mientras que emitir, que es lo
 irreversible, pasa igual por `can_emit`.
+
+### El texto del mail es el único límite que se aplica dos veces (2026-09-01)
+`custom_email_enabled` decide **si el texto se puede guardar** —el 402 de
+`POST`/`PATCH /invoice-templates`— y además **si se usa al enviar**, que lo mira
+`POST /invoices/{id}/send` en el momento del envío. Los otros límites se aplican una sola vez,
+en la acción que corta.
+
+La segunda mitad es la excepción a *bajar de plan nunca borra datos*, y es una excepción de
+uso y no de datos: el texto que un ex-Pro escribió sigue guardado y vuelve solo el día que
+vuelve el plan; lo que sale mientras tanto es el mail de FactuMov, que dice lo mismo con otras
+palabras. La diferencia con las identidades fiscales —donde el ex-Pro conserva las tres **y las
+sigue usando**— es qué significa dejar de usar cada cosa: allá, no poder facturar con un CUIT;
+acá, mandar el otro texto. Ver *Emisión y envío → El texto del mail vive en el modelo*.
+
+**Borrarlo no pide Pro**, y esa asimetría es deliberada: es la única salida del que ya no puede
+editarlo, y lo que deja en su lugar es el default. Un límite que impide *sacar* algo no protege
+nada; solo deja al usuario encerrado con un texto ajeno a su plan.
 
 ## La baja (2026-08-31)
 

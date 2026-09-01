@@ -48,6 +48,10 @@ class SubscriptionRead(BaseModel):
     fiscal_identities_limit: int | None
     can_emit: bool
     can_add_fiscal_identity: bool
+    # Si el modelo puede tener su propio texto de mail. Lo lee el editor para ofrecer los dos
+    # campos o el aviso de Pro; el que **manda** el mail no lee esto sino el `Entitlements` del
+    # momento del envío, que es el que decide qué texto sale.
+    custom_email_enabled: bool
     voice_enabled: bool
 
 

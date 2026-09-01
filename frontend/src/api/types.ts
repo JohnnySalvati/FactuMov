@@ -353,6 +353,19 @@ export interface InvoiceTemplate {
   voucher_type: VoucherType
   pos: number
   concepto: Concepto
+  /**
+   * El asunto y el cuerpo del mail con el que se manda la factura emitida de este modelo.
+   *
+   * **`null` no es "sin texto": es "el mail de FactuMov"**, el que la app manda desde siempre
+   * y el que tienen todos los modelos que nadie personalizó. La pantalla lo dibuja como el
+   * campo vacío, no como un mail en blanco.
+   *
+   * Escribirlos es del plan Pro (`custom_email_enabled`), y el plan decide dos cosas: si se
+   * pueden guardar y si se usan al enviar. Un Free con un texto guardado de cuando era Pro lo
+   * conserva y mientras tanto manda el default.
+   */
+  email_subject: string | null
+  email_body: string | null
   created_at: string
   updated_at: string
   lines: InvoiceTemplateLine[]
@@ -366,6 +379,12 @@ export interface InvoiceTemplateCreate {
   // sería decirle al servidor algo que él sabe mejor — y que puede cambiar después.
   pos: number
   concepto: Concepto
+  // El texto propio del mail, o `null` para mandar el de FactuMov. El campo vacío del
+  // formulario viaja como `null` y no como `''`: son lo mismo para el backend —el schema lo
+  // normaliza— pero mandar el vacío haría que el 402 del plan se dispare sobre un modelo que
+  // no personalizó nada.
+  email_subject: string | null
+  email_body: string | null
   lines: InvoiceTemplateLineCreate[]
 }
 
@@ -672,6 +691,8 @@ export interface Subscription {
   fiscal_identities_limit: number | null
   can_emit: boolean
   can_add_fiscal_identity: boolean
+  /** Si el modelo puede tener su propio texto de mail. Lo lee el editor del modelo. */
+  custom_email_enabled: boolean
   voice_enabled: boolean
 }
 

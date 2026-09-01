@@ -32,6 +32,29 @@ class InvoiceTemplate(Base, TimestampMixin):
         Enum(Concepto), default=Concepto.products, server_default=Concepto.products.name
     )
 
+    # --- El mail con el que se manda la factura emitida de este modelo ---
+    #
+    # Dos columnas y no una: el asunto es lo que el destinatario ve en la lista de su casilla y
+    # el cuerpo es lo que lee al abrir, así que se escriben por separado y se pueden
+    # personalizar por separado. Cada una cae en el texto por default de forma independiente —
+    # el que solo quiso cambiar el cuerpo conserva el asunto que arma la app, con el número del
+    # comprobante y la razón social adentro.
+    #
+    # **`None` significa "el texto de la app", no "sin texto".** Es lo que tienen todos los
+    # modelos que existían antes de esta columna y lo que sigue siendo el default de los
+    # nuevos: el mail que ya se venía mandando. Un string vacío sería otra cosa —un mail sin
+    # asunto— y por eso el schema lo convierte a `None` en vez de guardarlo.
+    #
+    # **Van acá y no en `invoices`.** El texto del mail es una pregunta sobre el envío que se
+    # está por hacer, no un hecho de la emisión: es la misma razón por la que el mail del
+    # cliente se lee en vivo y no se copia al emitir. Ver *La factura emitida es lo contrario
+    # del modelo* en `docs/emision-y-envio.md`. La consecuencia es que corregirle una falta de
+    # ortografía al texto arregla también los reenvíos de las facturas viejas, que es lo que
+    # uno espera; y que borrar el modelo (`template_id` es SET NULL) devuelve sus facturas al
+    # texto por default, que es el único comportamiento posible cuando el texto se fue con él.
+    email_subject: Mapped[str | None] = mapped_column(String(200))
+    email_body: Mapped[str | None] = mapped_column(String(2000))
+
     fiscal_identity: Mapped["FiscalIdentity"] = relationship(back_populates="invoice_templates")
     customer: Mapped["Customer"] = relationship(back_populates="invoice_templates")
     lines: Mapped[list["InvoiceTemplateLine"]] = relationship(

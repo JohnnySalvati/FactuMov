@@ -78,6 +78,12 @@ Emitir = tomar un `InvoiceTemplate`, permitir retoques, y crear una `Invoice` nu
 - **`lines` con `min_length=1` en create y update, y `None` como "no tocar".** Un template sin
   líneas no se puede emitir, así que `[]` es 422 y el CRUD solo distingue entre `None` y una
   lista no vacía.
+- **`email_subject` y `email_body` son nullable y sin `server_default`** (2026-09-01, migración
+  `d7f3b0c81a95`). `NULL` no significa "sin texto" sino "el mail que la app manda desde
+  siempre", que es lo que tienen todos los modelos anteriores a las columnas; un
+  `server_default` con el texto de hoy le congelaría a cada fila una copia que dejaría de
+  actualizarse el día que se corrija la redacción. El texto se lee en vivo al enviar y no se
+  copia a la factura — ver *Emisión y envío → El texto del mail vive en el modelo*.
 
 ## La letra del comprobante se deduce (2026-08-26)
 **A, B o C no es una elección del usuario: es una consecuencia de quién le factura a quién.**

@@ -684,6 +684,36 @@ significaba dependía de la letra.
   formulario, donde los campos son largos; estos cuatro son números cortos, y apilados dejaban
   el importe de la línea fuera de la pantalla justo mientras se cargan precios.
 
+## El mail del modelo se edita en el modelo (2026-09-01)
+El editor tiene una tarjeta más, "Mail al cliente", con el asunto y el texto que van a salir
+cuando se mande una factura emitida con ese modelo. Es del plan Pro.
+
+- **Vacío es "el mail de FactuMov", y por eso el default va de placeholder y no sembrado.**
+  Sembrar los campos con el texto de la app convertiría a todo el mundo en alguien que escribió
+  un texto propio: el día que se corrija esa redacción, los modelos que nadie tocó seguirían
+  mandando la copia vieja. Además, en un formulario la diferencia entre el gris y el negro es
+  exactamente la que dice si eso lo escribió el usuario.
+- **El placeholder del cuerpo es el mail entero con datos de ejemplo**, no una instrucción. Lo
+  que hay que contestar antes de escribir es "¿qué se manda si no toco nada?", y la respuesta a
+  eso es el texto, no una descripción del texto.
+- **Con Free los campos se ven apagados, no escondidos.** Es la diferencia con el dictado por
+  voz, que se esconde entero. La voz se anuncia sola —hay micrófonos por toda la app y la
+  pantalla del plan la nombra— mientras que un campo que no existe no le cuenta a nadie que la
+  función existe. Y acá hay algo más que mostrar: el texto que el usuario escribió cuando era
+  Pro sigue guardado, y esconderlo dejaría un mail invisible que no se está usando.
+- **Y si hay texto guardado, aparece un botón para borrarlo.** Borrar no pide Pro —el backend
+  hace la misma distinción— porque lo que deja en su lugar es el default: es la única salida
+  del que ya no puede editarlo.
+- **El campo vacío viaja como `null` y no como `''`.** Para el backend son lo mismo, pero el
+  402 del plan se dispara sobre los textos que llegan con contenido: mandando el vacío, un Free
+  chocaría el límite de Pro al guardar un modelo en el que no escribió ningún mail.
+- **`useCustomEmailEnabled` devuelve `true` mientras no se sabe el plan**, igual que
+  `useVoiceEnabled` y por el mismo motivo — ver *El plan de la cuenta*. La diferencia es que
+  acá el backend sí puede hacer cumplir el límite, así que equivocarse hacia el lado permisivo
+  termina en un 402 con su explicación y no en una función regalada.
+- **Es un texto fijo, sin variables**, y el texto de ayuda debajo del campo lo dice: sale igual
+  en todas las facturas de ese modelo. El número, el importe y el CAE están en el PDF adjunto.
+
 ## El plan de la cuenta (2026-08-31)
 
 Ver [*Monetización → Las pantallas del plan*](monetizacion.md) por las decisiones de producto.

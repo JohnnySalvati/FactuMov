@@ -18,6 +18,7 @@ from factumov.schemas.invoice import InvoiceRead
 # Importados como módulo y no por nombre, para que un test pueda parchearlos en un solo lugar
 # — el mismo criterio que `MAX_UPLOAD_BYTES` y `notifications.py`.
 from factumov.services import balance360, invoice_pdf, notifications
+from factumov.services import subscription as subscription_service
 from factumov.services.email import EmailDeliveryError
 from factumov.services.invoice_pdf import format_amount
 from factumov.services.rate_limit import RateLimiter
@@ -44,6 +45,39 @@ _REGISTER_LIMITER = RateLimiter(limit=120, window_seconds=60 * 60)
 _MAIL_UNAVAILABLE_DETAIL = (
     "No pudimos mandar el mail. La factura está emitida igual: reintentá en unos minutos."
 )
+
+
+def _custom_email_text(
+    db: SessionDep, invoice: Invoice, user_id: uuid.UUID
+) -> tuple[str | None, str | None]:
+    """El asunto y el cuerpo que el usuario le escribió al modelo del que salió esta factura.
+
+    `(None, None)` es la respuesta normal y significa "mandá el texto de FactuMov". Hay tres
+    caminos que llegan ahí y ninguno es un error:
+
+    - **El modelo no tiene texto propio**, que es el caso de casi todos.
+    - **El modelo no está**: `invoices.template_id` es `SET NULL`, así que borrar el modelo del
+      año pasado deja a sus facturas sin procedencia. El texto se fue con él y no hay dónde
+      buscarlo — es el precio de leerlo en vivo en vez de copiarlo al emitir, y es el mismo
+      precio que ya se paga con el mail del cliente.
+    - **La cuenta ya no es Pro.** El texto sigue guardado y vuelve solo si vuelve el plan; lo
+      que sale mientras tanto es el default, que dice lo mismo con otras palabras. Ver
+      `Entitlements.custom_email_enabled`.
+
+    El orden de los dos chequeos importa por lo que cuesta el segundo: `entitlements` son dos
+    `COUNT`, y preguntarlos antes de mirar el modelo se los cobraría a todos los envíos para
+    contestar sobre un texto que en la enorme mayoría no existe.
+
+    Se llama **antes del commit** por lo mismo que el PDF y los importes: después, la sesión
+    expira los objetos y tocar `invoice.template` sería una query nueva sobre una transacción
+    que se cerró a propósito.
+    """
+    template = invoice.template
+    if template is None or (template.email_subject is None and template.email_body is None):
+        return None, None
+    if not subscription_service.entitlements(db, user_id).custom_email_enabled:
+        return None, None
+    return template.email_subject, template.email_body
 
 
 def get_invoice_or_404(invoice_id: uuid.UUID, db: SessionDep, user: CurrentUserDep) -> Invoice:
@@ -107,6 +141,13 @@ def send_invoice(invoice: InvoiceDep, db: SessionDep, user: CurrentUserDep) -> I
     dirección se lee de la ficha del cliente en cada envío, así que volver a esta factura
     después de completarla la deja mandable.
 
+    **El texto del mail también sale del modelo en vivo**, y es Pro. Si el modelo del que
+    salió esta factura tiene asunto o cuerpo propios y la cuenta es Pro, se manda ese texto; si
+    no, el de FactuMov. Se lee al enviar y no se copia al emitir por el mismo motivo que el
+    mail del cliente: qué decirle al destinatario es una pregunta sobre el envío que se está
+    por hacer, no un hecho que ARCA haya autorizado. La consecuencia es la que uno espera —
+    corregirle una falta de ortografía al modelo arregla también los reenvíos de lo ya emitido.
+
     **El CC sale de la ficha del cliente**, también en vivo: las direcciones que cargó para
     que reciban copia (el contador, el gestor). No hay 409 si están vacías —el CC es
     opcional— y `sent_to` sigue registrando solo el destinatario principal: a quién se copió
@@ -137,6 +178,7 @@ def send_invoice(invoice: InvoiceDep, db: SessionDep, user: CurrentUserDep) -> I
     label = invoice.label
     issuer_name = invoice.issuer_name
     total = format_amount(invoice.total)
+    subject, body = _custom_email_text(db, invoice, user.id)
     db.commit()
 
     try:
@@ -148,6 +190,8 @@ def send_invoice(invoice: InvoiceDep, db: SessionDep, user: CurrentUserDep) -> I
             pdf=pdf,
             filename=filename,
             cc=cc,
+            subject=subject,
+            body=body,
         )
     except EmailDeliveryError as error:
         logger.exception("No se pudo mandar la factura %s a %s", label, address)

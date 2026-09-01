@@ -12,6 +12,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
+from factumov.crud import subscription as subscription_crud
 from factumov.database import get_db
 from factumov.dependencies import SESSION_COOKIE_NAME
 from factumov.main import app
@@ -418,6 +419,25 @@ def other_user(db):
     other = factories.make_user(db, email_confirmed_at=datetime.now(UTC))
     factories.make_subscription(db, other.id)
     return other
+
+
+@pytest.fixture
+def free_plan(db, user):
+    """Deja al usuario de `client` en Free: su trial venció ayer.
+
+    Vencerlo es más fiel que borrar la fila. La cuenta sin suscripción existe —`entitlements`
+    la trata como Free y la loguea— pero no es un estado que la app pueda producir, así que
+    probar el Free contra ella estaría probando el caso anómalo y no el que van a tener miles.
+
+    Vive acá desde que lo piden tres archivos —el del plan, el del router de modelos y el del
+    envío—: un fixture copiado tres veces es tres definiciones de "qué es un Free" que pueden
+    dejar de coincidir, que es justo lo que este proyecto evita teniendo la política en un
+    solo módulo.
+    """
+    subscription = subscription_crud.get_for_user(db, user.id)
+    subscription.current_period_end = datetime.now(UTC) - timedelta(days=1)
+    db.flush()
+    return subscription
 
 
 @pytest.fixture

@@ -731,6 +731,96 @@ def test_the_subject_names_the_voucher_and_the_issuer(client, emitted, sent_emai
     assert emitted["issuer_name"] in sent_emails[0].subject
 
 
+# --- El texto propio del modelo ---
+#
+# El asunto y el cuerpo se leen del modelo del que salió la factura, en vivo y no copiados al
+# emitir: es la misma decisión que el mail del cliente, y por el mismo motivo — a quién y qué
+# decirle son preguntas sobre el envío que se está por hacer, no hechos que ARCA autorizó.
+
+
+@pytest.fixture
+def own_text(db, template):
+    """El modelo con asunto y cuerpo propios, escritos por el usuario."""
+    template.email_subject = "Tu factura de agosto"
+    template.email_body = "Hola Ana! Te mando la factura del mes. Gracias!"
+    db.flush()
+    return template
+
+
+def test_send_uses_the_templates_own_text(client, own_text, emitted, sent_emails):
+    client.post(f"/invoices/{emitted['id']}/send")
+
+    assert sent_emails[0].subject == "Tu factura de agosto"
+    assert sent_emails[0].body == "Hola Ana! Te mando la factura del mes. Gracias!"
+
+
+def test_the_own_text_still_carries_the_pdf(client, own_text, emitted, sent_emails):
+    """El texto acompaña al comprobante, no lo reemplaza."""
+    client.post(f"/invoices/{emitted['id']}/send")
+
+    assert sent_emails[0].attachments[0].content.startswith(b"%PDF-")
+
+
+def test_only_the_half_that_was_written_replaces_the_default(
+    client, template, db, emitted, sent_emails
+):
+    """Caen en el default por separado: el que solo cambió el cuerpo conserva el asunto."""
+    template.email_body = "Hola! Ahí va."
+    db.flush()
+
+    client.post(f"/invoices/{emitted['id']}/send")
+
+    assert sent_emails[0].body == "Hola! Ahí va."
+    assert sent_emails[0].subject == f"Factura {emitted['label']} de {emitted['issuer_name']}"
+
+
+def test_editing_the_text_afterwards_changes_the_resend(
+    client, own_text, db, emitted, sent_emails
+):
+    """Se lee en vivo: corregir el modelo arregla también los reenvíos de lo ya emitido."""
+    client.post(f"/invoices/{emitted['id']}/send")
+    own_text.email_body = "Corregido"
+    db.flush()
+
+    client.post(f"/invoices/{emitted['id']}/send")
+
+    assert [mail.body for mail in sent_emails] == [
+        "Hola Ana! Te mando la factura del mes. Gracias!",
+        "Corregido",
+    ]
+
+
+def test_deleting_the_template_falls_back_to_the_default_text(
+    client, own_text, db, emitted, sent_emails
+):
+    """`template_id` es SET NULL: el texto se fue con el modelo y no hay dónde buscarlo.
+
+    Es el precio de leerlo en vivo en vez de copiarlo al emitir, y el mismo que ya se paga con
+    el mail del cliente. Lo que no puede pasar es que el envío falle por eso.
+    """
+    assert client.delete(f"/invoice-templates/{own_text.id}").status_code == 204
+
+    response = client.post(f"/invoices/{emitted['id']}/send")
+
+    assert response.status_code == 200
+    assert sent_emails[0].subject == f"Factura {emitted['label']} de {emitted['issuer_name']}"
+
+
+def test_a_free_account_gets_the_default_text(
+    client, own_text, emitted, sent_emails, free_plan
+):
+    """El texto queda guardado y deja de usarse; lo que sale es el de FactuMov.
+
+    Es lo que distingue este límite del de las identidades fiscales, donde el ex-Pro conserva
+    las tres que cargó **y las sigue usando**: acá dejar de usar el texto propio no impide
+    nada, manda el otro.
+    """
+    client.post(f"/invoices/{emitted['id']}/send")
+
+    assert sent_emails[0].subject == f"Factura {emitted['label']} de {emitted['issuer_name']}"
+    assert "Te adjuntamos la factura" in sent_emails[0].body
+
+
 def test_send_records_when_it_went_out(client, emitted):
     assert emitted["sent_at"] is None
 

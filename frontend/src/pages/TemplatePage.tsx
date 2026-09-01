@@ -35,6 +35,12 @@ function fromTemplate(template: InvoiceTemplate): TemplateForm {
     // vieja apenas el usuario cambie de cliente.
     pos: String(template.pos),
     concepto: template.concepto,
+    // `null` es "el mail de FactuMov" y en el formulario eso es el campo vacío, que es lo que
+    // el editor dibuja con el texto por default de placeholder. Sembrarlo con ese texto haría
+    // que reabrir un modelo que nadie tocó lo convirtiera en uno con texto propio — y bastaría
+    // con guardar cualquier otro cambio para congelarle una copia del mail de la app.
+    email_subject: template.email_subject ?? '',
+    email_body: template.email_body ?? '',
     // Vienen ordenadas por `position`: lo declara el `order_by` de la relación en el modelo.
     lines: template.lines.map((line) =>
       newLine({

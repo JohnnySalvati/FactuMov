@@ -382,7 +382,8 @@ label {
 }
 
 input,
-select {
+select,
+textarea {
   width: 100%;
   padding: 0.6rem 0.7rem;
   border: 1px solid var(--border);
@@ -399,9 +400,28 @@ select {
 }
 
 input:focus,
-select:focus {
+select:focus,
+textarea:focus {
   outline: 2px solid var(--accent);
   outline-offset: -1px;
+}
+
+/* El único campo multilínea de la app: el texto del mail del modelo. Se agranda a lo alto y
+   nunca a lo ancho — un `resize` libre en un celular termina con el campo saliéndose de la
+   tarjeta. La altura la fija `rows`; esto solo deja tirar del borde de abajo. */
+textarea {
+  resize: vertical;
+  line-height: 1.4;
+}
+
+/* Los campos apagados: el Free ve el texto del mail y no lo puede editar. Se ven apagados y no
+   escondidos a propósito — ver `EmailCard` en `TemplateEditor.tsx`. */
+input:disabled,
+select:disabled,
+textarea:disabled {
+  background: var(--bg);
+  color: var(--muted);
+  cursor: not-allowed;
 }
 
 button {

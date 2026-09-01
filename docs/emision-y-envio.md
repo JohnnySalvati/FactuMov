@@ -320,6 +320,44 @@ siendo el destinatario principal (el `To`); esto es solo el `Cc`.
   direcciones con comas se escribe y se corrige mal. La pantalla de la factura muestra "con
   copia a …" al lado del botón de mandar, para que se sepa a quién más le llega.
 
+### El texto del mail vive en el modelo (2026-09-01, migración `d7f3b0c81a95`)
+`invoice_templates.email_subject` y `email_body`: el asunto y el cuerpo con los que se manda la
+factura emitida de ese modelo. **Es del plan Pro**, y `null` en las dos columnas —el estado de
+todo modelo que nadie personalizó— significa "el mail de FactuMov", que es el que la app viene
+mandando desde siempre.
+
+- **Va en el modelo y no en la factura**, o sea que se lee en vivo al enviar. Es la misma
+  decisión que el mail del cliente y el CC, y por el mismo motivo: qué decirle al destinatario
+  es una pregunta sobre el envío que se está por hacer, no un hecho fiscal que ARCA autorizó.
+  La consecuencia es la que uno espera — corregirle una falta de ortografía al modelo arregla
+  también los reenvíos de lo que ya se emitió — y el precio también: `invoices.template_id` es
+  `SET NULL`, así que borrar el modelo devuelve sus facturas al texto por default. No hay dónde
+  buscarlo, y no hace falta: el default dice lo mismo.
+- **Dos columnas y no una.** El asunto es lo que el destinatario ve en la lista de su casilla y
+  el cuerpo es lo que lee al abrir; se escriben por separado y **caen en el default por
+  separado**. El que solo quiso cambiar el cuerpo conserva el asunto que arma la app, que lleva
+  el número del comprobante y la razón social — que es justamente lo que hace falta para
+  encontrar el mail entre cien.
+- **Es texto fijo: no hay variables.** Nada de `{cliente}` ni `{total}`. Una plantilla hay que
+  enseñarla, se rompe en silencio con una llave mal cerrada y el resultado sale para afuera con
+  el nombre del emisor puesto. Lo que hace que el mail no quede genérico no es la plantilla sino
+  el adjunto: el número, el importe y el CAE están en el PDF, que va siempre. Si algún día hace
+  falta, agregar variables es compatible hacia atrás; sacarlas no.
+- **`""` se guarda como `null`.** Un `<textarea>` vacío no manda `null`, y las dos cosas
+  significan lo mismo: quien borra el campo pide volver al texto de la app, no mandar un mail en
+  blanco. Lo normaliza el schema, y por eso el frontend puede tener un solo `string` en el
+  formulario en vez de `string | null`.
+- **El plan se chequea dos veces y en dos lugares distintos**, porque son dos preguntas: el
+  router del modelo corta el guardado con un 402, y el endpoint de envío decide qué texto sale.
+  Un Free con un texto guardado de cuando era Pro lo conserva y manda el default. Ver
+  *Monetización → El texto del mail es el único límite que se aplica dos veces*.
+- **`_custom_email_text` mira el modelo antes que el plan.** `entitlements` son dos `COUNT`, y
+  preguntarlos primero se los cobraría a todos los envíos para contestar sobre un texto que en
+  la enorme mayoría no existe.
+- **Se lee antes del `commit`**, junto con el PDF y los importes: después la sesión expira los
+  objetos y tocar `invoice.template` sería una query nueva sobre una transacción que se cerró a
+  propósito.
+
 ### `/facturas` no es la grilla de tarjetas
 Es una pila de links con tres datos por renglón: qué comprobante, a quién y por cuánto. La
 grilla existe para pantallas donde se entra a un elemento **y se lo elimina**, y donde alcanza

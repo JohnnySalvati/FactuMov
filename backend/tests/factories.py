@@ -115,11 +115,17 @@ def make_template_create(
     descriptions=("First", "Second"),
     pos=1,
     concepto=Concepto.products,
+    email_subject=None,
+    email_body=None,
 ):
     """Build an `InvoiceTemplateCreate` payload.
 
     Takes ids rather than objects so a test can pass a `uuid4()` that matches no row and
     exercise the foreign-key branches of `exception_map`.
+
+    `email_subject` and `email_body` default to `None`, which is what the app means by "send
+    the default mail": the router only asks about the plan when one of them carries text, so
+    this default keeps every unrelated test out of the Pro check.
     """
     return InvoiceTemplateCreate(
         name=name,
@@ -127,6 +133,8 @@ def make_template_create(
         customer_id=customer_id,
         pos=pos,
         concepto=concepto,
+        email_subject=email_subject,
+        email_body=email_body,
         lines=[make_line_create(description=description) for description in descriptions],
     )
 
@@ -139,6 +147,8 @@ def make_invoice_template(
     lines=((0, "First"), (1, "Second")),
     pos=1,
     concepto=Concepto.products,
+    email_subject=None,
+    email_body=None,
 ):
     """Insert a template straight through the ORM.
 
@@ -152,6 +162,8 @@ def make_invoice_template(
         customer_id=customer.id,
         pos=pos,
         concepto=concepto,
+        email_subject=email_subject,
+        email_body=email_body,
         lines=[
             InvoiceTemplateLine(
                 position=position,
