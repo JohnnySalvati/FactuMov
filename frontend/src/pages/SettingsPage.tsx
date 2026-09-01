@@ -8,11 +8,12 @@ import type {
 } from '../api/types'
 import { useAuth } from '../auth/useAuth'
 import { Notice } from '../components/Notice'
-import { formatDate } from '../format'
+import { formatTimestamp } from '../format'
 import { useResource } from '../hooks/useResource'
+import { useSubscription } from '../subscription/useSubscription'
 
 /**
- * Los ajustes de la cuenta. Hoy tienen una sola sección: la conexión con Balance360.
+ * Los ajustes de la cuenta: el plan y la conexión con Balance360.
  *
  * Es una pantalla de ajustes y no "la pantalla de Balance360" aunque hoy sean lo mismo, y la
  * diferencia está en el acceso: se llega por un engranaje en la barra, que es donde cualquiera
@@ -47,6 +48,7 @@ export function SettingsPage() {
   const connection = data?.connection ?? null
 
   const { user } = useAuth()
+  const { plan } = useSubscription()
 
   // El mail arranca con el de la cuenta de FactuMov porque en la práctica suele ser el mismo,
   // pero es un valor por defecto y no un supuesto: son dos aplicaciones y dos cuentas, así que
@@ -125,6 +127,22 @@ export function SettingsPage() {
   return (
     <div className="page">
       <h1>Ajustes</h1>
+
+      {/* El plan va primero y en dos renglones: es de la cuenta entera, mientras que
+          Balance360 es una integración opcional. Lo que hay acá es un resumen y un link, no la
+          pantalla: el estado completo, lo que agrega Pro y la baja viven en `/plan`, que es
+          adonde también llegan los avisos de límite. Duplicarlo garantizaría que un día los
+          dos digan cosas distintas. */}
+      <h2>Plan</h2>
+      <p className="muted">
+        {plan === undefined
+          ? 'Cargando…'
+          : plan.is_pro
+            ? 'Tenés Pro: comprobantes sin límite, varias identidades fiscales y dictado por voz.'
+            : `Estás en Free: ${plan.invoices_used} de ${plan.invoices_limit} comprobantes este mes.`}{' '}
+        <Link to="/plan">Ver tu plan</Link>
+      </p>
+
       <h2>Balance360</h2>
       <p className="muted">
         Con la cuenta conectada, cada factura que emitas acá queda cargada en Balance360 como
@@ -158,7 +176,7 @@ export function SettingsPage() {
                   <dt>Última vez que anduvo</dt>
                   <dd>
                     {connection.verified_at !== null
-                      ? formatDate(connection.verified_at.slice(0, 10))
+                      ? formatTimestamp(connection.verified_at)
                       : 'nunca'}
                   </dd>
                 </div>

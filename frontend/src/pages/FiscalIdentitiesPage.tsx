@@ -6,6 +6,7 @@ import type { FiscalIdentity } from '../api/types'
 import { Notice } from '../components/Notice'
 import { TileGrid } from '../components/TileGrid'
 import { useResource } from '../hooks/useResource'
+import { useSubscription } from '../subscription/useSubscription'
 
 /**
  * Las identidades fiscales, con la misma grilla que los modelos.
@@ -26,6 +27,7 @@ import { useResource } from '../hooks/useResource'
 export function FiscalIdentitiesPage() {
   const fetcher = useCallback(() => api.get<FiscalIdentity[]>('/fiscal-identities'), [])
   const { data, error, loading, reload } = useResource(fetcher)
+  const { reload: reloadPlan } = useSubscription()
 
   // Lo que ARCA contestó recién, por identidad. Se guarda al lado de `data` en vez de
   // reescribirlo: `useResource` es dueño de esa lista y la vuelve a pedir al borrar, y un
@@ -127,6 +129,9 @@ export function FiscalIdentitiesPage() {
           onDelete={async (id) => {
             await api.delete<void>(`/fiscal-identities/${id}`)
             reload()
+            // Borrar una devuelve cupo: sin esto, el Free que elimina la que tenía sigue
+            // viendo el aviso de "ya la cargaste" en el alta.
+            reloadPlan()
           }}
         />
       )}

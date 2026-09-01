@@ -1,6 +1,7 @@
 import { useState } from 'react'
 
 import { armSpeech, hush, say, setSpeaks, speaks, speechOutputSupported } from '../speak'
+import { useVoiceEnabled } from '../subscription/useVoiceEnabled'
 
 /**
  * El interruptor de la voz de la app. Prendido, contesta hablando lo que entendió.
@@ -18,8 +19,13 @@ import { armSpeech, hush, say, setSpeaks, speaks, speechOutputSupported } from '
  */
 export function SpeakToggle() {
   const [on, setOn] = useState(speaks)
+  const voiceEnabled = useVoiceEnabled()
 
-  if (!speechOutputSupported) return null
+  // Sin la voz en el plan no hay interruptor, por lo mismo que no hay micrófonos: un botón
+  // que solo puede quedar apagado es un botón roto. Que además la app se quede callada de
+  // verdad lo garantiza `setVoiceAllowed`, que es una llave aparte de esta preferencia — así
+  // el que se hace Pro recupera la que tenía elegida.
+  if (!speechOutputSupported || !voiceEnabled) return null
 
   return (
     <button

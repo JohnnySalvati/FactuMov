@@ -5,6 +5,7 @@ import { needsServiceDates, type Concepto } from '../api/types'
 import { emitPath, matchTemplate, monthDates, parseSpokenCommand } from '../commands'
 import { useSpeechInput } from '../hooks/useSpeechInput'
 import { armSpeech, say } from '../speak'
+import { useVoiceEnabled } from '../subscription/useVoiceEnabled'
 import { SpeakToggle } from './SpeakToggle'
 
 interface Props {
@@ -93,6 +94,7 @@ function outcomeAloud(outcome: Outcome): string {
  */
 export function DictateCommand({ templates }: Props) {
   const navigate = useNavigate()
+  const voiceEnabled = useVoiceEnabled()
   const [heard, setHeard] = useState<string>()
   const [outcome, setOutcome] = useState<Outcome>()
 
@@ -140,7 +142,11 @@ export function DictateCommand({ templates }: Props) {
     if (speech.error !== undefined) say(speech.error)
   }, [speech.error])
 
-  if (!speech.supported) return null
+  // El dictado es del plan Pro. Se esconde entero y sin cartel: un micrófono deshabilitado
+  // con un "pasate a Pro" al lado convertiría la pantalla que se abre cien veces por semana
+  // en un aviso publicitario. Lo que Pro agrega se lee en `/plan`, que es donde se va a
+  // mirar cuando interesa.
+  if (!speech.supported || !voiceEnabled) return null
 
   return (
     <div className="voice-command">

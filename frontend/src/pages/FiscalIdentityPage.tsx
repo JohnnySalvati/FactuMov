@@ -12,15 +12,9 @@ import {
   type FiscalIdentityLookup,
 } from '../api/types'
 import { Notice } from '../components/Notice'
+import { formatTimestamp } from '../format'
+import { useSubscription } from '../subscription/useSubscription'
 import { useRegisterUnsavedChanges } from '../unsaved/hooks'
-
-function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString('es-AR', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-  })
-}
 
 function digitsOf(value: string) {
   return value.replace(/\D/g, '')
@@ -65,6 +59,7 @@ export function FiscalIdentityPage() {
 
 function FiscalIdentityScreen({ id }: { id?: string }) {
   const navigate = useNavigate()
+  const { plan, reload: reloadPlan } = useSubscription()
 
   // `null` es "no hay fila": en el alta es el estado final, y en la edición dura lo que tarda
   // la carga, que es lo que informa `loading`.
@@ -118,6 +113,19 @@ function FiscalIdentityScreen({ id }: { id?: string }) {
       <Notice kind="error">{loadError}</Notice>
       {loading && <p className="muted">Cargando…</p>}
 
+      {/* El límite se avisa **antes del paso del CUIT**, o sea antes de consultar el padrón.
+          El 402 del backend llega recién al guardar, después de que el usuario tipeó once
+          dígitos y de que se gastó una consulta a ARCA — que sale del certificado, que es uno
+          solo para toda la app. Solo en el alta: editar la identidad que ya se tiene no agrega
+          ninguna, igual que en el backend. */}
+      {id === undefined && plan !== undefined && !plan.can_add_fiscal_identity && (
+        <Notice kind="warn">
+          Con el plan Free podés tener {plan.fiscal_identities_limit} identidad fiscal y ya la
+          cargaste. Para facturar desde varios CUIT hace falta Pro — <Link to="/plan">ver tu
+          plan</Link>. Las que ya tenés siguen funcionando igual.
+        </Notice>
+      )}
+
       {!loading && loadError === undefined && (
         <>
           {current === undefined ? (
@@ -126,7 +134,13 @@ function FiscalIdentityScreen({ id }: { id?: string }) {
             <FiscalIdentityForm
               editing={identity ?? undefined}
               initial={current}
-              onCreated={() => navigate('/identidades')}
+              onCreated={() => {
+                // El alta movió el contador de identidades del plan, y el contexto vive
+                // mientras dure la sesión: sin esto, el aviso de arriba seguiría diciendo que
+                // queda lugar hasta que el usuario recargue la página.
+                reloadPlan()
+                navigate('/identidades')
+              }}
               onUpdated={setIdentity}
             />
           )}
@@ -592,7 +606,7 @@ function DelegationCard({
         ) : (
           <span className="badge pending">Sin verificar</span>
         )}
-        {verified && <span className="muted">Última: {formatDate(verified)}</span>}
+        {verified && <span className="muted">Última: {formatTimestamp(verified)}</span>}
         {busy && <span className="muted">Consultando ARCA…</span>}
         {!busy && autoNote !== undefined && <span className="muted">{autoNote}</span>}
       </div>
@@ -633,7 +647,7 @@ function DelegationCard({
 
       {verified === null && claimed !== null && (
         <Notice kind="warn">
-          <strong>Falta un paso nuestro.</strong> Nos avisaste el {formatDate(claimed)} y ARCA
+          <strong>Falta un paso nuestro.</strong> Nos avisaste el {formatTimestamp(claimed)} y ARCA
           todavía no nos habilita. Delegar tiene dos partes: vos designás a FactuMov y nosotros
           tenemos que aceptar esa designación en ARCA. Ya estamos en eso —{' '}
           <strong>te avisamos por email en cuanto puedas emitir</strong> y no hace falta que

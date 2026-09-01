@@ -636,12 +636,48 @@ desplegable.
 - **El default de `emptyForm` pasó de `'1'` a vacío**, que es lo que permite completarlo solo
   sin pisar nada y lo que obliga a elegir cuando hay varios.
 
+## El plan de la cuenta (2026-08-31)
+
+Ver [*Monetización → Las pantallas del plan*](monetizacion.md) por las decisiones de producto.
+Del lado del frontend lo que hay que saber es cómo viaja el dato.
+
+- **Un contexto y no un `useResource` por pantalla.** `SubscriptionProvider` pide
+  `GET /subscription` una vez y lo comparten seis lugares que fueron a hacer otra cosa: la
+  franja de cupo del layout, el alta de identidad fiscal, la pantalla de emitir, los dos
+  micrófonos y `/plan`. Es el primer dato de la app que no es "el recurso de una pantalla" sino
+  una propiedad de la cuenta, como la sesión — y por eso se maneja como la sesión.
+- **Va montado adentro de `RequireAuth` y como ruta de layout**, no envolviendo a `<App>` como
+  `AuthProvider`: el endpoint exige sesión, así que más afuera dispararía un 401 en cada visita
+  a las pantallas públicas. Una ruta de layout no agrega nada al DOM.
+- **El error del contexto lo muestra una sola pantalla, la de `/plan`.** Los demás consumidores
+  lo ignoran y se comportan como si no supieran: un cartel rojo en la grilla de modelos por un
+  dato accesorio a lo que el usuario fue a hacer sería peor que no avisar nada.
+- **Quien mueve un contador llama a `reload()`**: emitir, dar de alta una identidad fiscal y
+  borrarla. El contexto no se recarga al cambiar de pantalla porque no se desmonta.
+- **La voz se apaga por dos caminos, y son dos a propósito.** Los tres componentes que la
+  ofrecen preguntan por `useVoiceEnabled()`; `say()`, que se llama desde efectos sin contexto,
+  la mira en una llave de módulo (`setVoiceAllowed` en `speak.ts`) que el provider baja. Esa
+  llave es **distinta** de la preferencia del usuario, que se sigue guardando en
+  `localStorage`: mezclarlas haría que el Free apagara sin querer la que eligió para el día que
+  se haga Pro.
+- **Mientras no se sabe el plan, la voz queda prendida.** Empezar callado le saca los
+  micrófonos al Pro en cada carga de la app, y para siempre si la consulta falla.
+- **`formatTimestamp` es el hermano de `formatDate`**, y la diferencia importa: `formatDate`
+  recibe una fecha sin hora —la del comprobante, que es un día— y la parte a mano para que
+  ninguna zona horaria la mueva; `formatTimestamp` recibe un momento y lo muestra en la hora
+  del que mira. Cortar el ISO en diez caracteres, que es lo que hacían los ajustes, lo muestra
+  en UTC: de las 21 en adelante en Argentina eso ya es el día siguiente.
+
 ## Sin TanStack Query y sin Tailwind
 Las dos por el mismo motivo: resuelven problemas que esta app todavía no tiene.
 
 TanStack Query da caché compartida entre pantallas, deduplicación y revalidación en foco —
-y acá son cuatro pantallas, cada una con su propia lista. `useResource` son treinta líneas.
-Revisar cuando dos pantallas necesiten los mismos datos y empiecen a discrepar.
+y acá cada pantalla carga su propia lista. `useResource` son treinta líneas.
+
+El caso que la justificaría llegó el 2026-08-31 con el plan de la cuenta, que lo miran seis
+lugares a la vez, **y se resolvió con un contexto de veinte líneas** montado sobre el mismo
+`useResource`. Sigue faltando lo que la librería resuelve de verdad: varias pantallas pidiendo
+recursos *distintos* que se pisan, o revalidación que hoy nadie necesita. Revisar entonces.
 
 Tailwind: son formularios y tablas, y lo que se ahorraría en clases se pagaría en una
 dependencia con su propio build. Revisar cuando el editor de facturas traiga drag-and-drop.

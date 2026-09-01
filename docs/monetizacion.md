@@ -148,6 +148,73 @@ en el navegador (Web Speech API) y lo único que llega al servidor es el formula
 ahorra es la parte reversible del camino —llenar campos—, mientras que emitir, que es lo
 irreversible, pasa igual por `can_emit`.
 
+## La baja (2026-08-31)
+
+`POST /subscription/cancel`, sin body y devolviendo el estado ya recalculado.
+
+- **`POST .../cancel` y no `DELETE /subscription`.** El DELETE diría que la suscripción
+  desaparece, y no desaparece nada: la fila queda, el acceso sigue hasta `current_period_end`
+  y volver a pagar es la misma fila pasando a `ACTIVE` otra vez (`activate` limpia
+  `canceled_at`). Es una transición de estado y la ruta tiene que decir eso.
+- **Sin body**, que es la otra mitad del diseño de `schemas/subscription.py`: la baja es el
+  único cambio de plan que el usuario pide desde la app. Un PATCH del plan sería un endpoint
+  para hacerse Pro gratis.
+- **Devuelve los entitlements y no un 204.** La pantalla que aprieta el botón muestra el estado
+  y la fecha, y las dos cambian con la llamada; un 204 la obligaría a un `GET` inmediato para
+  pintar lo que el usuario acaba de hacer.
+- **Es idempotente y no reescribe `canceled_at`.** Esa columna registra *cuándo lo pidió*, así
+  que el segundo click —o el reintento de una respuesta que se perdió— la haría mentir sobre
+  una fecha que ya ocurrió.
+- **Un Free también puede llamar y no es un error**: su fila queda en `CANCELED` y el acceso no
+  cambia, porque ya no había ninguno que cortar. Quien decide a quién ofrecerle el botón es la
+  pantalla —solo a `ACTIVE` y `PAST_DUE`, que son los estados donde hay una renovación que
+  frenar—, pero esa es una regla de presentación y no puede vivir en la API: un 409 ahí sería
+  un caso más para el frontend a cambio de nada.
+- **Falta la mitad del proveedor.** Cuando el checkout exista, la fila puede tener un
+  `provider_subscription_id`, y marcarla sin cancelar el `preapproval` dejaría a Mercado Pago
+  cobrando todos los meses una suscripción que la app da por terminada. El lugar exacto donde
+  va esa llamada está marcado en el router; hoy ninguna fila tiene ese id porque nada lo
+  escribe.
+
+## Las pantallas del plan (2026-08-31)
+
+`/plan` es la contraparte de `GET /subscription`: qué plan hay, cuánto del cupo va usado, qué
+agrega Pro y cómo darse de baja. **Existe para que chocar un límite deje de ser un 402 crudo** —
+los dos gates contestan un texto que dice "pasate a Pro" y hasta ahora ese texto era una pared
+sin ningún lado adonde ir.
+
+- **Ruta propia y no una sección de Ajustes**, aunque se llegue desde ahí. La linkean los dos
+  avisos de límite y la franja de cupo, y una sección adentro de otra pantalla no se puede
+  linkear sin mandar al usuario a buscarla. Ajustes se queda con dos renglones y el link.
+- **El plan se pide una vez por sesión, en un contexto** (`SubscriptionProvider`) y no con un
+  `useResource` por pantalla. Lo consultan seis lugares que fueron a hacer otra cosa —la franja
+  de cupo, el alta de identidad fiscal, la pantalla de emitir, los dos micrófonos y la pantalla
+  del plan—, y uno por pantalla serían seis `GET /subscription` por vuelta, tres de ellos sobre
+  pantallas que se abren cien veces por semana. Está montado **adentro** de `RequireAuth`, al
+  revés que `AuthProvider`, porque el endpoint exige sesión.
+- **Quien mueve un contador lo recarga**: emitir, dar de alta una identidad fiscal y borrarla.
+  El contexto vive lo que dure la sesión, así que sin eso la franja seguiría mostrando el
+  número de antes de emitir — que es justo el momento en el que ese número importa.
+- **La franja de cupo aparece recién con el último comprobante**, y no antes. Es una tira arriba
+  de todas las pantallas: un contador permanente diciendo "1 de 5" sería una publicidad del plan
+  Pro en la pantalla que se abre cien veces por semana. Y no aparece nunca si el plan no se pudo
+  cargar — avisar de un cupo que no se conoce es peor que no avisar.
+- **Sin botón de pago todavía**, porque el checkout no existe: un botón que no cobra manda a un
+  callejón sin salida justo al que quería pagar. En su lugar hay un párrafo que dice que el pago
+  no está abierto todavía.
+- **El dictado por voz se esconde entero para el Free**, sin cartel ni micrófono deshabilitado,
+  por lo mismo que la franja no es un contador permanente. Son tres componentes —el comando, el
+  micrófono de cada fecha y el interruptor de la respuesta hablada— y la regla está escrita una
+  vez, en `useVoiceEnabled`. La respuesta hablada se apaga además con una llave aparte
+  (`setVoiceAllowed` en `speak.ts`) porque `say()` se llama desde efectos que no tienen
+  contexto; que sea una llave **aparte** de la preferencia del usuario es lo que hace que el día
+  que se haga Pro recupere la que tenía elegida.
+- **Cuando no se sabe el plan, la voz queda prendida.** Las dos formas de equivocarse no cuestan
+  lo mismo: empezar callado le saca los micrófonos al Pro en cada carga de la app —y para
+  siempre si la consulta falla—, y empezar hablando se los deja medio segundo de más al Free. La
+  voz es la parte reversible del camino; lo irreversible lo sigue cortando `can_emit` del lado
+  del backend.
+
 ## Precios y cobro — decidido, todavía no implementado
 
 **Anclado en USD y mostrado en pesos**, con revisión periódica anunciada. Precio en pesos fijo
@@ -188,19 +255,16 @@ negocio, y como cobro mensual sería un recordatorio por mes y una baja por olvi
 
 ### Lo que falta
 
-Esta unidad dejó el modelo, la política y los dos gates. Falta:
+Están el modelo, la política, los dos gates, la baja y las pantallas. Falta:
 
-- **El checkout y el webhook de Mercado Pago**, que es lo único que hoy puede escribir un
-  `ACTIVE`. El webhook tiene que ser **idempotente**: MP reintenta y manda el mismo evento más
-  de una vez. Ahí aparece la tabla `subscription_payments`, que es a la vez el historial y el
-  registro de idempotencia — no se creó ahora justamente porque no existe todavía nada que la
-  escriba.
-- **El endpoint de baja**, sin body: el único cambio de plan que el usuario pide desde la app.
-  Por eso `schemas/subscription.py` no tiene schema de entrada — un PATCH del plan sería un
-  endpoint para hacerse Pro gratis.
-- **Las pantallas**: el estado del plan, el aviso de cupo y el checkout. Hoy `GET
-  /subscription` devuelve todo lo que necesitan, incluidos `can_emit` y `can_add_fiscal_identity`
-  ya resueltos, para que la pantalla y el endpoint que corta la acción no puedan discrepar.
+- **El checkout y el webhook de Mercado Pago**, que es lo único que puede escribir un `ACTIVE`.
+  El webhook tiene que ser **idempotente**: MP reintenta y manda el mismo evento más de una vez.
+  Ahí aparece la tabla `subscription_payments`, que es a la vez el historial y el registro de
+  idempotencia — no existe todavía justamente porque no hay nada que la escriba.
+- **La otra mitad de la baja**: cancelar el `preapproval` del lado de Mercado Pago. Sin eso, una
+  cuenta dada de baja acá seguiría siendo cobrada allá. El lugar está marcado en
+  `routers/subscription.py`.
+- **El botón de pago en `/plan`**, que hoy es un párrafo diciendo que el cobro no está abierto.
 - **Los avisos del trial** por mail, en el día ~23 y el ~28, con el link de pago ya armado.
 - **Emitir las propias facturas de las suscripciones** con FactuMov, que es la mejor prueba de
   producto que el proyecto puede darse.

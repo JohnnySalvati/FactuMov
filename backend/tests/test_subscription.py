@@ -228,6 +228,74 @@ def test_an_account_without_a_subscription_is_free(client, db, user):
     assert body["invoices_limit"] == subscription_service.FREE_MONTHLY_INVOICES
 
 
+# --- POST /subscription/cancel --------------------------------------------------------------
+
+
+def test_cancelling_marks_the_row_without_cutting_the_access(client, db, user):
+    """El que da de baja con el período pago sigue adentro: ya lo pagó."""
+    response = client.post("/subscription/cancel")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "canceled"
+    assert body["is_pro"] is True
+    assert body["invoices_limit"] is None
+
+    db.expire_all()
+    assert subscription_crud.get_for_user(db, user.id).canceled_at is not None
+
+
+def test_cancelling_does_not_move_the_period(client, db, user):
+    before = subscription_crud.get_for_user(db, user.id).current_period_end
+
+    client.post("/subscription/cancel")
+
+    db.expire_all()
+    assert subscription_crud.get_for_user(db, user.id).current_period_end == before
+
+
+def test_cancelling_twice_does_not_rewrite_when_it_was_asked(client, db, user):
+    """`canceled_at` registra *cuándo lo pidió*. El segundo click no es un segundo pedido."""
+    client.post("/subscription/cancel")
+    db.expire_all()
+    first = subscription_crud.get_for_user(db, user.id).canceled_at
+
+    second = client.post("/subscription/cancel")
+
+    assert second.status_code == 200
+    assert second.json()["status"] == "canceled"
+    db.expire_all()
+    assert subscription_crud.get_for_user(db, user.id).canceled_at == first
+
+
+def test_a_free_account_can_cancel_and_nothing_changes(client, free_plan):
+    """No hay acceso que cortar, así que tampoco hay error que inventar."""
+    body = client.post("/subscription/cancel").json()
+
+    assert body["status"] == "canceled"
+    assert body["is_pro"] is False
+
+
+def test_cancelling_without_a_subscription_is_a_404(client, db, user):
+    db.delete(subscription_crud.get_for_user(db, user.id))
+    db.flush()
+
+    assert client.post("/subscription/cancel").status_code == 404
+
+
+def test_cancelling_needs_a_session(anonymous_client):
+    assert anonymous_client.post("/subscription/cancel").status_code == 401
+
+
+def test_cancelling_leaves_the_invoices_alone(client, db, user, fiscal_identity):
+    """Lo emitido nunca queda detrás del paywall: es documentación fiscal obligatoria."""
+    make_invoice(db, fiscal_identity, make_customer(db, user.id))
+
+    client.post("/subscription/cancel")
+
+    assert len(client.get("/invoices").json()) == 1
+
+
 # --- El límite de identidades fiscales ------------------------------------------------------
 
 

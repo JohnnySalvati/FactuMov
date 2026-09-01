@@ -1433,3 +1433,66 @@ button.mic.wide {
 .guide .notice {
   margin-top: 1.75rem;
 }
+
+/* --- El plan ------------------------------------------------------------------------- */
+/*
+ * El aviso de cupo vive en el layout, o sea pegado abajo de la barra y arriba de todas las
+ * pantallas. No es un `.notice`, que es lo que usa el resto de la app, y la diferencia es a
+ * propósito: aquellos son mensajes *de una pantalla* —van adentro del `.page`, con su margen y
+ * sus bordes redondeados— y este es una franja del marco. Con el borde redondeado y el margen
+ * de un `.notice` quedaría flotando arriba del contenido como si fuera de la pantalla que
+ * casualmente esté abierta.
+ *
+ * Casi siempre no se dibuja nada — ver `PlanBanner`.
+ */
+.plan-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.1rem 1rem;
+  font-size: 0.88rem;
+  border-bottom: 1px solid transparent;
+}
+
+.plan-banner.warn {
+  background: var(--warn-bg);
+  border-bottom-color: #ecd9a6;
+  color: var(--warn);
+}
+
+.plan-banner.error {
+  background: var(--danger-bg);
+  border-bottom-color: #f3c6c0;
+  color: var(--danger);
+}
+
+/* `color: inherit` para que el link no salga verde adentro de una franja ámbar o roja: lo que
+   lo señala como link es el subrayado y la negrita. La altura es la de siempre —44px, el dedo—
+   y es la que le termina de dar el alto a la franja, que por eso casi no lleva padding. */
+.plan-banner a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--touch);
+  color: inherit;
+  font-weight: 600;
+}
+
+.plan-heading {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.plan-features {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding-left: 1.15rem;
+  font-size: 0.92rem;
+}
+
+.plan-confirm {
+  margin: 0;
+  font-size: 0.92rem;
+}

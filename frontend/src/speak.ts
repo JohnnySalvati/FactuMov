@@ -59,8 +59,29 @@ function stored(): boolean {
 
 let enabled = speechOutputSupported && stored()
 
+/**
+ * Si el plan de la cuenta incluye la voz. Lo pone `SubscriptionProvider` con `voice_enabled`.
+ *
+ * Es una segunda llave y **no** se mezcla con la preferencia de arriba: son dos preguntas
+ * distintas —"¿lo tenés contratado?" y "¿lo querés prendido?"— y guardarlas juntas haría que
+ * el Free apagara sin querer la preferencia del día que se haga Pro.
+ *
+ * Arranca en `true` a propósito. Mientras el primer `GET /subscription` no volvió no se sabe
+ * qué plan hay, y las dos formas de equivocarse no cuestan lo mismo: empezar callado le saca
+ * la voz al Pro en cada carga de la app —que la pagó— y empezar hablando se la deja medio
+ * segundo al Free. Lo mismo cuando la consulta falla: la voz es la parte reversible del
+ * camino, y lo irreversible —emitir— lo sigue cortando el backend con `can_emit`.
+ */
+let allowed = true
+
+/** Prende o apaga la voz por plan. Apagarla corta lo que estuviera diciendo. */
+export function setVoiceAllowed(value: boolean) {
+  allowed = value
+  if (!value) hush()
+}
+
 export function speaks(): boolean {
-  return enabled
+  return enabled && allowed
 }
 
 export function setSpeaks(value: boolean) {
@@ -96,7 +117,7 @@ let armed = false
 export function armSpeech() {
   if (!speechOutputSupported) return
   hush()
-  if (armed || !enabled) return
+  if (armed || !speaks()) return
   const silent = new SpeechSynthesisUtterance(' ')
   silent.volume = 0
   window.speechSynthesis.speak(silent)
@@ -116,7 +137,7 @@ export function armSpeech() {
  * Pidiendo el idioma, la elige el sistema y siempre hay una.
  */
 export function say(text: string) {
-  if (!enabled || !speechOutputSupported || text === '') return
+  if (!speaks() || !speechOutputSupported || text === '') return
   window.speechSynthesis.cancel()
   const utterance = new SpeechSynthesisUtterance(text)
   utterance.lang = 'es-AR'

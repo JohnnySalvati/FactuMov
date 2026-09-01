@@ -3,6 +3,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { formatDate } from '../format'
 import { useSpeechInput } from '../hooks/useSpeechInput'
 import { armSpeech, say, spokenDate } from '../speak'
+import { useVoiceEnabled } from '../subscription/useVoiceEnabled'
 import { parseSpokenDate } from '../speech'
 
 interface Props {
@@ -41,6 +42,8 @@ export function DictateDate({ id, label, value, min, max, hint, onChange }: Prop
   // seguir diciendo la verdad después de que el usuario corrija el campo a mano: leyendo el
   // `value` del input diría "se escuchó «hoy» → 03/09/2026", que es un dictado que no ocurrió.
   const [last, setLast] = useState<{ heard: string; date?: string }>()
+  // El dictado es del plan Pro; el campo de fecha sigue estando y se tipea igual.
+  const voiceEnabled = useVoiceEnabled()
 
   const speech = useSpeechInput((heard) => {
     const today = new Date()
@@ -72,7 +75,7 @@ export function DictateDate({ id, label, value, min, max, hint, onChange }: Prop
           max={max}
           onChange={(event) => onChange(event.target.value)}
         />
-        {speech.supported && (
+        {speech.supported && voiceEnabled && (
           // `type="button"` **no es opcional**: el default de un `<button>` adentro de un
           // `<form>` es `submit`, y el formulario de esta pantalla emite una factura con CAE.
           // Sin esto, apretar el micrófono emitiría.

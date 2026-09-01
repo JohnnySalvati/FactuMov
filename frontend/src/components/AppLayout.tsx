@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router'
 
 import { BrandMark } from './BrandMark'
+import { PlanBanner } from './PlanBanner'
 import { useAuth } from '../auth/useAuth'
 import { useSwipeNav, type SwipeSection } from '../hooks/useSwipeNav'
 import { UnsavedChangesGuard } from '../unsaved/UnsavedChangesGuard'
@@ -95,6 +96,10 @@ export function AppLayout() {
           </button>
         </div>
       </header>
+      {/* El aviso de cupo va abajo de la barra y arriba del contenido, o sea en el layout y
+          no en una pantalla: el que se está por quedar sin comprobantes tiene que enterarse
+          esté donde esté, y no al apretar "Emitir". Casi siempre no dibuja nada. */}
+      <PlanBanner />
       {/* El `<Outlet />` va adentro de un contenedor propio y no suelto: el gesto necesita un
           elemento del que colgarse que cubra la pantalla entera y que no sea la barra —
           deslizar sobre las pestañas tiene que seguir siendo tocar una pestaña. */}

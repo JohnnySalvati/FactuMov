@@ -39,3 +39,22 @@ export function isoDate(value: Date): string {
   const pad = (part: number) => String(part).padStart(2, '0')
   return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`
 }
+
+/**
+ * Un instante ISO con hora (`2026-09-30T02:15:00Z`) → `29/09/2026`, en hora local.
+ *
+ * Es el complemento de `formatDate`, y la diferencia entre las dos no es de estilo: aquella
+ * recibe una **fecha sin hora** —la del comprobante, que es un día y no un momento— y por eso
+ * la parte a mano sin dejar que ninguna zona horaria la mueva. Esto recibe un **momento**
+ * —cuándo se verificó algo, hasta cuándo llega el período pagado— que ocurrió en un instante
+ * y que hay que mostrar en la hora del que mira. Cortar el string en los diez primeros
+ * caracteres, que es lo que se hacía antes en los ajustes, lo muestra en UTC: de las 21 en
+ * adelante en Argentina eso ya es el día siguiente, y el cartel adelanta un día.
+ */
+export function formatTimestamp(iso: string): string {
+  return new Date(iso).toLocaleDateString('es-AR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  })
+}

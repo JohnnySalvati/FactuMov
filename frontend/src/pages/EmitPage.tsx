@@ -14,6 +14,7 @@ import { SpeakToggle } from '../components/SpeakToggle'
 import { formatDate, isoDate, money } from '../format'
 import { useResource } from '../hooks/useResource'
 import { say, spokenAmount, spokenDate } from '../speak'
+import { useSubscription } from '../subscription/useSubscription'
 
 /**
  * La pantalla de confirmación de la emisión.
@@ -125,6 +126,7 @@ function EmitScreen({ id }: { id: string }) {
   )
   const preview = useResource(fetcher)
   const navigate = useNavigate()
+  const { plan, reload: reloadPlan } = useSubscription()
 
   const [params] = useSearchParams()
   const spoken = {
@@ -168,6 +170,10 @@ function EmitScreen({ id }: { id: string }) {
     }
     try {
       const invoice = await api.post<Invoice>(`/invoice-templates/${id}/emit`, body)
+      // El comprobante gastó cupo del mes. El contexto del plan vive mientras dure la sesión,
+      // así que sin esto el aviso de la barra seguiría diciendo el número de antes de emitir —
+      // que es justo el momento en el que ese número importa.
+      reloadPlan()
       // `replace` para que el "atrás" del navegador no vuelva a la pantalla de confirmar una
       // emisión que ya ocurrió.
       navigate(`/facturas/${invoice.id}`, { replace: true })
@@ -314,7 +320,20 @@ function EmitScreen({ id }: { id: string }) {
           )}
 
           {data.blocked_reason !== null ? (
-            <Notice kind="warn">{data.blocked_reason}</Notice>
+            <Notice kind="warn">
+              {data.blocked_reason}
+              {/* El link solo cuando el que bloquea es el plan. `blocked_reason` es un solo
+                  campo para dos motivos —el cupo y la delegación que falta— y con los dos
+                  puestos gana el de la delegación, así que mostrarlo siempre mandaría a la
+                  pantalla de suscripción a alguien cuyo problema está en ARCA. El plan lo
+                  decide `can_emit`, que es el mismo booleano que usa el backend. */}
+              {plan !== undefined && !plan.can_emit && (
+                <>
+                  {' '}
+                  <Link to="/plan">Ver tu plan</Link>.
+                </>
+              )}
+            </Notice>
           ) : (
             <Notice kind="warn">
               Esto le pide el CAE a ARCA y <strong>no se puede deshacer</strong>. Para dejar sin

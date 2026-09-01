@@ -619,3 +619,52 @@ export interface Balance360RegisterPendingResult {
   registered: number
   failed: number
 }
+
+/* --- El plan ------------------------------------------------------------------------ */
+
+/**
+ * Los cuatro estados de `subscriptions`. **No hay `free`**, y esa ausencia es la decisión:
+ * Free es lo que queda cuando ninguno de los cuatro está vigente, así que preguntarle al
+ * `status` si el usuario es Pro sería la pregunta equivocada — la contesta `is_pro`, que
+ * calcula el backend contra el reloj.
+ */
+export const SubscriptionStatus = {
+  trialing: 'trialing',
+  active: 'active',
+  past_due: 'past_due',
+  canceled: 'canceled',
+} as const
+export type SubscriptionStatus = (typeof SubscriptionStatus)[keyof typeof SubscriptionStatus]
+
+/**
+ * Lo que devuelven `GET /subscription` y `POST /subscription/cancel`. Espejo de
+ * `SubscriptionRead`.
+ *
+ * **Los permisos vienen resueltos** (`can_emit`, `can_add_fiscal_identity`, `voice_enabled`) y
+ * no se recalculan acá a partir de los contadores, aunque la cuenta sea de una línea. El que
+ * corta la acción es el backend, y si la pantalla dedujera el permiso por su cuenta bastaría
+ * con que alguien tocara una de las dos fórmulas para que el botón y el 402 discreparan —
+ * ofreciendo algo que después falla, o escondiendo algo que sí se podía. Es el mismo criterio
+ * por el que los importes del `preview` salen del servidor.
+ */
+export interface Subscription {
+  is_pro: boolean
+  /** `null` solo en el caso anómalo de una cuenta sin fila de suscripción, que es Free. */
+  status: SubscriptionStatus | null
+  /**
+   * Hasta cuándo llega el trial o el período pagado, en ISO con hora.
+   *
+   * **No es hasta cuándo hay acceso**: si un cobro falla, el backend suma sus días de gracia
+   * después de esta fecha. Es la fecha del "se renueva el …", que es la pregunta que el
+   * usuario tiene.
+   */
+  current_period_end: string | null
+  invoices_used: number
+  /** `null` = sin límite, o sea Pro. Cero sería lo contrario: hay que leer la ausencia. */
+  invoices_limit: number | null
+  fiscal_identities_used: number
+  fiscal_identities_limit: number | null
+  can_emit: boolean
+  can_add_fiscal_identity: boolean
+  voice_enabled: boolean
+}

@@ -10,6 +10,7 @@ import { AppLayout } from './components/AppLayout'
 import { PublicLayout } from './components/PublicLayout'
 import { RequireAuth } from './components/RequireAuth'
 import { AuthProvider } from './auth/AuthProvider'
+import { SubscriptionProvider } from './subscription/SubscriptionProvider'
 import { UnsavedChangesProvider } from './unsaved/UnsavedChangesProvider'
 import { ConfirmEmailPage } from './pages/ConfirmEmailPage'
 import { CustomerPage } from './pages/CustomerPage'
@@ -25,6 +26,7 @@ import { InvoicePage } from './pages/InvoicePage'
 import { InvoicesPage } from './pages/InvoicesPage'
 import { LoginPage } from './pages/LoginPage'
 import { NewTemplatePage } from './pages/NewTemplatePage'
+import { PlanPage } from './pages/PlanPage'
 import { RegisterPage } from './pages/RegisterPage'
 import { ResetPasswordPage } from './pages/ResetPasswordPage'
 import { SettingsPage } from './pages/SettingsPage'
@@ -65,40 +67,53 @@ const router = createBrowserRouter(
       </Route>
 
       <Route element={<RequireAuth />}>
-        <Route element={<AppLayout />}>
-          {/* La raíz es la grilla de modelos: es lo que se abre cien veces por semana. Las
-              identidades fiscales y los clientes son configuración —se tocan al empezar y
-              después casi nunca— así que dejar una de ellas de portada le cobraría un toque a
-              la pantalla principal en cada entrada. */}
-          <Route index element={<TemplatesPage />} />
-          {/* La literal antes que la dinámica es por costumbre y no por necesidad: el router
-              ordena por especificidad y `nuevo` le gana a `:id` igual. */}
-          <Route path="/modelos/nuevo" element={<NewTemplatePage />} />
-          <Route path="/modelos/:id" element={<TemplatePage />} />
-          {/* La confirmación de la emisión es su propia ruta y no un diálogo adentro del
-              modelo. Emitir es irreversible: separarlo en una pantalla es lo que impide que
-              un dedo mal apoyado al lado de "Guardar" pida un CAE de verdad. */}
-          <Route path="/modelos/:id/emitir" element={<EmitPage />} />
-          {/* Las facturas emitidas solo se leen: no hay ruta de alta ni de edición, y esa
-              ausencia es la decisión. Se crean emitiendo un modelo y no se corrigen. */}
-          <Route path="/facturas" element={<InvoicesPage />} />
-          <Route path="/facturas/:id" element={<InvoicePage />} />
-          {/* Identidades y clientes siguen la misma forma que los modelos: la grilla en la
-              ruta pelada y una pantalla por elemento. Que el id vaya en el path y no como
-              `?editar=` es lo que hace que el "mantener apretado" del editor de modelos sea
-              un link común. */}
-          <Route path="/identidades" element={<FiscalIdentitiesPage />} />
-          <Route path="/identidades/nueva" element={<FiscalIdentityPage />} />
-          <Route path="/identidades/:id" element={<FiscalIdentityPage />} />
-          <Route path="/clientes" element={<CustomersPage />} />
-          <Route path="/clientes/nuevo" element={<CustomerPage />} />
-          <Route path="/clientes/:id" element={<CustomerPage />} />
-          {/* Fuera de las cuatro pestañas y del gesto de deslizar: los ajustes se tocan una
-              vez y no se vuelven a mirar, así que ocupar un quinto lugar en la barra le
-              cobraría ancho a las cuatro que sí se usan todas las semanas. Se llega por el
-              engranaje, que en el celular es lo único de la derecha que se ve — el mail del
-              usuario está oculto abajo de 640px. */}
-          <Route path="/ajustes" element={<SettingsPage />} />
+        {/* El plan de la cuenta, pedido una vez para toda la sesión. Va **adentro** de
+            `RequireAuth` y no envolviendo a `<App>` como `AuthProvider`, porque
+            `GET /subscription` exige sesión: más afuera dispararía un 401 en cada visita a
+            las pantallas públicas —confirmar el mail, restablecer la contraseña— por un dato
+            que ahí no se usa. Es una ruta de layout, así que no agrega ningún elemento al
+            DOM: solo el contexto alrededor del `<Outlet />`. */}
+        <Route element={<SubscriptionProvider />}>
+          <Route element={<AppLayout />}>
+            {/* La raíz es la grilla de modelos: es lo que se abre cien veces por semana. Las
+                identidades fiscales y los clientes son configuración —se tocan al empezar y
+                después casi nunca— así que dejar una de ellas de portada le cobraría un toque a
+                la pantalla principal en cada entrada. */}
+            <Route index element={<TemplatesPage />} />
+            {/* La literal antes que la dinámica es por costumbre y no por necesidad: el router
+                ordena por especificidad y `nuevo` le gana a `:id` igual. */}
+            <Route path="/modelos/nuevo" element={<NewTemplatePage />} />
+            <Route path="/modelos/:id" element={<TemplatePage />} />
+            {/* La confirmación de la emisión es su propia ruta y no un diálogo adentro del
+                modelo. Emitir es irreversible: separarlo en una pantalla es lo que impide que
+                un dedo mal apoyado al lado de "Guardar" pida un CAE de verdad. */}
+            <Route path="/modelos/:id/emitir" element={<EmitPage />} />
+            {/* Las facturas emitidas solo se leen: no hay ruta de alta ni de edición, y esa
+                ausencia es la decisión. Se crean emitiendo un modelo y no se corrigen. */}
+            <Route path="/facturas" element={<InvoicesPage />} />
+            <Route path="/facturas/:id" element={<InvoicePage />} />
+            {/* Identidades y clientes siguen la misma forma que los modelos: la grilla en la
+                ruta pelada y una pantalla por elemento. Que el id vaya en el path y no como
+                `?editar=` es lo que hace que el "mantener apretado" del editor de modelos sea
+                un link común. */}
+            <Route path="/identidades" element={<FiscalIdentitiesPage />} />
+            <Route path="/identidades/nueva" element={<FiscalIdentityPage />} />
+            <Route path="/identidades/:id" element={<FiscalIdentityPage />} />
+            <Route path="/clientes" element={<CustomersPage />} />
+            <Route path="/clientes/nuevo" element={<CustomerPage />} />
+            <Route path="/clientes/:id" element={<CustomerPage />} />
+            {/* Fuera de las cuatro pestañas y del gesto de deslizar: los ajustes se tocan una
+                vez y no se vuelven a mirar, así que ocupar un quinto lugar en la barra le
+                cobraría ancho a las cuatro que sí se usan todas las semanas. Se llega por el
+                engranaje, que en el celular es lo único de la derecha que se ve — el mail del
+                usuario está oculto abajo de 640px. */}
+            <Route path="/ajustes" element={<SettingsPage />} />
+            {/* El plan es su propia ruta y no una sección de Ajustes: la linkean los dos avisos
+                de límite y el cartel de cupo de la barra, y una sección adentro de otra pantalla
+                no se puede linkear sin mandar al usuario a buscarla. Fuera de las pestañas por
+                lo mismo que Ajustes — se mira cuando algo lo trae, no todas las semanas. */}
+            <Route path="/plan" element={<PlanPage />} />
+          </Route>
         </Route>
       </Route>
 
