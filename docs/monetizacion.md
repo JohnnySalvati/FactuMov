@@ -248,7 +248,19 @@ sin ningún lado adonde ir.
   la pantalla con eso es volver a preguntar y explicar que la confirmación puede tardar unos
   segundos. Quien activa es el webhook: creerle a una query string sería dejar que cualquiera se
   haga Pro escribiéndola a mano.
-- **Al `PAST_DUE` se le ofrece contratar de nuevo, y a ningún otro Pro.** Es el caso de la
+- **La caja de contratar la ve todo el mundo menos el `ACTIVE`** (2026-09-01). La primera
+  versión la mostraba solo al Free —`!plan.is_pro`— y eso dejaba sin ninguna forma de pagar
+  justo a los dos que estaban pensando en hacerlo: el que está en la prueba, que es Pro mientras
+  dura y quería no quedarse sin nada cuando se termine, y el que se dio de baja y quiere volver.
+  El backend nunca los bloqueó; era la pantalla la que no ofrecía nada. El `ACTIVE` sigue afuera
+  porque un segundo `preapproval` son dos débitos automáticos por el mismo servicio, y ahí el
+  409 del backend es la regla de verdad.
+- **Al que está en la prueba se le dice que no la pierde.** Contratar durante el trial le manda
+  a Mercado Pago los días que faltan como `free_trial`, así que el primer cobro cae el día que
+  la prueba termina — sin esa frase, apretar el botón parece regalar los días que quedaban. Al
+  que se dio de baja se le dice lo contrario y con la misma franqueza: ahí el cobro entra en el
+  momento, no espera al período ya pagado, así que si no tiene apuro conviene esperar.
+- **Al `PAST_DUE` se le ofrece con otro texto: cambiar el medio de pago.** Es el caso de la
   tarjeta vencida o reemplazada, donde el reintento de Mercado Pago va a fallar siempre con la
   misma. El backend cancela la autorización anterior antes de crear la nueva.
 - **El dictado por voz se esconde entero para el Free**, sin cartel ni micrófono deshabilitado,

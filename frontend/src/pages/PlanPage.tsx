@@ -236,6 +236,20 @@ export function PlanPage() {
     plan !== undefined &&
     (plan.status === SubscriptionStatus.active || plan.status === SubscriptionStatus.past_due)
 
+  // A quién se le ofrece contratar. **No es solo el Free**, que es lo que esta pantalla hacía
+  // hasta ahora y dejaba sin ninguna forma de pagar a las dos únicas personas que estaban
+  // pensando en hacerlo: el que está en la prueba —que es Pro, `is_pro` en `true`, y quiere no
+  // quedarse sin nada cuando se termine— y el que se dio de baja y quiere volver.
+  //
+  // Los dos que no la ven son el `ACTIVE`, porque un segundo `preapproval` son dos débitos
+  // automáticos por el mismo servicio y el backend lo rechaza con un 409, y el `PAST_DUE`, que
+  // ya tiene su propia caja más arriba: ahí contratar es reemplazar la tarjeta que viene
+  // fallando, y el texto tiene que decir eso y no "empezá con Pro".
+  const offerable =
+    plan !== undefined &&
+    plan.status !== SubscriptionStatus.active &&
+    plan.status !== SubscriptionStatus.past_due
+
   return (
     <div className="page">
       <h1>Tu plan</h1>
@@ -331,23 +345,55 @@ export function PlanPage() {
             </Notice>
           )}
 
-          {!plan.is_pro && (
+          {offerable && (
             <div className="card stack">
-              <h2 className="plan-heading">Qué agrega Pro</h2>
-              <ul className="plan-features">
-                <li>
-                  <strong>Comprobantes sin límite.</strong> Con Free son {plan.invoices_limit} por
-                  mes.
-                </li>
-                <li>
-                  <strong>Varias identidades fiscales.</strong> Con Free es{' '}
-                  {plan.fiscal_identities_limit}, así que se factura desde un solo CUIT.
-                </li>
-                <li>
-                  <strong>Dictado por voz.</strong> Pedir la factura hablando, y que la app
-                  conteste en voz alta.
-                </li>
-              </ul>
+              {plan.status === SubscriptionStatus.trialing ? (
+                <>
+                  <h2 className="plan-heading">Seguí con Pro cuando termine la prueba</h2>
+                  {/* Contratar durante la prueba no la corta: el backend le manda a Mercado
+                      Pago los días que faltan como `free_trial`, así que la autorización queda
+                      hecha hoy y el primer cobro cae el día que la prueba se termina. Decirlo
+                      acá es lo que hace que apretar el botón no parezca perder los días que
+                      quedan — ver `_free_trial_days` en `services/mercadopago.py`. */}
+                  <p>
+                    Estás probando Pro hasta el {periodEnd(plan)}. Si contratás ahora no perdés
+                    los días que te quedan: el primer cobro entra recién cuando la prueba se
+                    termina, y de ahí en más no se corta nada.
+                  </p>
+                </>
+              ) : plan.is_pro ? (
+                <>
+                  <h2 className="plan-heading">Volver a contratar</h2>
+                  {/* El que se dio de baja y todavía tiene período pagado sí puede volver, pero
+                      pagando desde ahora: el `free_trial` solo respeta la prueba, no el período
+                      ya cobrado. Se avisa en vez de esconder el botón — el que quiere volver
+                      tiene que poder, y el que no tiene apuro merece saber que conviene
+                      esperar. */}
+                  <p>
+                    Contratar de nuevo reanuda la renovación. El cobro entra en el momento y no
+                    espera al {periodEnd(plan)}, así que si no tenés apuro conviene hacerlo
+                    cuando ese período se termine.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <h2 className="plan-heading">Qué agrega Pro</h2>
+                  <ul className="plan-features">
+                    <li>
+                      <strong>Comprobantes sin límite.</strong> Con Free son{' '}
+                      {plan.invoices_limit} por mes.
+                    </li>
+                    <li>
+                      <strong>Varias identidades fiscales.</strong> Con Free es{' '}
+                      {plan.fiscal_identities_limit}, así que se factura desde un solo CUIT.
+                    </li>
+                    <li>
+                      <strong>Dictado por voz.</strong> Pedir la factura hablando, y que la app
+                      conteste en voz alta.
+                    </li>
+                  </ul>
+                </>
+              )}
               <SubscribeBox />
             </div>
           )}
