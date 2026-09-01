@@ -112,6 +112,14 @@ la funcionalidad #1 del lado del backend: parser + draft + HTTP.
   el domicilio o la razón social.
 - **El draft sale sin nombre.** El nombre del template lo elige el usuario en el editor; el
   PDF no lo trae. Por eso `build_draft` no recibe ningún `name`.
+- **El draft sí lleva la letra que leyó el parser (`voucher_type`, 2026-09-01)**, aunque no se
+  guarde en ningún lado: el modelo la deduce del emisor y del receptor. Es lo que le dice al
+  editor **cómo leer el `unit_price` que viene acá** —neto en A, con el IVA adentro en B y C—
+  para sembrarlo en la columna que corresponde (ver [*El precio se carga sin IVA o con
+  IVA*](frontend.md)). No alcanzaba con deducirla del par emisor/receptor: al importar la
+  factura de un cliente que todavía no está en la cartera no hay par, y una A sembrada como si
+  el precio trajera el IVA adentro se guardaba un 21% abajo. Va `None` cuando el PDF no dijo la
+  letra, y ahí el editor asume IVA incluido.
 - **La ruta literal va declarada antes que `/{invoice_template_id}`.** FastAPI resuelve en
   orden de declaración y `GET /{invoice_template_id}` matchea el path
   `/invoice-templates/import`: con la literal abajo, el POST responde 405.

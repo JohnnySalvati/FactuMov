@@ -1135,6 +1135,23 @@ button.mic.wide {
   gap: 0.6rem;
 }
 
+/* Los cuatro campos de una línea: cantidad, precio sin IVA, alícuota y precio con IVA.
+   Van de a dos en el celular, y no uno abajo del otro como los de `.row`.
+
+   La regla de `.row` sigue valiendo para todo lo demás —ahí los campos son largos (un nombre,
+   una dirección) y dos al lado en 360 px no entran ni con calzador—. Estos cuatro son números
+   cortos y un desplegable de cinco caracteres: apilados hacen una línea de seis renglones, y
+   con dos líneas cargadas el importe queda abajo de todo, fuera de la pantalla, que es
+   justamente lo que uno mira mientras carga precios.
+
+   Las columnas no son iguales: la cantidad y la alícuota son más angostas que los precios, por
+   el mismo motivo que antes llevaban `.narrow`. */
+.line-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 0.75fr) minmax(0, 1fr);
+  gap: 0.6rem 0.5rem;
+}
+
 .line-head {
   display: flex;
   align-items: center;
@@ -1193,6 +1210,14 @@ button.mic.wide {
   .tiles {
     grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
     gap: 1rem;
+  }
+
+  /* Con lugar, los cuatro campos de la línea entran en un solo renglón. */
+  .line-fields {
+    grid-template-columns:
+      minmax(0, 0.75fr) minmax(0, 1fr)
+      minmax(0, 0.75fr) minmax(0, 1fr);
+    align-items: end;
   }
 
   .field-button {

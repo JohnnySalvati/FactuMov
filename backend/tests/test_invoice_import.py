@@ -9,7 +9,7 @@ from pathlib import Path
 
 from sqlalchemy import func, select
 
-from factumov.enums import DocType, IvaAliquot
+from factumov.enums import DocType, IvaAliquot, VoucherType
 from factumov.models.customer import Customer
 from factumov.routers import invoice_template
 from tests import factories
@@ -173,6 +173,22 @@ def test_import_reads_a_type_a_invoice(client):
         IvaAliquot.standard.value,
     ]
     assert [line["unit_price"] for line in draft["lines"]] == ["35000.00", "15000.00"]
+
+
+def test_import_carries_the_letter_of_the_parsed_invoice(client):
+    """La letra del PDF viaja en el draft, y no se guarda en ningún lado.
+
+    Es lo que le dice al editor **cómo leer el `unit_price` que viene en el draft**: en A es
+    neto y en B y C trae el IVA adentro. Sin ella, un draft de una A cuyo receptor todavía no
+    está en la cartera —o sea sin par emisor/cliente del que deducir la letra— se sembraría en
+    la columna equivocada y al guardarlo el precio quedaría un 21% corrido.
+
+    Las tres muestras son las tres letras, que es justo lo que hace falta cubrir: la C es la
+    del default de `post_import`.
+    """
+    assert post_import(client).json()["voucher_type"] == VoucherType.C.value
+    assert post_import(client, filename=SAMPLE_B).json()["voucher_type"] == VoucherType.B.value
+    assert post_import(client, filename=SAMPLE_A).json()["voucher_type"] == VoucherType.A.value
 
 
 def test_import_ignores_a_customer_whose_doc_type_differs(user, client, db):

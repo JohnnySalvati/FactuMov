@@ -7,15 +7,17 @@ import {
   IVA_ALIQUOT_LABELS,
   IvaAliquot,
   VOUCHER_TYPE_LABELS,
-  voucherTypeFor,
   type Concepto,
   type Customer,
   type FiscalIdentity,
+  type VoucherType,
 } from '../api/types'
 import {
+  formVoucherType,
   lineAmount,
   newLine,
   totals,
+  unitPriceFields,
   type LineForm,
   type TemplateForm,
 } from '../forms/templateForm'
@@ -70,11 +72,10 @@ export function TemplateEditor({
   // condición frente al IVA del emisor y de la del receptor. Antes había un desplegable con
   // seis opciones, cinco de las cuales eran siempre incorrectas para un par dado; ahora hay un
   // renglón que dice cuál sale. El backend hace la misma cuenta y es el que manda — acá se
-  // repite para poder mostrarla y sumar mientras el usuario todavía no guardó nada.
-  const issuer = fiscalIdentities.find((identity) => identity.id === value.fiscal_identity_id)
-  const customer = customers.find((option) => option.id === value.customer_id)
-  const voucherType =
-    issuer && customer ? voucherTypeFor(issuer.condicion_iva, customer.condicion_iva) : undefined
+  // repite para poder mostrarla, sumar y convertir el precio mientras el usuario todavía no
+  // guardó nada. La cuenta vive en `templateForm` porque las pantallas la necesitan igual para
+  // guardar: es la que decide si el precio de la línea va neto o con el IVA adentro.
+  const voucherType = formVoucherType(value, fiscalIdentities, customers)
 
   // Los puntos de venta del emisor elegido. Se piden acá y no en las pantallas porque el que
   // sabe qué identidad fiscal está elegida en este momento es el formulario.
@@ -218,49 +219,15 @@ export function TemplateEditor({
               onChange={(event) => patchLine(line.key, { description: event.target.value })}
             />
 
-            <div className="row">
-              <div className="narrow">
-                <label htmlFor={`${line.key}-qty`}>Cantidad</label>
-                <input
-                  id={`${line.key}-qty`}
-                  inputMode="decimal"
-                  value={line.quantity}
-                  onChange={(event) => patchLine(line.key, { quantity: event.target.value })}
-                />
-              </div>
-              <div>
-                <label htmlFor={`${line.key}-price`}>Precio unitario</label>
-                <input
-                  id={`${line.key}-price`}
-                  inputMode="decimal"
-                  placeholder="0,00"
-                  value={line.unit_price}
-                  onChange={(event) => patchLine(line.key, { unit_price: event.target.value })}
-                />
-              </div>
-              <div className="narrow">
-                <label htmlFor={`${line.key}-iva`}>IVA</label>
-                <select
-                  id={`${line.key}-iva`}
-                  value={line.iva_aliquot}
-                  onChange={(event) =>
-                    patchLine(line.key, {
-                      iva_aliquot: Number(event.target.value) as IvaAliquot,
-                    })
-                  }
-                >
-                  {Object.entries(IVA_ALIQUOT_LABELS).map(([code, label]) => (
-                    <option key={code} value={code}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
+            <LineFields
+              line={line}
+              voucherType={voucherType}
+              onChange={(changes) => patchLine(line.key, changes)}
+            />
 
             <div className="line-amount">
               <span className="muted">Importe</span>
-              <strong>{money.format(lineAmount(line))}</strong>
+              <strong>{money.format(lineAmount(line, voucherType))}</strong>
             </div>
           </div>
         ))}
@@ -301,6 +268,99 @@ export function TemplateEditor({
         </button>
       )}
     </form>
+  )
+}
+
+/**
+ * Los cuatro campos de una línea: cantidad, precio sin IVA, alícuota y precio con IVA.
+ *
+ * **Los dos precios son la misma caja vista de los dos lados.** Se carga cualquiera de ellos y
+ * el otro aparece calculado; escribir en el calculado invierte los papeles. El estado guarda
+ * uno solo —cuál, lo dice `price_includes_iva`— y `unitPriceFields` arma el par, así que las
+ * dos cajas nunca pueden discrepar entre sí ni con la alícuota.
+ *
+ * Por qué los dos y no solo el que se guarda: el que carga un precio piensa en el precio que
+ * tiene —el de la lista, el que le dice al cliente— y no en si la letra que le va a tocar lo
+ * quiere neto o con el IVA adentro. Ver `unitPriceFields` para lo que eso arregla al cambiar
+ * de cliente.
+ *
+ * En una C las dos columnas muestran el mismo número: no hay IVA que sacar ni que poner, y la
+ * alícuota que quede cargada no se declara. Es lo mismo que hace `compute_totals` allá.
+ *
+ * Fuera de `TemplateEditor` pero en el mismo archivo, por el mismo motivo que
+ * `PointOfSaleField`: no lo usa nadie más y sacarlo a otro archivo lo alejaría del formulario
+ * del que es parte.
+ */
+function LineFields({
+  line,
+  voucherType,
+  onChange,
+}: {
+  line: LineForm
+  voucherType: VoucherType | undefined
+  onChange: (changes: Partial<LineForm>) => void
+}) {
+  const prices = unitPriceFields(line, voucherType)
+
+  return (
+    <>
+      <div className="line-fields">
+        <div>
+          <label htmlFor={`${line.key}-qty`}>Cantidad</label>
+          <input
+            id={`${line.key}-qty`}
+            inputMode="decimal"
+            value={line.quantity}
+            onChange={(event) => onChange({ quantity: event.target.value })}
+          />
+        </div>
+        <div>
+          <label htmlFor={`${line.key}-net`}>Precio sin IVA</label>
+          <input
+            id={`${line.key}-net`}
+            inputMode="decimal"
+            placeholder="0,00"
+            value={prices.net}
+            // Escribir acá no solo cambia el precio: además declara que **este** es el que se
+            // cargó, y el de al lado pasa a ser el calculado.
+            onChange={(event) =>
+              onChange({ unit_price: event.target.value, price_includes_iva: false })
+            }
+          />
+        </div>
+        <div>
+          <label htmlFor={`${line.key}-iva`}>IVA</label>
+          <select
+            id={`${line.key}-iva`}
+            value={line.iva_aliquot}
+            onChange={(event) =>
+              onChange({ iva_aliquot: Number(event.target.value) as IvaAliquot })
+            }
+          >
+            {Object.entries(IVA_ALIQUOT_LABELS).map(([code, label]) => (
+              <option key={code} value={code}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label htmlFor={`${line.key}-gross`}>Precio c/IVA</label>
+          <input
+            id={`${line.key}-gross`}
+            inputMode="decimal"
+            placeholder="0,00"
+            value={prices.gross}
+            onChange={(event) =>
+              onChange({ unit_price: event.target.value, price_includes_iva: true })
+            }
+          />
+        </div>
+      </div>
+      <span className="field-hint">
+        Cargá el precio donde te quede cómodo: el otro se calcula con la alícuota.
+      </span>
+    </>
   )
 }
 

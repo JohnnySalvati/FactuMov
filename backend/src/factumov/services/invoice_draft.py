@@ -37,6 +37,7 @@ def build_draft(
         customer_id=customer_id,
         customer=customer,
         pos=parsed_invoice.pos,
+        voucher_type=parsed_invoice.voucher_type,
         concepto=Concepto.products if parsed_invoice.from_date is None else Concepto.services,
         lines=lines,
     )

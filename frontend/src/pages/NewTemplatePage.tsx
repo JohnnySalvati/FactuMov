@@ -16,8 +16,10 @@ import { Notice } from '../components/Notice'
 import { TemplateEditor } from '../components/TemplateEditor'
 import {
   emptyForm,
+  formVoucherType,
   fromDecimal,
   newLine,
+  priceIncludesIva,
   toPayload,
   validate,
   type TemplateForm,
@@ -120,7 +122,8 @@ export function NewTemplatePage() {
 
   async function save() {
     if (form === undefined) return
-    const problem = validate(form)
+    const voucherType = formVoucherType(form, identities.data ?? [], customers.data ?? [])
+    const problem = validate(form, voucherType)
     if (problem !== undefined) {
       setError(problem)
       return
@@ -128,7 +131,7 @@ export function NewTemplatePage() {
     setBusy(true)
     setError(undefined)
     try {
-      await api.post<InvoiceTemplate>('/invoice-templates', toPayload(form))
+      await api.post<InvoiceTemplate>('/invoice-templates', toPayload(form, voucherType))
       // Vuelve a la grilla: la tarjeta nueva ahí es la confirmación de que se guardó, y es
       // además donde el usuario iba a ir igual.
       navigate('/')
@@ -289,6 +292,12 @@ function fromDraft(draft: InvoiceTemplateDraft): TemplateForm {
               description: line.description ?? '',
               quantity: line.quantity !== null ? fromDecimal(line.quantity) : '1',
               unit_price: line.unit_price !== null ? fromDecimal(line.unit_price) : '',
+              // En qué columna cae el precio que trajo el PDF lo dice la letra **de ese PDF**,
+              // que el parser leyó y el draft trae. No la del par emisor/cliente que se termine
+              // eligiendo acá: si la factura importada era una A, ese precio es neto aunque el
+              // receptor todavía no esté en la cartera y no haya letra que deducir. Poniéndolo
+              // en la columna equivocada, al guardar quedaría un 21% corrido.
+              price_includes_iva: priceIncludesIva(draft.voucher_type ?? undefined),
               iva_aliquot: line.iva_aliquot ?? IvaAliquot.standard,
             }),
           )

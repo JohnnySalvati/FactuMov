@@ -6,8 +6,10 @@ import type { Customer, FiscalIdentity, InvoiceTemplate } from '../api/types'
 import { Notice } from '../components/Notice'
 import { TemplateEditor } from '../components/TemplateEditor'
 import {
+  formVoucherType,
   fromDecimal,
   newLine,
+  priceIncludesIva,
   toPayload,
   validate,
   type TemplateForm,
@@ -39,6 +41,11 @@ function fromTemplate(template: InvoiceTemplate): TemplateForm {
         description: line.description,
         quantity: fromDecimal(line.quantity),
         unit_price: fromDecimal(line.unit_price),
+        // El precio guardado está en la convención de la letra con la que se guardó, y es esa
+        // la columna en la que se lo muestra: en una A es el neto, en una B o una C es el que
+        // trae el IVA adentro. Sembrarlo siempre en la misma columna sería mostrar un precio
+        // distinto del que se cargó en la mitad de los modelos.
+        price_includes_iva: priceIncludesIva(template.voucher_type),
         iva_aliquot: line.iva_aliquot,
       }),
     ),
@@ -97,7 +104,8 @@ function TemplateScreen({ id }: { id: string }) {
    */
   async function save() {
     if (form === undefined) return
-    const problem = validate(form)
+    const voucherType = formVoucherType(form, identities.data ?? [], customers.data ?? [])
+    const problem = validate(form, voucherType)
     if (problem !== undefined) {
       setError(problem)
       setSaved(false)
@@ -107,7 +115,7 @@ function TemplateScreen({ id }: { id: string }) {
     setError(undefined)
     setSaved(false)
     try {
-      await api.patch<InvoiceTemplate>(`/invoice-templates/${id}`, toPayload(form))
+      await api.patch<InvoiceTemplate>(`/invoice-templates/${id}`, toPayload(form, voucherType))
       // Lo que se acaba de mandar pasa a ser lo guardado, y con eso vuelve a aparecer
       // "Emitir esta factura". No se resiembra con la respuesta del PATCH: daría claves de
       // línea nuevas y dejaría el formulario marcado como cambiado apenas se guardó.

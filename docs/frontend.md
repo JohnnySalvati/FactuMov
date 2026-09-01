@@ -188,13 +188,14 @@ lleva a `/modelos/nuevo`, `/identidades/nueva`, `/clientes/nuevo`.
   sin eso el que escribe como se escribe acá manda `NaN`. Y viajan como **string** al backend,
   no como `number`: `Decimal` se serializa con su escala, y pasar por el binario de coma
   flotante en el camino de ida es pedirle centavos al azar.
-- **El total de la pantalla aplica la convención del proyecto**: en A el precio va neto y en B
-  y C ya viene con el IVA adentro. No es una regla nueva, es la misma que usa el parser al leer
+- **El total de la pantalla aplica la convención del proyecto**: en A el precio se guarda neto
+  y en B y C con el IVA adentro. No es una regla nueva, es la misma que usa el parser al leer
   un PDF. La letra que decide cuál de las dos aplica es la **deducida** —ver *La letra del
   comprobante se deduce*—, así que el total se recalcula solo al cambiar de cliente. Mientras
   falte elegir emisor o cliente no hay letra y se asume IVA incluido, que es lo que vale en tres
   de las cuatro combinaciones. Está escrito abajo del total que es una cuenta nuestra y que el
-  importe que vale es el que autorice ARCA.
+  importe que vale es el que autorice ARCA. Cómo se **carga** el precio es otra cosa y no
+  depende de la letra — ver *El precio se carga sin IVA o con IVA*.
 - **La importación resuelve las dos partes que le faltan contra el padrón, sola y sin salir de
   la pantalla.** El draft trae al emisor y al receptor por CUIT pero sin id cuando no están
   cargados, y el editor pide ids: sin una salida ahí, importar la factura de un cliente nuevo es
@@ -635,6 +636,53 @@ desplegable.
   que no figura en ARCA.
 - **El default de `emptyForm` pasó de `'1'` a vacío**, que es lo que permite completarlo solo
   sin pisar nada y lo que obliga a elegir cuando hay varios.
+
+## El precio se carga sin IVA o con IVA (2026-09-01)
+Cada línea del modelo tiene ahora cuatro campos: cantidad, **precio sin IVA**, alícuota y
+**precio c/IVA**. Se carga cualquiera de los dos precios y el otro aparece calculado; escribir
+en el calculado invierte los papeles. Antes había un solo campo, "Precio unitario", y lo que
+significaba dependía de la letra.
+
+- **El problema no era de comodidad, era que el mismo modelo cambiaba de importe.** Con un solo
+  campo, el número guardado se lee neto en una A y con el IVA adentro en una B, así que cambiar
+  el cliente de un inscripto a un consumidor final movía el total un 21% sin que nadie tocara
+  el precio. Con las dos columnas lo que se guarda es el precio *convertido* a lo que pide la
+  letra, y el importe emitido queda igual con cualquiera de las dos.
+- **La convención de la base no cambió**, y no hay migración: `unit_price` sigue guardando un
+  solo número que se lee según la letra —neto en A, con IVA en B y C—, que es lo que después
+  leen `invoice_totals.py`, el PDF y Balance360. Lo que cambió es que la pantalla dejó de
+  obligar al usuario a cargar en esa convención. Cambiarlo de raíz —guardar siempre el neto—
+  era tocar el parser, la emisión, el PDF, la copia a Balance360 y las filas ya guardadas, para
+  arreglar algo que era de la pantalla.
+- **El estado guarda un precio, no dos.** `LineForm` tiene el precio tipeado y un
+  `price_includes_iva` que dice en qué columna se lo tipeó; la otra columna es siempre una
+  cuenta (`unitPriceFields`). Guardar los dos garantizaba que en algún render discreparan: cada
+  tecla en una caja tendría que reescribir la otra, y el redondeo a centavos del derivado haría
+  que reabrir un modelo y no tocar nada le moviera el precio original.
+- **Cuando la columna cargada ya es la que se guarda, el texto va tal cual.** No es una
+  optimización: `35000` convertido a `28925.62` y de vuelta no siempre vuelve a `35000`, y
+  guardar sin tocar nada no puede mover un precio.
+- **En A, cargar el precio con IVA puede dejar un centavo abajo.** Lo que se guarda es el neto
+  con dos decimales, y `82.64 × 1,21` da `99.99` y no los `100` tipeados. Es propio de la A
+  —ARCA arma el total sumando neto e IVA, no al revés— y no de esta pantalla, así que la
+  columna que se recalcula es la de con IVA y no al revés.
+- **La letra dejó de ser un dato solo del editor.** `formVoucherType` vive en `templateForm.ts`
+  porque ahora las tres cosas que dependen de ella —lo que se muestra, lo que valida `validate`
+  y lo que arma `toPayload`— tienen que usar exactamente la misma, y dos de ellas ocurren en
+  las pantallas. Sin letra no se guarda: `validate` corta con un mensaje y `toPayload` tira,
+  porque elegir mal ahí mueve el importe un 21% en silencio.
+- **El draft de la importación ahora trae `voucher_type`.** Es la letra que el parser leyó del
+  PDF, y decide en qué columna se siembra el precio importado. No se podía deducir del par
+  emisor/cliente: al importar la factura de un cliente que todavía no está en la cartera no hay
+  par, y una A sembrada como si el precio trajera el IVA adentro se guardaba un 21% abajo.
+- **En la C las dos columnas muestran el mismo número.** No hay IVA que sacar ni que poner y la
+  alícuota que quede cargada no se declara — es lo mismo que hace `compute_totals` allá. De
+  paso se arregló el total de la pantalla, que hasta ahora en una C partía el importe en neto e
+  IVA y mostraba un desglose que la factura emitida no iba a tener.
+- **Los cuatro campos van de a dos en el celular** (`.line-fields` es un grid, no un `.row`).
+  La regla de `.row` —campos uno abajo del otro en angosto— sigue valiendo para el resto del
+  formulario, donde los campos son largos; estos cuatro son números cortos, y apilados dejaban
+  el importe de la línea fuera de la pantalla justo mientras se cargan precios.
 
 ## El plan de la cuenta (2026-08-31)
 

@@ -553,6 +553,12 @@ export interface InvoiceTemplateDraft {
   customer: CustomerDraft
   pos: number | null
   concepto: Concepto
+  /**
+   * La letra que traía el PDF, o `null` si no la dijo. No entra al formulario —la letra se
+   * deduce del emisor y del receptor— pero decide **cómo leer el `unit_price` de este draft**:
+   * en A es neto y en B y C ya trae el IVA adentro.
+   */
+  voucher_type: VoucherType | null
   lines: InvoiceTemplateLineDraft[]
 }
 
