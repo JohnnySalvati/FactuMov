@@ -186,6 +186,30 @@ class BillingProvider(Enum):
     MANUAL = "manual"
 
 
+class PaymentStatus(Enum):
+    """Cómo terminó un cobro. **Dos valores, y Mercado Pago maneja quince.**
+
+    Del otro lado un pago pasa por `pending`, `in_process`, `authorized`, `approved`,
+    `rejected`, `cancelled`, `refunded` y `charged_back`, entre otros. Acá se guardan
+    únicamente los dos desenlaces que cambian algo: entró la plata, o no entró. Los estados
+    intermedios no se escriben — mientras el cobro sigue en vuelo simplemente no hay fila, que
+    es más honesto que una fila que dice `PENDING` y que nadie va a volver a mirar si la
+    notificación final se pierde.
+
+    Copiar la tabla del proveedor tendría además el costo de atarnos a ella: los nombres son
+    de Mercado Pago, y el día que un cobro entre por otro lado —`BillingProvider.MANUAL`, una
+    transferencia conciliada a mano— no habría cómo mapear `in_process`.
+
+    Un `REJECTED` puede pasar a `APPROVED` sobre el **mismo** id: Mercado Pago recicla el
+    cobro fallido y lo reintenta con la misma referencia. Por eso el estado es parte de la
+    clave de idempotencia y no un dato inmutable de la fila — ver
+    `crud/subscription_payment.py`.
+    """
+
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
 class Balance360Status(Enum):
     """En qué anda la copia de una factura emitida hacia Balance360.
 

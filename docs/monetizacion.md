@@ -170,11 +170,13 @@ irreversible, pasa igual por `can_emit`.
   pantalla —solo a `ACTIVE` y `PAST_DUE`, que son los estados donde hay una renovación que
   frenar—, pero esa es una regla de presentación y no puede vivir en la API: un 409 ahí sería
   un caso más para el frontend a cambio de nada.
-- **Falta la mitad del proveedor.** Cuando el checkout exista, la fila puede tener un
-  `provider_subscription_id`, y marcarla sin cancelar el `preapproval` dejaría a Mercado Pago
-  cobrando todos los meses una suscripción que la app da por terminada. El lugar exacto donde
-  va esa llamada está marcado en el router; hoy ninguna fila tiene ese id porque nada lo
-  escribe.
+- **Primero Mercado Pago y después la fila** (2026-09-01). Si la fila tiene
+  `provider_subscription_id`, el endpoint cancela el `preapproval` del otro lado **antes** de
+  marcar nada, y si esa llamada falla contesta 502 sin tocar la suscripción. Marcarla igual
+  dejaría a Mercado Pago cobrando todos los meses algo que la app da por terminado, y el
+  usuario se enteraría por el resumen de la tarjeta: hacerlo reintentar es molesto, cobrarle de
+  más no tiene arreglo. Un `preapproval` que Mercado Pago ya no conoce (404) cuenta como
+  cancelado — lo que se busca es que no se cobre más, y eso ya se cumple.
 
 ## Las pantallas del plan (2026-08-31)
 
@@ -199,9 +201,20 @@ sin ningún lado adonde ir.
   de todas las pantallas: un contador permanente diciendo "1 de 5" sería una publicidad del plan
   Pro en la pantalla que se abre cien veces por semana. Y no aparece nunca si el plan no se pudo
   cargar — avisar de un cupo que no se conoce es peor que no avisar.
-- **Sin botón de pago todavía**, porque el checkout no existe: un botón que no cobra manda a un
-  callejón sin salida justo al que quería pagar. En su lugar hay un párrafo que dice que el pago
-  no está abierto todavía.
+- **Los dos botones de pago viven en `SubscribeBox`** (2026-09-01), y esa caja **pide los
+  precios con su propio `useResource`**, no desde el contexto. Es el caso que
+  `SubscriptionProvider` no cubre a propósito: el plan de la cuenta lo leen seis lugares en cada
+  sesión y la lista de precios la mira solo quien está mirando esa caja, así que montarla ahí
+  adentro hace que la consulta ocurra cuando se muestra y no cuando se abre la app. El botón
+  termina en un `location.href` y no en un `navigate`: el checkout lo hostea Mercado Pago, o sea
+  otro dominio.
+- **El regreso del checkout no activa nada.** `back_url` trae `?pago=listo`, y lo único que hace
+  la pantalla con eso es volver a preguntar y explicar que la confirmación puede tardar unos
+  segundos. Quien activa es el webhook: creerle a una query string sería dejar que cualquiera se
+  haga Pro escribiéndola a mano.
+- **Al `PAST_DUE` se le ofrece contratar de nuevo, y a ningún otro Pro.** Es el caso de la
+  tarjeta vencida o reemplazada, donde el reintento de Mercado Pago va a fallar siempre con la
+  misma. El backend cancela la autorización anterior antes de crear la nueva.
 - **El dictado por voz se esconde entero para el Free**, sin cartel ni micrófono deshabilitado,
   por lo mismo que la franja no es un contador permanente. Son tres componentes —el comando, el
   micrófono de cada fecha y el interruptor de la respuesta hablada— y la regla está escrita una
@@ -215,7 +228,7 @@ sin ningún lado adonde ir.
   voz es la parte reversible del camino; lo irreversible lo sigue cortando `can_emit` del lado
   del backend.
 
-## Precios y cobro — decidido, todavía no implementado
+## Precios y cobro
 
 **Anclado en USD y mostrado en pesos**, con revisión periódica anunciada. Precio en pesos fijo
 se come la inflación; precio *cobrado* en dólares genera más fricción de la que resuelve en una
@@ -253,18 +266,111 @@ tiene reservado. La transferencia queda como **excepción atendida a mano** y so
 anual (`BillingProvider.MANUAL`): cobrar todo junto una vez al año sin comisión es buen
 negocio, y como cobro mensual sería un recordatorio por mes y una baja por olvido.
 
+### La lista de precios está en el código, no en el `.env` (2026-09-01)
+
+`PRICES` vive en `services/subscription.py`, al lado de `TRIAL_DAYS` y de los dos límites del
+Free, y por el mismo motivo: es política comercial. Una variable de entorno haría que dos
+servidores pudieran cobrar distinto por el mismo plan, que es un problema bastante peor que
+tener que deployar para cambiar un precio.
+
+El número en pesos es lo único de toda la política que **se desactualiza solo**, porque el ancla
+es en dólares. Se revisa periódicamente y se anuncia; el importe de cada cobro queda guardado en
+`subscription_payments.amount` tal como lo informó el proveedor, así que subir el precio no
+reescribe lo que alguien pagó el mes pasado.
+
+## El checkout y el webhook (2026-09-01)
+
+Dos endpoints y una tabla. `POST /subscription/checkout` devuelve una URL, y
+`POST /webhooks/mercado-pago` es **lo único en toda la app que puede escribir un `ACTIVE`**.
+
+### El checkout no cambia el plan
+
+Lo único que produce es el `init_point` de Mercado Pago. El usuario autoriza el débito allá, la
+notificación llega por atrás y recién ahí la fila se mueve. Si esta llamada activara algo, sería
+un endpoint para hacerse Pro con un `curl` — es la misma razón por la que
+`schemas/subscription.py` no tiene un schema de escritura del plan. `CheckoutRequest` no lo
+contradice: elige **qué se va a pagar**, no qué plan se tiene, y ni el precio ni la moneda
+viajan desde el cliente.
+
+- **El `preapproval_id` no se guarda al crear el checkout.** Hasta que el webhook confirme, el
+  vínculo lo lleva `external_reference` con el id del usuario adentro. Guardarlo antes ataría la
+  cuenta a una autorización que quizás nadie complete, y el `unique` de esa columna convertiría
+  el segundo intento en un error sobre una fila que no se llegó a usar.
+- **El que paga durante la prueba no pierde los días que le faltaban.** El preapproval se crea
+  con un `free_trial` de exactamente los días que quedan, así que la autorización queda hecha ya
+  mismo y el primer cobro cae el día que la prueba se terminaba. Sin eso, el que decide pagar en
+  el día 5 compra treinta días teniendo veinticinco gratis en la mano — que es un pedido de
+  reembolso, y castiga justo al que convirtió antes de que se lo pidieran.
+- **El `ACTIVE` no puede volver a contratar** (409): dos `preapproval` sobre la misma cuenta son
+  dos débitos por el mismo servicio. El `PAST_DUE` **sí**, porque es el de la tarjeta vencida y
+  el reintento de Mercado Pago va a fallar siempre con la misma; ahí se cancela la anterior
+  **antes** de crear la nueva, porque el orden inverso deja dos vivas si algo falla en el medio.
+
+### La firma es toda la autenticación del webhook
+
+El endpoint no tiene sesión —lo llama un servidor de Mercado Pago— así que el HMAC de
+`x-signature` es lo único que separa un cobro real de un `curl` que se hace Pro. Sin
+`MERCADOPAGO_WEBHOOK_SECRET` no se procesa **nada**.
+
+**No se chequea que el `ts` sea reciente**, y es deliberado. Rechazar por antigüedad evitaría
+que alguien reenvíe una notificación vieja capturada, pero reenviarla no logra nada —el cobro ya
+aplicado cae en la idempotencia, y el estado del preapproval se relee de Mercado Pago cada vez—
+y a cambio se perdería cualquier entrega demorada, que sí puede ser el cobro que activa una
+cuenta.
+
+### La idempotencia: dos mecanismos, porque son dos problemas
+
+`subscription_payments` es a la vez el historial y el registro de idempotencia. Una tabla y no
+dos: "¿este cobro ya lo procesamos?" y "¿de qué se le cobró?" se contestan las dos con la lista
+de cobros, y una tabla de ids vistos guardaría lo mismo sin el importe ni la fecha.
+
+- **El estado del `preapproval` no necesita registro.** El evento no dice qué pasó, dice qué
+  recurso mirar: se relee de Mercado Pago y se copia. Procesarlo dos veces escribe dos veces lo
+  mismo, y procesar uno viejo escribe el estado de **ahora**.
+- **El dinero sí.** Sin la tabla, tres entregas del mismo cobro empujarían el período tres
+  meses. El `unique` de `provider_payment_id` está en la base y no solo en el servicio porque el
+  chequeo pierde contra dos entregas simultáneas y la restricción no.
+- **La clave es el par (id, estado) y no el id solo.** Mercado Pago **recicla** un cobro
+  rechazado: lo reintenta durante días con la misma referencia, y cuando entra manda otro aviso
+  sobre ese mismo id ya aprobado. Filtrando por id, esa aprobación se descartaría como duplicada
+  y el usuario se quedaría en `PAST_DUE` hasta que se le acabe la gracia, habiendo pagado.
+
+### Qué contesta, y por qué importa
+
+Del otro lado hay una máquina que lee el status y decide si reintenta:
+
+| Status | Cuándo | Qué logra |
+|---|---|---|
+| 200 | Se aplicó, o no había nada que aplicar (tema ajeno, cobro en vuelo, duplicado) | Que deje de reintentar algo que nunca va a cambiar |
+| 401 | La firma no cierra | Nada que reintentar: no va a mejorar |
+| 503 | Falta `MERCADOPAGO_WEBHOOK_SECRET` | Que reintente cuando la variable esté puesta |
+| 502 | Mercado Pago no contestó cuando fuimos a leer el recurso | Que reintente: perder ese aviso puede ser perder el cobro que activa la cuenta |
+
+El 502 cubre además un caso que pasa de verdad: **los dos avisos pueden llegar al revés**. Si el
+cobro de la primera cuota llega antes que la autorización, la fila todavía no tiene el id del
+proveedor y ese cobro no es de nadie; pedir el reintento lo resuelve solo.
+
+### El período y el importe salen de Mercado Pago, no de un reloj propio
+
+`current_period_end` es el `next_payment_date` que ellos informan, y el importe es su
+`transaction_amount`. Son quienes deciden cuándo vuelven a cobrar: una cuenta local solo podría
+discrepar, y discrepar acá es cortarle el acceso a alguien a quien le van a cobrar igual.
+
+### Cómo se prueba
+
+El webhook lo llama Mercado Pago desde internet, así que **contra `localhost` no llega**: hace
+falta un túnel y cargar esa URL pública en el panel. Sin túnel se puede probar todo menos la
+acreditación — el checkout se crea, la pantalla redirige, y la cuenta queda como estaba porque
+nadie avisó. Y una cuenta de Mercado Pago **no se puede pagar a sí misma**: hacen falta las dos
+cuentas de prueba, una como vendedor y otra como comprador.
+
 ### Lo que falta
 
-Están el modelo, la política, los dos gates, la baja y las pantallas. Falta:
+Están el modelo, la política, los dos gates, la baja completa, el checkout, el webhook y las
+pantallas. Falta:
 
-- **El checkout y el webhook de Mercado Pago**, que es lo único que puede escribir un `ACTIVE`.
-  El webhook tiene que ser **idempotente**: MP reintenta y manda el mismo evento más de una vez.
-  Ahí aparece la tabla `subscription_payments`, que es a la vez el historial y el registro de
-  idempotencia — no existe todavía justamente porque no hay nada que la escriba.
-- **La otra mitad de la baja**: cancelar el `preapproval` del lado de Mercado Pago. Sin eso, una
-  cuenta dada de baja acá seguiría siendo cobrada allá. El lugar está marcado en
-  `routers/subscription.py`.
-- **El botón de pago en `/plan`**, que hoy es un párrafo diciendo que el cobro no está abierto.
 - **Los avisos del trial** por mail, en el día ~23 y el ~28, con el link de pago ya armado.
+- **La conciliación a mano de `BillingProvider.MANUAL`**, que hoy no tiene por dónde entrar: el
+  modelo lo contempla y ningún endpoint lo escribe.
 - **Emitir las propias facturas de las suscripciones** con FactuMov, que es la mejor prueba de
   producto que el proyecto puede darse.

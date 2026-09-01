@@ -18,13 +18,14 @@ import logging
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from factumov.crud import subscription as subscription_crud
-from factumov.enums import SubscriptionStatus
+from factumov.enums import BillingInterval, SubscriptionStatus
 from factumov.exceptions import PlanLimitReachedError
 from factumov.models.fiscal_identity import FiscalIdentity
 from factumov.models.invoice import Invoice
@@ -51,6 +52,34 @@ FREE_MONTHLY_INVOICES = 5
 
 # Multi-entidad sigue siendo Pro, pero como el segundo límite y no como el único.
 FREE_FISCAL_IDENTITIES = 1
+
+# La moneda en la que se cobra. El precio está **anclado en dólares y cobrado en pesos**: un
+# precio fijo en pesos se lo come la inflación, y cobrar en dólares mete una fricción enorme en
+# una app de consumo local. ISO 4217, que es lo que espera Mercado Pago en `currency_id`.
+CURRENCY = "ARS"
+
+# La lista de precios, en pesos. Está acá y no en el `.env` por lo mismo que el largo del trial
+# y los dos límites del Free: es política comercial, y lo que cambia un precio es una decisión
+# que se toma una vez y se acompaña con los tests, no una variable de entorno que cada
+# instalación puede tener distinta — dos servidores cobrando distinto por el mismo plan es un
+# problema mucho peor que un deploy.
+#
+# **El anual vale diez mensuales**, o sea dos meses bonificados (~17%). No más: con un 50% de
+# descuento todos eligen anual —hacen bien— y se pierde la mitad del ingreso a cambio de un
+# flujo de caja que a esta escala no hace falta.
+#
+# El número en pesos es lo único de la política que se desactualiza solo, porque el ancla es en
+# dólares: se revisa periódicamente y se anuncia. Ver *Monetización → Precios y cobro*.
+PRICES = {
+    BillingInterval.MONTHLY: Decimal("7000"),
+    BillingInterval.YEARLY: Decimal("70000"),
+}
+
+
+def price(interval: BillingInterval) -> Decimal:
+    """Cuánto sale ese plan, hoy y en pesos."""
+    return PRICES[interval]
+
 
 # El mes se corta en hora argentina y no en UTC. Con UTC, las facturas emitidas entre las 21 y
 # la medianoche del último día del mes caerían en el mes siguiente: el usuario vería el

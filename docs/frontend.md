@@ -662,6 +662,18 @@ Del lado del frontend lo que hay que saber es cómo viaja el dato.
   se haga Pro.
 - **Mientras no se sabe el plan, la voz queda prendida.** Empezar callado le saca los
   micrófonos al Pro en cada carga de la app, y para siempre si la consulta falla.
+- **Los precios, en cambio, sí van con `useResource`** (2026-09-01), adentro de `SubscribeBox`.
+  Es la contracara de la regla de arriba y no una excepción: lo que justifica el contexto es que
+  seis lugares miren el mismo dato en cada sesión, y a la lista de precios la mira una sola caja
+  de una sola pantalla. Montada ahí adentro, `GET /subscription/plans` sale cuando esa caja se
+  muestra y no cuando se abre la app.
+- **El botón de pago sale de la SPA con `location.href`**, no con `navigate`: el checkout lo
+  hostea Mercado Pago, o sea otro dominio. Y el `busy` del botón no se apaga cuando la llamada
+  sale bien —el navegador ya se está yendo—, porque devolverle el estado normal sería un
+  parpadeo ofreciendo otra vez algo que ya está en curso.
+- **Volver del checkout (`?pago=listo`) no hace Pro a nadie.** Quien activa la cuenta es el
+  webhook, que llega por atrás; la pantalla solo llama a `reload()` y explica que puede tardar
+  unos segundos. Creerle a la query string sería un plan Pro que se consigue escribiendo una URL.
 - **`formatTimestamp` es el hermano de `formatDate`**, y la diferencia importa: `formatDate`
   recibe una fecha sin hora —la del comprobante, que es un día— y la parte a mano para que
   ninguna zona horaria la mueva; `formatTimestamp` recibe un momento y lo muestra en la hora

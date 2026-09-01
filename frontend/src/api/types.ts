@@ -668,3 +668,40 @@ export interface Subscription {
   can_add_fiscal_identity: boolean
   voice_enabled: boolean
 }
+
+/** Cada cuánto se paga. Espejo de `BillingInterval`; es lo único que elige el usuario. */
+export const BillingInterval = {
+  monthly: 'monthly',
+  yearly: 'yearly',
+} as const
+export type BillingInterval = (typeof BillingInterval)[keyof typeof BillingInterval]
+
+/**
+ * Lo que devuelve `GET /subscription/plans`: qué se puede contratar y a qué precio.
+ *
+ * **Va aparte de `Subscription` y no adentro del contexto.** El plan de la cuenta lo leen seis
+ * lugares en cada sesión; los precios los mira una sola pantalla y solo cuando alguien entra a
+ * ella. Ver `PlanOffer` del backend.
+ */
+export interface PlanOffer {
+  /** Si este servidor puede cobrar. Es config de la instalación, no algo del usuario. */
+  available: boolean
+  /** Qué variable de entorno falta, cuando falta. Lo lee el operador, no el cliente. */
+  unavailable_reason: string | null
+  /** ISO 4217. Hoy siempre "ARS". */
+  currency: string
+  /** Strings, como todos los importes de la API: son `Decimal` del lado del backend. */
+  monthly_price: string
+  yearly_price: string
+}
+
+/**
+ * Lo que devuelve `POST /subscription/checkout`: a dónde mandar el navegador.
+ *
+ * Una URL de Mercado Pago y nada más. **Esa llamada no cambia el plan**: el usuario autoriza
+ * el débito del otro lado y la cuenta pasa a Pro recién cuando el webhook lo confirma, así que
+ * volver de esa pantalla no es prueba de nada — hay que preguntarle al backend.
+ */
+export interface CheckoutStart {
+  init_point: string
+}

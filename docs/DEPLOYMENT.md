@@ -116,6 +116,11 @@ Lo que no puede quedar como está:
   La clave se genera una vez con
   `uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`;
   perderla no borra nada, pero obliga a cada usuario a volver a conectar.
+- `MERCADOPAGO_ACCESS_TOKEN` y `MERCADOPAGO_WEBHOOK_SECRET`, que son el cobro de las
+  suscripciones. Las dos vacías es válido —la app arranca igual y la pantalla del plan dice que
+  el pago no está disponible en este servidor—, pero **una sola de las dos no sirve**: con el
+  token y sin el secreto el checkout cobraría y la notificación no se podría verificar, o sea
+  que el usuario pagaría y su cuenta seguiría en Free. De dónde salen, en 2.4.
 
 ### 2.2 Los certificados de ARCA
 
@@ -169,6 +174,41 @@ esquema viejo.
 
 La base arranca vacía y el esquema lo crean las migraciones. **No hay nada que restaurar**: a
 diferencia de Balance360, acá no existe una base de desarrollo que sea la fuente de verdad.
+
+---
+
+### 2.4 El webhook de Mercado Pago
+
+Va **después** de levantar y de que el dominio conteste, porque el panel de Mercado Pago valida
+la URL cuando se la carga.
+
+En https://www.mercadopago.com.ar/developers → tu aplicación:
+
+1. **Credenciales → producción.** El `Access Token` va en `MERCADOPAGO_ACCESS_TOKEN`. Las de
+   prueba empiezan con `TEST-` y son visualmente idénticas: con esas, el checkout se abre, se
+   paga con tarjetas de prueba y no entra un peso.
+2. **Webhooks → configurar notificaciones.** La URL es
+   `https://factumov.insoft.net.ar/api/webhooks/mercado-pago`, con los eventos **Suscripciones**
+   (`subscription_preapproval`) y **Pagos de suscripción** (`subscription_authorized_payment`).
+   Los demás llegan igual y se contestan 200 sin hacer nada.
+3. **La clave secreta que ese alta genera** va en `MERCADOPAGO_WEBHOOK_SECRET`, y hay que
+   reiniciar el `app` para que la lea.
+
+Las dos vacías es válido: la app arranca igual y la pantalla del plan dice que el pago no está
+disponible en este servidor, nombrando la que falta. Lo que **no** hay que hacer es dejar solo
+el access token: ahí el checkout cobraría y ninguna notificación se podría verificar, o sea que
+el usuario pagaría y la cuenta seguiría en Free. Por eso `unavailable_reason` trata la falta de
+cualquiera de las dos como "no se puede cobrar".
+
+Poner el secreto tarde no pierde nada: mientras falta, el webhook contesta **503** y Mercado
+Pago reintenta el aviso durante horas.
+
+Para comprobar que quedó andando, el log lo cuenta entero — cada notificación deja una línea
+con el tema, el id y qué hizo:
+
+```bash
+docker compose -f docker-compose.prod.yml logs app | grep "Mercado Pago"
+```
 
 ---
 

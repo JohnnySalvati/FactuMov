@@ -19,8 +19,8 @@ class Subscription(Base, TimestampMixin):
     `invoices`. Aquellas son 1 a 1, sin historia y se leen en la misma grilla que la factura,
     así que sacarlas afuera solo agregaba un join. Acá pasa lo contrario en los tres puntos:
     es una relación comercial con su propia contraparte del lado de Mercado Pago —ids de
-    proveedor, intervalo, vencimiento—, la va a acompañar una tabla de pagos cuando exista el
-    webhook, y no se lee en cada request sino solo en los endpoints que cobran algo. Mezclarla
+    proveedor, intervalo, vencimiento—, la acompaña `subscription_payments` con el historial de
+    cobros, y no se lee en cada request sino solo en los endpoints que cobran algo. Mezclarla
     con la tabla de autenticación pondría datos del proveedor de pagos al lado del hash de la
     contraseña sin ninguna razón estructural.
 
@@ -63,10 +63,11 @@ class Subscription(Base, TimestampMixin):
     # asociado. Es lo que permite ir de un webhook a la fila sin buscar por usuario, y lo que
     # hay que cancelar del otro lado cuando el usuario da de baja.
     #
-    # `unique` porque una suscripción del proveedor no puede estar atada a dos usuarios; el
-    # día que el webhook exista, ese unique es lo que convierte un cruce de ids en un error en
-    # vez de en un cobro atribuido a la cuenta equivocada. Postgres deja repetir el NULL, que
-    # es lo que tienen todas las filas en trial.
+    # `unique` porque una suscripción del proveedor no puede estar atada a dos usuarios: es lo
+    # que convierte un cruce de ids en un error en vez de en un cobro atribuido a la cuenta
+    # equivocada. Postgres deja repetir el NULL, que es lo que tienen todas las filas en trial —
+    # la columna se escribe recién cuando el webhook confirma la autorización, así que también
+    # lo tiene el que abandonó el checkout.
     provider_subscription_id: Mapped[str | None] = mapped_column(String(64), unique=True)
     # Cuándo el usuario pidió la baja. No corta el acceso: lo que corta es que
     # `current_period_end` pase, y hasta ese día el período ya está pagado. Timestamp y no

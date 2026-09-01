@@ -19,6 +19,7 @@ from factumov.models.base import Base
 from factumov.services import arca as arca_service
 from factumov.services import balance360 as balance360_service
 from factumov.services import email as email_service
+from factumov.services import mercadopago as mercadopago_service
 from factumov.services import secrets as secrets_service
 from factumov.services.rate_limit import reset_all as reset_all_limiters
 from tests import factories
@@ -133,6 +134,34 @@ def balance360_settings(monkeypatch):
     balance360_service.get_client_settings.cache_clear()
     yield
     balance360_service.get_client_settings.cache_clear()
+
+
+# El secreto con el que se firman las notificaciones de Mercado Pago en la suite. Está en
+# claro y no pasa nada, igual que la clave de cifrado: no verifica nada que exista fuera de
+# estos tests, y los que firman una notificación lo importan de acá para no tener dos copias.
+MERCADOPAGO_WEBHOOK_SECRET = "un-secreto-de-prueba"
+
+
+@pytest.fixture(autouse=True)
+def mercadopago_settings(monkeypatch):
+    """Credenciales de Mercado Pago fijas y desenganchadas del `.env`.
+
+    Autouse por lo mismo que las otras cuatro: sin esto, tener o no tener las variables en la
+    máquina decide si el cobro está "disponible", y la pantalla del plan —y todo lo que
+    consulta `unavailable_reason`— pasaría en una máquina y fallaría en la de al lado.
+
+    Deja el servidor **configurado**, que es el caso normal y el que ejercitan casi todos los
+    tests; el que necesita el caso contrario borra las variables y limpia el cache. Nada de
+    esto sale a la red: los tests parchean `requests` en el módulo del cliente.
+    """
+    monkeypatch.setitem(
+        mercadopago_service.MercadoPagoSettings.model_config, "env_file", None
+    )
+    monkeypatch.setenv("MERCADOPAGO_ACCESS_TOKEN", "TEST-token-de-prueba")
+    monkeypatch.setenv("MERCADOPAGO_WEBHOOK_SECRET", MERCADOPAGO_WEBHOOK_SECRET)
+    mercadopago_service.get_mercadopago_settings.cache_clear()
+    yield
+    mercadopago_service.get_mercadopago_settings.cache_clear()
 
 
 # El CUIT que lleva el certificado de prueba en el `serialNumber` del subject. No es el de

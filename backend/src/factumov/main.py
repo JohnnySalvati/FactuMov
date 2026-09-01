@@ -117,3 +117,7 @@ app.include_router(fiscal_identity.delegation_router)
 app.include_router(invoice.router)
 app.include_router(invoice_template.router)
 app.include_router(subscription.router)
+# El segundo router de suscripción, y el tercero de la app sin sesión: lo llama Mercado Pago
+# desde sus servidores, que no tienen ninguna cookie de acá. Su autenticación es la firma
+# `x-signature` — ver `mercado_pago_webhook`.
+app.include_router(subscription.webhook_router)

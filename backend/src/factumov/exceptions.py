@@ -183,3 +183,38 @@ class Balance360Error(Exception):
     def __init__(self, message: str, *, retryable: bool = True) -> None:
         super().__init__(message)
         self.retryable = retryable
+
+
+class MercadoPagoError(Exception):
+    """No se pudo hablar con Mercado Pago, o Mercado Pago contestó que no.
+
+    Las dos familias juntas, igual que en `Balance360Error` y por el mismo motivo: para el que
+    aprieta "Suscribirme" son lo mismo —no hay checkout— y la diferencia que importa viaja en
+    `retryable`, que la decide el status HTTP.
+
+    Dónde termina depende de quién la levantó, y son dos caminos muy distintos:
+
+    - En el **checkout** y en la **baja** hay alguien esperando: sube como 502 con este texto.
+      La baja es el caso delicado — si Mercado Pago no confirma la cancelación del
+      `preapproval`, la fila local **no** se marca, porque una baja que solo existe de este
+      lado deja al proveedor cobrando todos los meses una suscripción que la app da por
+      terminada.
+    - En el **webhook** no hay nadie esperando: sube como 502 a propósito, que es lo que hace
+      que Mercado Pago reintente la notificación más tarde. Contestar 200 sobre un evento que
+      no se pudo procesar lo pierde para siempre, y ese evento puede ser el cobro que activa
+      una cuenta.
+    """
+
+    def __init__(self, message: str, *, retryable: bool = True) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+
+
+class WebhookSignatureError(Exception):
+    """La notificación no viene firmada por Mercado Pago, o la firma no cierra.
+
+    Es un 401 y no un 400: lo que falta es la prueba de quién manda. El endpoint del webhook
+    no tiene sesión —lo llama un servidor ajeno— así que esta firma es **toda** su
+    autenticación, y del otro lado hay un endpoint que escribe `ACTIVE`. Sin este chequeo,
+    cualquiera con la URL se hace Pro con un `curl`.
+    """

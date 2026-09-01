@@ -344,6 +344,7 @@ def make_subscription(
     current_period_end=None,
     billing_interval=None,
     provider=None,
+    provider_subscription_id=None,
     canceled_at=None,
 ):
     """La suscripción de un usuario. Por default, el trial recién empezado.
@@ -367,6 +368,7 @@ def make_subscription(
         ),
         billing_interval=billing_interval,
         provider=provider,
+        provider_subscription_id=provider_subscription_id,
         canceled_at=canceled_at,
     )
     db.add(subscription)

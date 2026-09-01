@@ -27,6 +27,26 @@ def get_for_user(db: Session, user_id: uuid.UUID) -> Subscription | None:
     )
 
 
+def get_by_provider_subscription_id(
+    db: Session, provider_subscription_id: str
+) -> Subscription | None:
+    """La fila atada a ese `preapproval` de Mercado Pago, si alguna lo está.
+
+    Es la lectura del webhook, que llega sabiendo de qué suscripción **del proveedor** habla y
+    no de qué usuario. Se apoya en el `unique` de la columna: un id del proveedor no puede
+    estar en dos cuentas, así que "la primera que coincide" es "la única".
+    """
+    return (
+        db.execute(
+            select(Subscription).where(
+                Subscription.provider_subscription_id == provider_subscription_id
+            )
+        )
+        .scalars()
+        .first()
+    )
+
+
 def create_trialing(db: Session, user_id: uuid.UUID, current_period_end: datetime) -> Subscription:
     """La fila con la que nace toda cuenta: en trial y con el reloj ya corriendo.
 
@@ -57,7 +77,7 @@ def activate(
     Sirve para las tres transiciones que terminan en un pago acreditado —la primera compra
     desde el trial, la renovación normal y el reintento que rescata a un `PAST_DUE`— porque
     para la fila son la misma escritura. Distinguirlas obligaría a que quien cobra sepa de
-    dónde venía el usuario, que es justo lo que el webhook de Mercado Pago no va a saber.
+    dónde venía el usuario, que es justo lo que el webhook de Mercado Pago no sabe.
 
     **Limpia `canceled_at`.** Volver a pagar después de haber dado de baja es una alta nueva;
     dejar la marca puesta haría que la próxima renovación exitosa siguiera diciendo que esta
