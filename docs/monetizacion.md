@@ -166,6 +166,24 @@ acá, mandar el otro texto. Ver *Emisión y envío → El texto del mail vive en
 editarlo, y lo que deja en su lugar es el default. Un límite que impide *sacar* algo no protege
 nada; solo deja al usuario encerrado con un texto ajeno a su plan.
 
+### El Free se paga con el pie del mail (2026-09-01)
+El mail por default de cada factura termina en una firma que nombra a FactuMov, dice cuántos
+comprobantes por mes salen gratis y linkea a la app. Es el único canal de adquisición que el
+producto tiene hoy y no cuesta nada: el mail sale igual, y lo lee el cliente del que facturó —
+alguien que muy probablemente también emite facturas.
+
+**El Free es el que más lo reparte**, y eso es exactamente lo que se buscaba con el corte por
+volumen: el que factura tres veces por mes se queda gratis y **recomienda**. Los cinco
+comprobantes no son solo un tope, son cinco mails con el link adentro.
+
+**Sacarlo es escribir el texto propio del modelo, que es Pro.** No hay un interruptor de "quitar
+la marca": la función que ya existe alcanza, y de paso le da al Pro un motivo más concreto que
+"sin límites". Un Pro que no personaliza nada lo sigue llevando, y está bien — el que le molesta
+tiene la herramienta para sacarlo en treinta segundos, con el texto por default a la vista en el
+placeholder para copiar y editar.
+
+El texto y el resto de las decisiones están en *Emisión y envío → El pie de FactuMov*.
+
 ## La baja (2026-08-31)
 
 `POST /subscription/cancel`, sin body y devolviendo el estado ya recalculado.

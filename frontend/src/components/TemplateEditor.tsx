@@ -299,12 +299,28 @@ export function TemplateEditor({
  * En el mismo archivo que el editor por lo mismo que `LineFields` y `PointOfSaleField`: no lo
  * usa nadie más.
  */
-/** El cuerpo por default, con datos de ejemplo. Es el placeholder del campo de texto. */
+/**
+ * El cuerpo por default, con datos de ejemplo. Es el placeholder del campo de texto.
+ *
+ * **Incluye el pie de FactuMov**, y eso es lo más importante de esta constante: el pie sale en
+ * todos los mails que usan el texto por default, así que esconderlo acá haría que un usuario se
+ * enterara de que su factura lleva propaganda por un cliente suyo. Mostrándolo, la decisión de
+ * dejarlo o sacarlo —escribiendo el texto propio— es suya y está informada.
+ *
+ * Es una copia de `notifications.default_invoice_body` y no la fuente: el número del
+ * comprobante, la razón social y el importe son inventados, como corresponde a un ejemplo, y el
+ * texto que de verdad sale lo arma el backend. Si allá se corrige la redacción, esto queda
+ * viejo — es el precio de que el campo pueda mostrar el default sin pedirle un mail de mentira
+ * al servidor. Lo que hay que mantener parecido es el pie, que es lo que el usuario decide.
+ */
 const PLACEHOLDER_BODY = `Hola,
 
 Te adjuntamos la factura B 0001-00000123 de Fulano SRL por $ 42.350,00.
 
-El comprobante está autorizado por ARCA; el CAE y su vencimiento figuran al pie del PDF.`
+El comprobante está autorizado por ARCA; el CAE y su vencimiento figuran al pie del PDF.
+
+-- 
+Esta factura se emitió con FactuMov. Vos también podés emitir las tuyas: 5 comprobantes por mes, gratis, en https://factumov.insoft.net.ar`
 
 function EmailCard({
   value,
@@ -323,7 +339,8 @@ function EmailCard({
       {enabled ? (
         <p className="field-hint" style={{ margin: 0 }}>
           Lo que le llega al cliente cuando le mandás una factura emitida con este modelo. Si
-          los dejás vacíos mandamos el texto de FactuMov, que es el que está en gris.
+          los dejás vacíos mandamos el texto de FactuMov, que es el que está en gris — con su
+          pie contando que existimos. Escribiendo el tuyo, sale solo lo que pongas acá.
         </p>
       ) : (
         <Notice kind="warn">

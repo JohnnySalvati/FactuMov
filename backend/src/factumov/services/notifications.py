@@ -16,7 +16,7 @@ from urllib.parse import quote
 # un test puede parchear `factumov.services.email.send_email` en un solo lugar y estas
 # funciones miran el parche. Con `from ... import send_email` la referencia quedaría fija al
 # importar y el parche no llegaría acá nunca.
-from factumov.services import arca, email
+from factumov.services import arca, email, subscription
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,12 @@ _DELEGATION_ACCEPTED_PATH = "/delegacion-aceptada"
 # operador de FactuMov. Sus nombres los reflejan las rutas de `App.tsx`.
 _HOW_TO_DELEGATE_PATH = "/como-delegar"
 _HOW_TO_ACCEPT_PATH = "/como-aceptar-delegacion"
+# La app pelada, sin ninguna pantalla en particular. La usa el pie del mail de la factura, que
+# es el único texto de la app dirigido a alguien que todavía no es usuario — ver
+# `default_invoice_body`. Vacío y no `/registro` a propósito: en un mail de texto plano un
+# dominio suelto se lee y se recuerda mucho mejor que un dominio con path, y el que llega sin
+# cuenta cae en el login, que tiene su "Creá una" a la vista. El que ya la tiene, entra.
+_HOME_PATH = ""
 
 # Cuál de los dos transportes usa cada mail — la decisión está explicada en `email.py`. En
 # una línea: el mail que **es** el producto del request usa `send_email`, que levanta si no
@@ -211,12 +217,54 @@ def default_invoice_body(label: str, issuer_name: str, total: str) -> str:
 
     Los importes llegan ya formateados: quien los sabe formatear es `invoice_pdf`, y hacerlo
     otra vez acá sería una segunda forma de escribir el mismo número.
+
+    **Termina en el pie de FactuMov**, que es propaganda y está solo acá: el cuerpo que escribe
+    el usuario sale tal como lo escribió. Ver `_signature`.
     """
     return (
         "Hola,\n\n"
         f"Te adjuntamos la factura {label} de {issuer_name} por $ {total}.\n\n"
         "El comprobante está autorizado por ARCA; el CAE y su vencimiento figuran al pie "
         "del PDF.\n"
+        f"{_signature()}"
+    )
+
+
+def _signature() -> str:
+    """El pie que cuenta que FactuMov existe y que hay un plan gratis.
+
+    **Es el único texto de la app dirigido a alguien que no es usuario**: el que lee este mail
+    es el cliente del que facturó, y muy probablemente alguien que también emite facturas. Es
+    el lugar más barato que tiene el producto para hacerse conocer, porque el mail ya se manda
+    igual.
+
+    - **Linkea a FactuMov y no a la landing de InSoft.** Al que acaba de recibir una factura le
+      sirve "yo también puedo emitir las mías", y esa respuesta es la app. La landing presenta
+      a la casa de software y sus tres productos, o sea que le pide al lector que primero
+      averigüe cuál de los tres es para él — un paso más para perder gente que ya estaba a un
+      click. Además vive fuera de este repo y sin git, y los mails ya enviados no se pueden
+      corregir: linkear a algo que este proyecto no controla es apostar a que nadie le cambie
+      la URL. La casa igual está: el dominio dice `insoft.net.ar`.
+    - **Dice el número del plan Free y lo saca de `FREE_MONTHLY_INVOICES`.** "Gratis" a secas
+      es la clase de promesa que se lee como mentira el día que el usuario choca el quinto
+      comprobante; el número exacto es más honesto y además más convincente. Sale de la
+      constante y no escrito acá porque es política comercial y va a cambiar — ver
+      *Monetización → Los dos planes*.
+    - **Va detrás de `-- `**, que es el separador de firma de RFC 3676: los clientes de mail lo
+      reconocen y muchos lo pintan en gris o lo pliegan. O sea que la propaganda queda marcada
+      como una firma y no disfrazada de parte del mensaje, que es la diferencia entre un pie y
+      una trampa.
+    - **Solo está en el texto por default.** Al cuerpo que escribió el usuario no se le agrega
+      nada: sería meterle una línea que no puso en un mail que sale con su nombre y su factura
+      adentro. La consecuencia es que quien no lo quiere lo saca escribiendo su propio texto,
+      que es la función Pro — y que el editor lo muestra en el placeholder, así que nadie se
+      entera de este pie por un cliente suyo.
+    """
+    return (
+        "\n-- \n"
+        "Esta factura se emitió con FactuMov. Vos también podés emitir las tuyas: "
+        f"{subscription.FREE_MONTHLY_INVOICES} comprobantes por mes, gratis, en "
+        f"{_url(_HOME_PATH)}\n"
     )
 
 

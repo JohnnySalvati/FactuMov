@@ -358,6 +358,38 @@ mandando desde siempre.
   objetos y tocar `invoice.template` sería una query nueva sobre una transacción que se cerró a
   propósito.
 
+### El pie de FactuMov (2026-09-01)
+El mail por default termina en una firma que dice que FactuMov existe, que hay un plan gratis y
+dónde está. **Es el único texto de la app dirigido a alguien que no es usuario**: el que lo lee
+es el cliente del que facturó, o sea alguien que muy probablemente también emite facturas. El
+mail se manda igual, así que es el lugar más barato que tiene el producto para hacerse conocer.
+
+- **Linkea a la app y no a la landing de InSoft.** Al que acaba de recibir una factura le sirve
+  "yo también puedo emitir las mías", y esa respuesta es FactuMov. La landing presenta a la casa
+  y sus tres productos: le pide al lector que primero averigüe cuál de los tres es para él, que
+  es un paso más para perder a alguien que ya estaba a un click. Además vive fuera de este repo
+  y sin git, y un mail enviado no se puede corregir. La casa igual aparece: el dominio dice
+  `insoft.net.ar`.
+- **La URL sale de `APP_BASE_URL`**, la misma de la que cuelgan el link de confirmación y el de
+  reset, y va sin path: en texto plano un dominio suelto se lee y se recuerda mejor que uno con
+  `/registro` colgando, y el que llega sin cuenta cae en el login, que tiene su "Creá una" a la
+  vista.
+- **Dice el número del plan Free, y lo lee de `FREE_MONTHLY_INVOICES`.** "Gratis" a secas es la
+  clase de promesa que se lee como mentira el día que el usuario choca el quinto comprobante.
+  El número sale de la constante porque es política comercial y va a cambiar.
+- **Va detrás de `-- `** (RFC 3676), que es lo que hace que los clientes de mail lo traten como
+  firma —muchos lo pintan en gris o lo pliegan— en vez de como parte del mensaje. La diferencia
+  entre un pie y una trampa.
+- **Está adentro de `default_invoice_body` y no se agrega al final del envío.** Es lo que hace
+  que no exista ninguna rama donde haya que acordarse de ponerlo o de sacarlo: el que manda el
+  texto de la app lo lleva —Free o Pro— y el que escribió el suyo sale tal como lo escribió. A
+  un cuerpo propio no se le agrega nada: sería meterle una línea que no puso en un mail que va
+  con su nombre y su factura adentro.
+- **Sacarlo es escribir el texto propio**, o sea la función Pro. No hay un interruptor aparte, y
+  no hace falta: el editor muestra el pie en el placeholder, así que quien no lo quiere lo ve
+  antes de que salga y sabe exactamente qué hacer. Nadie se entera de este pie por un cliente
+  suyo.
+
 ### `/facturas` no es la grilla de tarjetas
 Es una pila de links con tres datos por renglón: qué comprobante, a quién y por cuánto. La
 grilla existe para pantallas donde se entra a un elemento **y se lo elimina**, y donde alcanza

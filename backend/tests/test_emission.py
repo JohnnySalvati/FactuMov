@@ -821,6 +821,58 @@ def test_a_free_account_gets_the_default_text(
     assert "Te adjuntamos la factura" in sent_emails[0].body
 
 
+# --- El pie de FactuMov ---
+#
+# El único texto de la app dirigido a alguien que no es usuario: el que lee este mail es el
+# cliente del que facturó. Va solo en el texto por default — ver `notifications._signature`.
+
+
+def test_the_default_body_advertises_the_free_plan(client, emitted, sent_emails):
+    from factumov.services.subscription import FREE_MONTHLY_INVOICES
+
+    client.post(f"/invoices/{emitted['id']}/send")
+
+    body = sent_emails[0].body
+    # El número sale de la constante, no escrito acá: es política comercial y va a cambiar.
+    assert f"{FREE_MONTHLY_INVOICES} comprobantes por mes, gratis" in body
+    # La URL es la de la app, la misma de la que cuelgan los links de confirmación.
+    assert "https://app.test" in body
+
+
+def test_the_signature_goes_behind_the_rfc_delimiter(client, emitted, sent_emails):
+    """`-- ` con el espacio: es el separador de firma de RFC 3676, y lo que hace que el pie se
+    lea como una firma y no como parte del mensaje."""
+    client.post(f"/invoices/{emitted['id']}/send")
+
+    assert "\n-- \n" in sent_emails[0].body
+
+
+def test_an_own_body_carries_no_advertising(client, own_text, emitted, sent_emails):
+    """Al texto que escribió el usuario no se le agrega nada.
+
+    Sale con su nombre y su factura adentro: meterle una línea que no puso sería usar su mail
+    para otra cosa. El que no quiere el pie lo saca escribiendo su propio texto — que es la
+    función Pro, y el editor le muestra en el placeholder de qué se está deshaciendo.
+    """
+    client.post(f"/invoices/{emitted['id']}/send")
+
+    assert sent_emails[0].body == "Hola Ana! Te mando la factura del mes. Gracias!"
+    assert "FactuMov" not in sent_emails[0].body
+
+
+def test_a_free_account_with_an_own_text_still_gets_the_signature(
+    client, own_text, emitted, sent_emails, free_plan
+):
+    """El Free vuelve al texto por default, y el default lleva el pie.
+
+    Es la otra mitad de por qué el pie vive adentro del default y no se agrega al final del
+    envío: no hay ninguna rama en la que haya que acordarse de ponerlo o de sacarlo.
+    """
+    client.post(f"/invoices/{emitted['id']}/send")
+
+    assert "Vos también podés emitir las tuyas" in sent_emails[0].body
+
+
 def test_send_records_when_it_went_out(client, emitted):
     assert emitted["sent_at"] is None
 
