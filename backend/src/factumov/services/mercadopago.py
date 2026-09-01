@@ -495,6 +495,27 @@ def _subscription_of(db: Session, preapproval: dict[str, Any]) -> Subscription |
     return subscription_crud.get_for_user(db, user_id)
 
 
+def _unknown(resource_id: str) -> str:
+    """El recurso que la notificación nombra no existe para esta aplicación.
+
+    **Se contesta 200 y no 502, que es lo que salía antes de acá.** El 502 existe para que
+    Mercado Pago reintente cuando no pudimos leer el recurso, y ahí el reintento arregla algo:
+    la próxima vez la API contesta. Un 404 no mejora nunca —ese id no va a aparecer—, así que
+    el reintento es una notificación que vuelve durante horas y un log que se llena de un
+    problema que no existe.
+
+    Llega por dos caminos, los dos benignos: el botón "Simular notificación" del panel, que
+    manda ids inventados como `123456`, y un aviso del modo de prueba aterrizando en el
+    servidor de producción, cuyo id no pertenece a estas credenciales. Observado en producción
+    el 2026-09-01.
+
+    Es INFO y no WARNING por lo mismo: no hay nada que hacer al respecto. La línea igual queda,
+    porque quien está probando el alta del webhook necesita ver que su simulación llegó.
+    """
+    logger.info("Mercado Pago notificó %s, que no existe para esta aplicación.", resource_id)
+    return "no existe"
+
+
 def _apply_preapproval(db: Session, preapproval_id: str) -> str:
     """El estado de la autorización cambió: se relee de Mercado Pago y se copia a la fila.
 
@@ -504,7 +525,9 @@ def _apply_preapproval(db: Session, preapproval_id: str) -> str:
     entonces. La idempotencia que sí necesita un registro es la del dinero, que es la de
     `subscription_payments`.
     """
-    remote = _request("GET", f"/preapproval/{preapproval_id}")
+    remote = _request("GET", f"/preapproval/{preapproval_id}", missing_is_empty=True)
+    if not remote:
+        return _unknown(preapproval_id)
     subscription = _subscription_of(db, remote)
     if subscription is None:
         logger.warning("Llegó un preapproval %s que no es de ninguna cuenta.", preapproval_id)
@@ -558,7 +581,9 @@ def _outcome_of(authorized_payment: dict[str, Any]) -> PaymentStatus | None:
 
 def _apply_authorized_payment(db: Session, payment_id: str) -> str:
     """Un cobro de la suscripción: acredita el período nuevo, o marca que falló."""
-    remote = _request("GET", f"/authorized_payments/{payment_id}")
+    remote = _request("GET", f"/authorized_payments/{payment_id}", missing_is_empty=True)
+    if not remote:
+        return _unknown(payment_id)
 
     preapproval_id = remote.get("preapproval_id")
     if not isinstance(preapproval_id, str):

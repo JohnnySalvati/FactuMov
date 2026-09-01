@@ -237,6 +237,14 @@ sin ningún lado adonde ir.
   de todas las pantallas: un contador permanente diciendo "1 de 5" sería una publicidad del plan
   Pro en la pantalla que se abre cien veces por semana. Y no aparece nunca si el plan no se pudo
   cargar — avisar de un cupo que no se conoce es peor que no avisar.
+- **La franja avisa también los últimos 7 días de la prueba** (2026-09-01). El aviso de cupo no
+  cubría ese caso y no podía: durante el trial la cuenta es Pro y `invoices_limit` viene en
+  `null`, así que la franja no aparecía ni una vez en los treinta días y el único camino a la
+  pantalla del plan era el engranaje de Ajustes. El usuario se enteraba de que la prueba se había
+  terminado el día que iba a emitir. Siete y no treinta por lo mismo que el cupo avisa recién con
+  el último comprobante: desde el día uno sería una publicidad permanente y un renglón que se
+  deja de ver a la semana. Siete alcanza además para que lo vea el que abre la app una vez por
+  semana, que es la frecuencia de mucha gente que factura.
 - **Los dos botones de pago viven en `SubscribeBox`** (2026-09-01), y esa caja **pide los
   precios con su propio `useResource`**, no desde el contexto. Es el caso que
   `SubscriptionProvider` no cubre a propósito: el plan de la cuenta lo leen seis lugares en cada
@@ -389,7 +397,7 @@ Del otro lado hay una máquina que lee el status y decide si reintenta:
 
 | Status | Cuándo | Qué logra |
 |---|---|---|
-| 200 | Se aplicó, o no había nada que aplicar (tema ajeno, cobro en vuelo, duplicado) | Que deje de reintentar algo que nunca va a cambiar |
+| 200 | Se aplicó, o no había nada que aplicar (tema ajeno, cobro en vuelo, duplicado, **el recurso no existe**) | Que deje de reintentar algo que nunca va a cambiar |
 | 401 | La firma no cierra | Nada que reintentar: no va a mejorar |
 | 503 | Falta `MERCADOPAGO_WEBHOOK_SECRET` | Que reintente cuando la variable esté puesta |
 | 502 | Mercado Pago no contestó cuando fuimos a leer el recurso | Que reintente: perder ese aviso puede ser perder el cobro que activa la cuenta |
@@ -397,6 +405,14 @@ Del otro lado hay una máquina que lee el status y decide si reintenta:
 El 502 cubre además un caso que pasa de verdad: **los dos avisos pueden llegar al revés**. Si el
 cobro de la primera cuota llega antes que la autorización, la fila todavía no tiene el id del
 proveedor y ese cobro no es de nadie; pedir el reintento lo resuelve solo.
+
+**El 404 al leer el recurso no es un 502** (2026-09-01). La diferencia entre los dos casos es si
+el reintento arregla algo: "Mercado Pago no contestó" mejora solo, y "ese id no existe para esta
+aplicación" no va a mejorar nunca. Llega por dos caminos benignos —el botón *Simular
+notificación* del panel, que manda ids como `123456`, y un aviso del modo de prueba aterrizando
+en el servidor de producción— y con un 502 los dos vuelven durante horas, llenando justo el log
+que está mirando el que acaba de dar de alta el webhook. Se contesta 200 con `no existe` y queda
+una línea INFO. Observado en producción el día que se configuró.
 
 ### El período y el importe salen de Mercado Pago, no de un reloj propio
 

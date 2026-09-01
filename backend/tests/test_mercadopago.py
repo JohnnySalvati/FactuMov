@@ -369,6 +369,22 @@ def test_mercado_pago_being_down_asks_for_a_retry(anonymous_client, db, user, mp
     assert response.status_code == 502
 
 
+def test_a_notification_about_something_that_does_not_exist_is_not_retried(
+    anonymous_client, db, mp
+):
+    """El 404 es el otro lado del test de arriba: acá el reintento no arregla nada.
+
+    Es lo que manda el botón "Simular notificación" del panel —ids inventados como `123456`— y
+    también un aviso del modo de prueba que aterriza en el servidor de producción. Con un 502
+    esos avisos vuelven durante horas y llenan el log del que está justamente mirándolo para
+    ver si el webhook quedó bien dado de alta. Observado en producción el 2026-09-01.
+    """
+    mp.routes[("GET", "/preapproval")] = FakeResponse(404, {"message": "does not exist"})
+    response = notify(anonymous_client, "subscription_preapproval", "123456")
+    assert response.status_code == 200
+    assert response.json()["result"] == "no existe"
+
+
 # --- Los cobros --------------------------------------------------------------------------
 
 
@@ -492,6 +508,20 @@ def test_a_charge_before_its_authorization_asks_for_a_retry(anonymous_client, db
     response = notify(anonymous_client, "subscription_authorized_payment", PAYMENT_ID)
 
     assert response.status_code == 502
+
+
+def test_a_charge_that_does_not_exist_is_not_retried(anonymous_client, db, user, mp):
+    """La misma regla del preapproval, del lado del cobro: un 404 no mejora reintentando.
+
+    Se prueba aparte porque son dos endpoints distintos de Mercado Pago y cada uno se lee en su
+    función; que uno deje de pedir reintentos no dice nada del otro.
+    """
+    mp.routes[("GET", "/authorized_payments")] = FakeResponse(404, {"message": "not found"})
+
+    response = notify(anonymous_client, "subscription_authorized_payment", PAYMENT_ID)
+
+    assert response.status_code == 200
+    assert response.json()["result"] == "no existe"
 
 
 # --- El checkout ---------------------------------------------------------------------------
