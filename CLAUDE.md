@@ -147,8 +147,8 @@ FactuMov/
 │   │       ├── secrets.py          # cifra los secretos que hay que poder volver a leer
 │   │       └── invoice_pdf.py      # Invoice → QR + HTML + PDF (imprime las propias)
 │   └── tests/
-│       └── samples/                # 10 facturas PDF reales (1 A, 4 B, 5 C)
-│           └── unsupported/       # otros layouts, fuera del glob de los tests
+│       └── samples/                # 11 facturas PDF reales: 10 de ARCA (1 A, 4 B, 5 C)
+│                                   # y 1 A impresa por Balance360, que es el layout propio
 └── frontend/                       # Vite + React 19 + TypeScript
     ├── Dockerfile                  # build de la SPA + el nginx que la sirve
     ├── nginx.conf                  # sirve el dist y proxea /api al app

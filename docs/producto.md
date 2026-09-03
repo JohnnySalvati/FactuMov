@@ -118,10 +118,12 @@ escrita y a la espera de que se corra su `scp.ps1`.
    - **Falta lo que avisa y lo que concilia**: los mails del trial por vencer, la
      transferencia manual del plan anual y emitir con FactuMov las propias facturas de las
      suscripciones. El detalle, en *Lo que falta* de ese archivo.
-5. **Segundo layout del parser** — ver *Parser → Pendiente: un segundo layout*. No bloquea
-   nada: hoy el usuario puede cargar el modelo a mano.
-6. **WhatsApp**, la otra mitad de la funcionalidad #5. Sin empezar y sin decisión tomada
+5. **WhatsApp**, la otra mitad de la funcionalidad #5. Sin empezar y sin decisión tomada
    sobre qué proveedor.
+
+El segundo layout del parser salió de esta lista el **2026-09-02**: importar un PDF impreso
+por FactuMov o por Balance360 —que son el mismo comprobante— ya devuelve el modelo entero.
+Ver *Parser → Dos layouts*.
 
 Y dos cosas que la emisión dejó anotadas y no son unidades todavía:
 

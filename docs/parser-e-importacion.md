@@ -30,9 +30,10 @@ mail— e `invoice.py`, que nunca fue reutilizable.
 Reescrito a partir del de Balance360 y verificado contra las 10 muestras de
 `backend/tests/samples/`. Extrae todo: emisor, receptor, período, CAE e items.
 
-- **Un solo layout: ARCA "Comprobantes en línea".** Todas las facturas de Miguel salen de
-  ahí. Se borraron los otros nueve layouts de Balance360: un regex que no se puede verificar
-  contra un PDF real es un pasivo, no una función.
+- **Al principio, un solo layout: ARCA "Comprobantes en línea".** Todas las facturas de
+  Miguel salen de ahí. Se borraron los otros nueve layouts de Balance360: un regex que no
+  se puede verificar contra un PDF real es un pasivo, no una función. Desde el 2026-09-02
+  hay dos, y del segundo también hay PDFs reales — ver *Dos layouts* más abajo.
 - **El PDF trae la factura tres veces** (ORIGINAL / DUPLICADO / TRIPLICADO). Se corta en el
   primer `DUPLICADO`; si no, toda extracción encuentra tres de cada cosa.
 - **La alícuota se lee en A y se deduce en B y C.** Solo la A discrimina IVA por línea, y
@@ -68,31 +69,114 @@ Reescrito a partir del de Balance360 y verificado contra las 10 muestras de
 - Los campos del emisor se llaman `issuer_*`, no `supplier_*`: en FactuMov el emisor es el
   propio usuario.
 
-### Pendiente: un segundo layout (2026-08-26)
-`tests/samples/unsupported/factura_A_00005-00000001.pdf` es una factura A real de Miguel que
-el parser hoy **no** sabe leer: saca `pos`, `number`, `date`, CAE, IIBB y fecha de inicio, y
-nada más. Sin CUIT del emisor, sin receptor y sin líneas. No hay nada roto — es otro
-generador, no ARCA "Comprobantes en línea":
+## Dos layouts (2026-09-02)
+El parser lee dos generadores, y del segundo también hay facturas reales:
 
-| | Comprobantes en línea | El PDF nuevo |
+- **`arca`**: "Comprobantes en línea", el sitio de ARCA.
+- **`factumov`**: el comprobante que imprime `services/invoice_pdf.py`, que es **el mismo
+  que imprime Balance360** — el template de acá es un port del de allá y los dos salen
+  iguales. Reimportar una factura propia es el caso natural: se emitió una en julio y en
+  agosto se quiere volver a facturar lo mismo.
+
+Antes el segundo no se leía. De `factura_A_00005-00000001.pdf` —una A de Miguel impresa por
+Balance360— salían `pos`, `number`, `date`, CAE, IIBB y fecha de inicio, y nada más: sin CUIT
+del emisor, sin receptor y sin líneas. No estaba roto nada; era otro generador:
+
+| | Comprobantes en línea | El comprobante propio |
 |---|---|---|
 | Copias | ORIGINAL + DUPLICADO + TRIPLICADO | una sola, `Pág. 1/1` |
 | CUIT | `20182810674` | `20-18281067-4`, con guiones |
-| Columnas de items | `Código` `Producto/Servicio` `Cantidad` `U. Medida` `Precio Unit.` `% Bonif` … | `Producto/Servicio` `Cantidad` `Precio Unit.` … — sin código, **sin U. Medida**, sin bonif |
-| Tipo de comprobante | rótulo de ARCA | `COD. 01`, pegado a la razón social |
+| Columnas de items | `Código` `Producto/Servicio` `Cantidad` `U. Medida` `Precio Unit.` `% Bonif` … | `Producto/Servicio` `Cantidad` `Precio Unit.` `Subtotal` … |
+| Importes | `35000,00` | `$ 35.000,00` |
+| Vencimiento del período | `Fecha de Vto. para el pago:` | `Vto. para el pago:` |
+| Tipo de comprobante | rótulo suelto | `COD. 01`, pegado a la razón social |
 | Datos del emisor | un campo por renglón | varios por renglón (`Condición frente al IVA: … CUIT: …`) |
 | Peso | ~86 KB | 19 KB |
 
-Los guiones tumban `_ISSUER_CUIT` y `_CUSTOMER`, que piden 11 dígitos seguidos; la falta de
-`U. Medida` tumba `_ITEM_ROW`, que exige el token de unidad entre cantidad y precio; y los
-campos apilados en un mismo renglón tumban los regex del emisor, que buscan el rótulo
-siguiente y `.` no cruza saltos de línea.
+### El registry es flaco a propósito
+Es el registry de layouts que Balance360 tenía y que acá se había borrado, pero con la
+diferencia que hacía a aquella decisión: de los dos hay PDFs contra los cuales verificar.
 
-Soportarlo es **volver a un registry de layouts**, que es justamente lo que se borró de
-Balance360 — pero con la diferencia que hacía a esa decisión: acá hay un PDF real contra el
-cual verificar. Miguel confirmó que es una factura suya y que hay que soportarla, más
-adelante. Mientras tanto vive en `samples/unsupported/`, fuera del glob de
-`test_every_sample_parses_end_to_end`.
+Lo que un `_Layout` guarda es **la tabla de items y la marca que lo identifica, y nada más**.
+Los rótulos —"Razón Social:", "Condición frente al IVA:", "Período Facturado Desde:"— los
+fija la RG 1415 y no el generador, así que la extracción del emisor y del receptor quedó
+**una sola**: tener una copia por layout serían dos listas capaces de discrepar, y la segunda
+se escribiría copiando la primera y cambiándole una palabra.
+
+Donde los rótulos difieren en algo, la diferencia entró como una alternativa más en el mismo
+patrón (`(?:Fecha de\s+)?Vto\. para el pago:`) y no como un patrón nuevo. **Cada alternativa
+sale de un PDF que se leyó**; ninguna está puesta por las dudas, que es la regla que sigue
+distinguiendo esto de los diez layouts heredados.
+
+### Cómo se reconoce cuál es
+Por una marca que está en **todo** comprobante de su generador, tenga items o no: ARCA
+imprime el rótulo largo del receptor (`Apellido y Nombre / Razón Social`) y nunca pone
+guiones en el CUIT; el comprobante propio hace exactamente al revés. Reconocerlos por el
+encabezado de la tabla habría dejado sin identificar justo a los PDFs cuyas líneas no se
+pudieron leer, que son los que más interesa ubicar.
+
+Un generador desconocido cae en el de ARCA. Lo que sale de eso no es un error: las filas no
+matchean, `needs_manual_items` queda en `True` y la UI ofrece carga manual — el mismo camino
+que un PDF escaneado.
+
+### Las dos columnas del encabezado se mezclan
+El encabezado del comprobante son dos celdas lado a lado, y el texto que sale de pdfplumber
+las intercala renglón por renglón: **qué campo de la derecha queda pegado a qué campo de la
+izquierda depende de dónde cortó cada línea**, o sea del largo de la razón social y del
+domicilio. Con una razón social larga, `Domicilio Comercial:` deja de terminar en `CUIT:` y
+pasa a terminar en `Ingresos Brutos:`, o en nada.
+
+Por eso ningún campo del encabezado termina en fin de renglón sino **en el rótulo
+siguiente**, con la lista de rótulos posibles compartida (`_NEXT_LABEL`). Y por eso el
+domicilio partido en dos renglones se rearma descartando de cada continuación lo que venga
+pegado de la columna derecha, en vez de exigir que la continuación tenga una forma fija.
+
+### Lo que ancla una fila de items es el `$`
+El comprobante propio no imprime ni código, ni unidad de medida, ni bonificación: la fila es
+`descripción cantidad $ precio $ subtotal`, más `alícuota% $ subtotal c/IVA` cuando es A. Sin
+el `$` como ancla, una descripción terminada en número —"Instalacion 2", cantidad 1— se leería
+como la descripción "Instalacion" y la cantidad 2: una línea plausible y equivocada. La cola
+es opcional en vez de contarse por ancho como en ARCA, porque las dos columnas del IVA
+existen solo en la A: o está la alícuota, o hay que caer en la de la letra.
+
+### Una descripción larga se parte, y los números quedan en el medio
+Cuando la celda de la descripción ocupa más renglones que las de los números, el generador
+centra los números y **la fila con las columnas queda en el renglón del medio**: el principio
+de la descripción está arriba y el final abajo. Ignorar lo de arriba dejaba la línea con la
+mitad del texto, así que ahora también se junta hacia atrás.
+
+Ahí aparece un choque: los restos del encabezado partido caen exactamente en el mismo lugar
+—"IVA" abajo de "Alicuota" en ARCA, "UNIT. IVA IVA" abajo del título en el propio—. Se los
+distingue porque **no tienen ni una minúscula**, que es lo que deja el `text-transform` del
+encabezado, y una descripción escrita por el usuario no.
+
+### La alícuota de Balance360 viene con punto decimal
+Balance360 imprime la alícuota sin pasarla por ningún formateador: sale el `Decimal` crudo de
+una columna `Numeric(5, 2)`, o sea `10.50%` y no `10,5%`. Con la regla argentina a secas —el
+punto agrupa miles— eso se leía **1050**, `IvaAliquot.get_by_rate` no encontraba ninguna
+alícuota con esa tasa y toda factura A de Balance360 perdía el IVA de sus líneas.
+
+`_to_decimal` acepta ahora esa forma: **un punto seguido de una o dos cifras, en un número sin
+ninguna coma, es una coma decimal**. Tres cifras después del punto siguen siendo miles, que es
+lo que deja intacto a `2.805.000`.
+
+### El `&nbsp;` del propio
+El comprobante propio separa el punto de venta del número con `&nbsp;`, que sale del PDF como
+U+00A0. `\s` lo matchea y `[ \t]` no, así que se lo normaliza a espacio apenas se extrae el
+texto en vez de tener que acordarse de eso en cada patrón — y `[ \t]` hace falta en varios,
+porque `\s` cruza el salto de línea y un rótulo vacío se llevaba el contenido del renglón de
+abajo.
+
+### Cómo se verifica
+`factura_A_00005-00000001.pdf` dejó de estar en `samples/unsupported/` —esa carpeta ya no
+existe— y entró al glob de `test_every_sample_parses_end_to_end` con sus valores fijados.
+
+Pero la prueba que importa es otra: `test_invoice_parser.py` **imprime una factura con
+`services/invoice_pdf.py` y la lee de vuelta**. Es más caro —hay que levantar weasyprint— y
+es lo único que sigue diciendo la verdad el día que el template cambie. Un PDF nuestro
+guardado en `samples/` envejecería sin que nada lo delate, y encima ese directorio está
+gitignoreado: los PDFs son facturas reales y no viajan al repo, así que un test que dependa
+solo de ellos no corre en ningún lado que no sea la máquina de Miguel.
 
 
 ## Endpoint de importación (2026-08-17)

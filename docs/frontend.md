@@ -205,9 +205,10 @@ lleva a `/modelos/nuevo`, `/identidades/nueva`, `/clientes/nuevo`.
   respuesta —el cliente se da de alta solo y se avisa; la identidad fiscal espera un toque— y el
   porqué de esa asimetría está en el archivo. Sigue valiendo que `/import` no escribe nada: el
   alta es un `POST` aparte que manda el cliente.
-- **"Empezar en blanco" no es un extra.** Hay un segundo layout de factura que el parser
-  todavía no sabe leer, y un PDF escaneado contesta 200 con el modelo vacío a propósito. Con
-  una sola puerta, cualquiera de esos dos casos queda sin salida.
+- **"Empezar en blanco" no es un extra.** Un PDF escaneado contesta 200 con el modelo vacío a
+  propósito, y el parser conoce dos generadores —el de ARCA y el propio, desde el
+  2026-09-02— pero no todos: ante uno desconocido devuelve lo mismo. Con una sola puerta,
+  cualquiera de esos dos casos queda sin salida.
 - **La palabra de la UI es "modelo".** Miguel dice indistintamente "modelo" y "plantilla"; se
   eligió "modelo" porque es lo que ya dicen los mensajes de error del backend ("Modelo no
   encontrado", "No se puede eliminar un cliente con modelos asociados") y tener la pantalla
