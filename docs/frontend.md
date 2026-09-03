@@ -121,6 +121,12 @@ lleva a `/modelos/nuevo`, `/identidades/nueva`, `/clientes/nuevo`.
 - **La raíz sigue siendo la grilla de modelos y no las identidades fiscales.** Identidades y
   clientes son configuración: se tocan al empezar y después casi nunca. Dejar una de ellas de
   portada le cobra un toque a la pantalla que se abre cien veces por semana.
+- **Y entrar también termina ahí** (2026-09-03). El login mandaba a `/identidades` —un resto de
+  cuando la primera cosa que había que hacer era cargar el certificado—, así que la decisión de
+  arriba solo valía para quien ya tenía sesión: abrir la app desde cero caía igual en
+  configuración. Ahora `LoginPage` respeta el `state.from` que `RequireAuth` venía guardando sin
+  que nadie lo leyera —el link de un mail a una factura ya no se pierde al pasar por el login— y
+  cuando no hay destino guardado va a `/`.
 - **La tarjeta muestra solo el nombre.** Lo que hace falta ahí es reconocer el elemento de un
   vistazo y llegar con un dedo; el CUIT, el cliente y los importes están adentro, que es donde
   se los mira. Una lista con cuatro columnas diría más y se leería peor.

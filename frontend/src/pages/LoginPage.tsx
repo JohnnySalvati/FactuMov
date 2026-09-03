@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router'
+import { Link, useLocation, useNavigate } from 'react-router'
 
 import { ApiError } from '../api/client'
 import { Notice } from '../components/Notice'
@@ -8,6 +8,11 @@ import { useAuth } from '../auth/useAuth'
 export function LoginPage() {
   const { login } = useAuth()
   const navigate = useNavigate()
+  // A dónde quería ir quien fue pateado al login. Lo deja `RequireAuth` en el `state` de la
+  // navegación y hasta ahora nadie lo leía: el link del mail a una factura terminaba igual en
+  // la portada.
+  const location = useLocation()
+  const from = (location.state as { from?: string } | null)?.from
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string>()
@@ -19,9 +24,12 @@ export function LoginPage() {
     setError(undefined)
     try {
       await login(email, password)
+      // A la grilla de modelos, que es la portada de la app: es la pantalla que se abre cien
+      // veces por semana, mientras que las identidades fiscales se cargan una vez y no se
+      // vuelven a tocar. Entrar y caer en configuración le cobraba un toque a cada sesión.
       // `replace` y no `push`: sin eso, el "atrás" del navegador vuelve al login estando ya
       // logueado, que es una pantalla sin sentido.
-      navigate('/identidades', { replace: true })
+      navigate(from ?? '/', { replace: true })
     } catch (caught) {
       // El backend contesta el **mismo** 401 para email desconocido, contraseña incorrecta y
       // cuenta sin confirmar, a propósito: distinguirlos le diría a un atacante si esa
