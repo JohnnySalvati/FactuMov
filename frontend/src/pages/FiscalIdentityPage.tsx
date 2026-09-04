@@ -30,6 +30,11 @@ function digitsOf(value: string) {
 interface Seed {
   tax_id: string
   name: string
+  /**
+   * El nombre de fantasía. Siempre arranca vacío en el alta —el padrón no lo tiene, porque
+   * cómo se llama el negocio no es un dato de ARCA— y en la edición sale de la fila.
+   */
+  trade_name: string
   /** `null` = todavía no se sabe, y el desplegable obliga a elegir. Ver `FiscalIdentityForm`. */
   condicion_iva: CondicionIva | null
   address: string
@@ -98,6 +103,7 @@ function FiscalIdentityScreen({ id }: { id?: string }) {
       : {
           tax_id: identity.tax_id,
           name: identity.name,
+          trade_name: identity.trade_name ?? '',
           condicion_iva: identity.condicion_iva,
           address: identity.address ?? '',
         }
@@ -201,6 +207,9 @@ function TaxIdStep({ onReady }: { onReady: (seed: Seed) => void }) {
       onReady({
         tax_id: found.tax_id,
         name: found.name,
+        // El padrón conoce la razón social, no el nombre del local. Sembrarlo con `found.name`
+        // diría que el usuario eligió llamarse igual, cuando todavía no eligió nada.
+        trade_name: '',
         condicion_iva: found.condicion_iva,
         address: found.address ?? '',
         note: noteFor(found),
@@ -215,7 +224,7 @@ function TaxIdStep({ onReady }: { onReady: (seed: Seed) => void }) {
   }
 
   function byHand() {
-    onReady({ tax_id: digits, name: '', condicion_iva: null, address: '' })
+    onReady({ tax_id: digits, name: '', trade_name: '', condicion_iva: null, address: '' })
   }
 
   return (
@@ -270,6 +279,7 @@ function FiscalIdentityForm({
   onUpdated: (identity: FiscalIdentity) => void
 }) {
   const [name, setName] = useState(initial.name)
+  const [tradeName, setTradeName] = useState(initial.trade_name)
   const [taxId, setTaxId] = useState(initial.tax_id)
   // `null` es "todavía no se eligió", y el desplegable arranca en su placeholder. No hay valor
   // por default a propósito: la condición decide la letra de cada comprobante que se emita, así
@@ -285,6 +295,9 @@ function FiscalIdentityForm({
 
   const body = {
     name: name.trim(),
+    // Igual que el domicilio: vacío es `null`, no `""`. Guardar la cadena vacía diría que el
+    // negocio se llama "" en vez de que no tiene nombre de fantasía.
+    trade_name: tradeName.trim() || null,
     tax_id: digitsOf(taxId),
     condicion_iva: condicionIva,
     // Cadena vacía y "sin dato" no son lo mismo para una columna que admite NULL: mandar
@@ -298,6 +311,7 @@ function FiscalIdentityForm({
   const savedBody = editing
     ? {
         name: editing.name.trim(),
+        trade_name: (editing.trade_name ?? '').trim() || null,
         tax_id: editing.tax_id,
         condicion_iva: editing.condicion_iva as CondicionIva | null,
         address: (editing.address ?? '').trim() || null,
@@ -425,6 +439,25 @@ function FiscalIdentityForm({
             setName(event.target.value)
           }}
         />
+      </div>
+
+      <div>
+        <label htmlFor="fi-trade-name">Nombre de fantasía (opcional)</label>
+        <input
+          id="fi-trade-name"
+          value={tradeName}
+          onChange={(event) => {
+            edited()
+            setTradeName(event.target.value)
+          }}
+        />
+        {/* El campo no se explica solo: "nombre de fantasía" y "razón social" son dos nombres
+            del emisor y desde el formulario no se ve cuál sale dónde. Decir qué pasa si se
+            deja vacío evita el reflejo de copiar ahí la razón social. */}
+        <span className="field-hint">
+          Sale arriba de todo en el comprobante, con la razón social abajo. Si lo dejás vacío,
+          arriba sale la razón social.
+        </span>
       </div>
 
       <div>

@@ -253,6 +253,37 @@ corrección del template. Cuesta unas décimas de segundo y se pide pocas veces.
 - **`inline` y no `attachment` en el endpoint del PDF**: en el celular abre el visor del
   navegador, que es lo que uno quiere antes de mandarlo. Bajarlo sigue estando a un toque.
 
+### El nombre de fantasía del emisor (2026-09-04, migración `e9b4d1c76a20`)
+El renglón grande de arriba del comprobante es cómo se llama el **negocio**, que no siempre es
+cómo se llama el contribuyente: "La Violeta" factura a nombre de Salvati Miguel Ángel, y el
+papel tiene que decir las dos cosas. Es lo mismo que hace Balance360, donde ese renglón sale de
+`Entity.name` y la razón social de la identidad fiscal. Hasta esta unidad FactuMov imprimía
+`issuer_name` **dos veces**: el renglón existía en el CSS y repetía la razón social.
+
+- **Va en `FiscalIdentity` y no en una tabla nueva.** Balance360 tiene ese nombre en `Entity`
+  porque ahí `Entity` responde "¿en los libros de quién va este movimiento?" y agrupa varias
+  identidades fiscales. FactuMov no lleva libros —ver *Desviaciones deliberadas* en
+  [`modelo-de-datos.md`](modelo-de-datos.md), punto 5— así que traer la tabla para colgarle un
+  `String(150)` sería importar el concepto contable entero por un campo.
+- **Se copia a la factura al emitir**, como el resto de los `issuer_*` y al revés que el mail
+  del cliente. El criterio es el de siempre: esto **se imprime**. Leerlo en vivo de la ficha
+  haría que cambiarle el nombre al negocio reescriba el encabezado de todas las facturas ya
+  emitidas y mandadas.
+- **Nullable en las dos tablas, y el template cae en la razón social.** "No tiene nombre de
+  fantasía" es el caso más común —el monotributista que factura con su propio nombre— y es la
+  verdad de todas las filas anteriores a la migración. Como el fallback imprime `issuer_name`,
+  una factura vieja con `NULL` sale hoy exactamente igual que antes. Guardar una copia del
+  `name` para evitar el `NULL` diría que el usuario eligió llamarse igual, que es distinto de
+  no haber elegido nada, y dejaría dos columnas para sincronizar en cada corrección.
+- **No viene del padrón y no viaja a ARCA.** ARCA conoce la razón social; cómo se llama el
+  local es una decisión comercial que no está registrada en ningún lado, así que
+  `FiscalIdentityLookup` no lo trae y lo carga siempre el usuario. Y el request de WSFE
+  identifica al emisor por CUIT, no por nombre: esto es del impreso, nada más.
+- **El schema convierte `"  "` en `None`.** El formulario que se dejó vacío manda la cadena
+  vacía; guardarla diría que el negocio se llama `""`. El renglón saldría igual —el fallback de
+  Jinja también se dispara con `""`— pero la fila mentiría y la detección de cambios de la
+  pantalla vería un cambio donde no lo hubo.
+
 ### Enviar sí se puede repetir
 Es lo contrario de emitir, y por eso esta pantalla **no** tiene confirmación. Reenviar es
 legítimo y frecuente —el cliente dice que no le llegó— así que no hay ninguna guarda contra el

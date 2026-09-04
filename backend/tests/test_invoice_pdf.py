@@ -39,6 +39,9 @@ def make_invoice(voucher_type=VoucherType.B, lines=((Decimal("2"), Decimal("1234
         "iva_total": Decimal("0.00"),
         "total": Decimal("2469.12"),
         "issuer_name": "Estudio Salvati",
+        # Sin nombre de fantasía por default: es el caso más común. El test que lo prueba lo
+        # pasa por `over`.
+        "issuer_trade_name": None,
         "issuer_tax_id": "20182810674",
         "issuer_condicion_iva": CondicionIva.INSCRIPTO,
         "issuer_address": "Corrientes 1234",
@@ -138,6 +141,32 @@ def test_the_html_shows_the_copied_parties():
     assert "Estudio Salvati" in html
     assert "Cliente SA" in html
     assert "Rivadavia 500" in html
+
+
+def test_the_trade_name_is_the_big_line_and_the_legal_name_stays_a_field():
+    """Las dos cosas salen, y en su lugar: "La Violeta" arriba, grande; "Estudio Salvati" como
+    Razón Social. Son datos distintos y el comprobante los pide a los dos."""
+    html = invoice_pdf.render_html(make_invoice(issuer_trade_name="La Violeta"))
+
+    assert '<div class="fantasia">La Violeta</div>' in html
+    assert "<b>Razón Social:</b> Estudio Salvati" in html
+
+
+def test_without_a_trade_name_the_big_line_falls_back_to_the_legal_name():
+    """El monotributista que factura con su propio nombre. Sin el fallback, el renglón
+    principal del comprobante saldría en blanco — y es lo que se imprimía antes de que la
+    columna existiera, así que las facturas viejas siguen saliendo iguales."""
+    html = invoice_pdf.render_html(make_invoice(issuer_trade_name=None))
+
+    assert '<div class="fantasia">Estudio Salvati</div>' in html
+
+
+def test_the_trade_name_is_escaped():
+    """Lo cargó una persona en un campo libre, igual que el nombre del cliente."""
+    html = invoice_pdf.render_html(make_invoice(issuer_trade_name="La <script>x</script>"))
+
+    assert "<script>" not in html
+    assert "&lt;script&gt;" in html
 
 
 def test_the_tax_ids_are_printed_the_way_arca_prints_them():

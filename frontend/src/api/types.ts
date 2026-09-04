@@ -92,6 +92,16 @@ export interface MessageResponse {
 export interface FiscalIdentity {
   id: string
   name: string
+  /**
+   * El nombre de fantasía: cómo se llama el negocio, que no siempre es cómo se llama el
+   * contribuyente. Es el renglón grande de arriba del comprobante, con la razón social abajo
+   * como un campo más.
+   *
+   * `null` es el caso más común —el monotributista que factura con su propio nombre— y ahí el
+   * comprobante imprime la razón social en ese renglón. No lo trae el padrón: ARCA conoce la
+   * razón social, no cómo se llama el local.
+   */
+  trade_name: string | null
   condicion_iva: CondicionIva
   tax_id: string
   address: string | null
@@ -113,6 +123,7 @@ export interface FiscalIdentity {
 
 export interface FiscalIdentityCreate {
   name: string
+  trade_name?: string | null
   condicion_iva: CondicionIva
   tax_id: string
   address?: string | null
@@ -436,6 +447,12 @@ export interface Invoice {
   total: string
 
   issuer_name: string
+  /**
+   * El nombre de fantasía **tal como salió impreso**, no el que la identidad fiscal tiene hoy:
+   * es una copia, como el resto de los `issuer_*`. `null` cuando no había ninguno, y entonces
+   * el comprobante imprime la razón social en ese renglón.
+   */
+  issuer_trade_name: string | null
   issuer_tax_id: string
   issuer_condicion_iva: CondicionIva
   issuer_address: string | null

@@ -114,6 +114,16 @@ class Invoice(Base, TimestampMixin):
 
     # --- Copia del emisor, tal como salió impreso ---
     issuer_name: Mapped[str] = mapped_column(String(150))
+    # El nombre de fantasía del emisor, el renglón grande de arriba del comprobante.
+    #
+    # Se copia, al revés que el mail del cliente, y el criterio es el mismo de siempre: esto
+    # **se imprime**. Leerlo en vivo de la ficha haría que cambiarle el nombre al negocio
+    # reescriba el encabezado de todas las facturas ya emitidas y mandadas.
+    #
+    # Nullable porque la ficha puede no tenerlo, y entonces el comprobante imprime la razón
+    # social en ese renglón — que es exactamente lo que imprimía antes de que esta columna
+    # existiera, así que las facturas viejas, con `NULL` acá, siguen saliendo iguales.
+    issuer_trade_name: Mapped[str | None] = mapped_column(String(150))
     issuer_tax_id: Mapped[str] = mapped_column(String(11))
     issuer_condicion_iva: Mapped[CondicionIva] = mapped_column(Enum(CondicionIva))
     issuer_address: Mapped[str | None] = mapped_column(String(200))

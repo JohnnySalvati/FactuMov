@@ -345,6 +345,48 @@ def test_editing_the_customer_afterwards_does_not_change_the_invoice(
     assert invoice.customer_name != "Otro nombre"
 
 
+def test_the_saved_invoice_copies_the_issuers_trade_name(client, template, db, wsfe_calls):
+    """El nombre de fantasía **se imprime**, así que se congela como el resto del emisor.
+
+    Es la diferencia con el mail del cliente, que se lee en vivo: aquello es a dónde entregar
+    el PDF —una pregunta sobre hoy— y esto es lo que salió en el papel.
+    """
+    template.fiscal_identity.trade_name = "La Violeta"
+    db.flush()
+
+    emit(client, template.id)
+
+    invoice = db.execute(select(Invoice)).scalars().one()
+    assert invoice.issuer_trade_name == "La Violeta"
+
+
+def test_renaming_the_business_afterwards_does_not_change_the_invoice(
+    client, template, db, wsfe_calls
+):
+    """Sin la copia, cambiarle el nombre al negocio reescribe facturas ya emitidas y mandadas."""
+    template.fiscal_identity.trade_name = "La Violeta"
+    db.flush()
+    emit(client, template.id)
+
+    template.fiscal_identity.trade_name = "La Violeta II"
+    db.flush()
+
+    invoice = db.execute(select(Invoice)).scalars().one()
+    db.refresh(invoice)
+    assert invoice.issuer_trade_name == "La Violeta"
+
+
+def test_an_issuer_without_a_trade_name_leaves_the_column_empty(
+    client, template, db, wsfe_calls
+):
+    """`None` y no una copia de la razón social: no eligió llamarse igual, no eligió nada. El
+    renglón del comprobante lo resuelve el fallback del template, no una copia acá."""
+    emit(client, template.id)
+
+    invoice = db.execute(select(Invoice)).scalars().one()
+    assert invoice.issuer_trade_name is None
+
+
 def test_the_saved_amounts_are_the_ones_sent_to_arca(client, template, db, wsfe_calls):
     emit(client, template.id)
 

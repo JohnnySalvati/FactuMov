@@ -117,6 +117,7 @@ def _snapshot(
         iva_total=totals.iva,
         total=totals.total,
         issuer_name=issuer.name,
+        issuer_trade_name=issuer.trade_name,
         issuer_tax_id=issuer.tax_id,
         issuer_condicion_iva=issuer.condicion_iva,
         issuer_address=issuer.address,

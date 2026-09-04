@@ -59,11 +59,21 @@ PASSWORD = "onePassword"
 PASSWORD_HASHED = hash_password(PASSWORD)
 
 
-def make_fiscal_identity(db, user_id, name=None, tax_id=None, condicion_iva=CondicionIva.INSCRIPTO):
+def make_fiscal_identity(
+    db,
+    user_id,
+    name=None,
+    tax_id=None,
+    condicion_iva=CondicionIva.INSCRIPTO,
+    trade_name=None,
+):
     n = next(_sequence)
     fiscal_identity = FiscalIdentity(
         user_id=user_id,
         name=f"Fiscal Identity {n}" if name is None else name,
+        # Sin nombre de fantasía por default: es el caso más común y el que hace que el
+        # comprobante caiga en la razón social. El test que lo necesita lo pasa.
+        trade_name=trade_name,
         tax_id=f"20{n:09d}" if tax_id is None else tax_id,
         condicion_iva=condicion_iva,
     )
@@ -332,6 +342,7 @@ def make_invoice(
         iva_total=iva_total,
         total=total,
         issuer_name=fiscal_identity.name,
+        issuer_trade_name=fiscal_identity.trade_name,
         issuer_tax_id=fiscal_identity.tax_id,
         issuer_condicion_iva=fiscal_identity.condicion_iva,
         issuer_address=fiscal_identity.address,

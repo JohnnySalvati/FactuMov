@@ -91,7 +91,10 @@
     <div class="head-wrap">
       <div class="head">
         <div class="head-cell left">
-          <div class="fantasia">{{ invoice.issuer_name }}</div>
+          {# El renglón grande es el nombre de fantasía, y cae en la razón social cuando el
+             emisor no tiene ninguno —el monotributista que factura con su propio nombre—. Sin
+             el fallback, el comprobante saldría con el renglón principal en blanco. #}
+          <div class="fantasia">{{ invoice.issuer_trade_name or invoice.issuer_name }}</div>
           <div class="field"><b>Razón Social:</b> {{ invoice.issuer_name }}</div>
           <div class="field"><b>Domicilio Comercial:</b> {{ invoice.issuer_address or "" }}</div>
           <div class="field"><b>Condición frente al IVA:</b> {{ issuer_condicion }}</div>

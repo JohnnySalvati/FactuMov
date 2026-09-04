@@ -6,13 +6,37 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from factumov.enums import CondicionIva
 
 
+def _blank_to_none(value: str | None) -> str | None:
+    """`"  "` y "no tiene" no son lo mismo para una columna que admite NULL.
+
+    Un formulario que se dejó vacío manda la cadena vacía, y guardarla diría que el negocio se
+    llama "" en vez de que no tiene nombre de fantasía. El renglón del comprobante saldría
+    igual —el fallback a la razón social también se dispara con `""`— pero la fila mentiría, y
+    la detección de cambios de la pantalla vería un cambio donde no lo hubo.
+    """
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
 class FiscalIdentityCreate(BaseModel):
     name: str = Field(max_length=150)
+    # Cómo se llama el negocio, cuando no se llama como el contribuyente. Opcional: el
+    # monotributista que factura con su propio nombre no tiene ninguno. No lo trae el padrón
+    # —ARCA conoce la razón social, no el nombre del local—, así que siempre lo carga el
+    # usuario. Ver `models/fiscal_identity.py`.
+    trade_name: str | None = Field(default=None, max_length=150)
     condicion_iva: CondicionIva
     tax_id: str = Field(max_length=11)
     address: str | None = Field(default=None, max_length=200)
     iibb: str | None = Field(default=None, max_length=50)
     start_date: date | None = None
+
+    @field_validator("trade_name")
+    @classmethod
+    def clean_trade_name(cls, value: str | None) -> str | None:
+        return _blank_to_none(value)
 
     @field_validator("tax_id")
     @classmethod
@@ -33,6 +57,7 @@ class FiscalIdentityRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
     name: str
+    trade_name: str | None
     condicion_iva: CondicionIva
     tax_id: str
     address: str | None
@@ -57,7 +82,7 @@ class FiscalIdentityLookup(BaseModel):
     criterio que `TaxpayerLookup` y que el `InvoiceTemplateDraft` de la importación de PDF.
 
     Los campos coinciden con `FiscalIdentityCreate` a propósito —la pantalla usa esto para
-    sembrar el formulario— con dos ausencias que no son olvidos:
+    sembrar el formulario— con tres ausencias que no son olvidos:
 
     - **`iibb` no está porque ARCA no lo tiene.** Ingresos Brutos es provincial: lo administran
       Rentas de cada provincia y ARBA/AGIP, no el padrón nacional. Inventarlo acá sería poner
@@ -66,6 +91,10 @@ class FiscalIdentityLookup(BaseModel):
       respuesta del A5; lo más parecido son los períodos de cada actividad, que dicen desde
       cuándo está registrada *esa* actividad y no desde cuándo el contribuyente opera.
       Deducirla de ahí daría una fecha creíble y equivocada, impresa en un comprobante fiscal.
+    - **`trade_name` tampoco, y no porque falte el dato sino porque no es de ARCA.** El padrón
+      sabe cómo se llama el contribuyente; cómo se llama el negocio es una decisión comercial
+      que no está registrada en ningún lado. Sembrarlo con la razón social diría que el
+      usuario eligió llamarse igual, cuando lo que pasa es que todavía no eligió nada.
     """
 
     tax_id: str
@@ -87,11 +116,19 @@ class FiscalIdentityLookup(BaseModel):
 
 class FiscalIdentityUpdate(BaseModel):
     name: str | None = Field(default=None, max_length=150)
+    # `null` explícito es "sacale el nombre de fantasía"; no mandar el campo es "no lo toques"
+    # —eso lo resuelve el `exclude_unset` del CRUD, igual que el resto—.
+    trade_name: str | None = Field(default=None, max_length=150)
     condicion_iva: CondicionIva | None = None
     tax_id: str | None = Field(default=None, max_length=11)
     address: str | None = Field(default=None, max_length=200)
     iibb: str | None = Field(default=None, max_length=50)
     start_date: date | None = None
+
+    @field_validator("trade_name")
+    @classmethod
+    def clean_trade_name(cls, value: str | None) -> str | None:
+        return _blank_to_none(value)
 
     @field_validator("tax_id")
     @classmethod

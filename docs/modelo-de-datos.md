@@ -46,7 +46,7 @@ Emitir = tomar un `InvoiceTemplate`, permitir retoques, y crear una `Invoice` nu
 ## Tablas del modelo
 | Tabla | Rol |
 |---|---|
-| `FiscalIdentity` | Emisor: CUIT, razón social, condición IVA, IIBB, domicilio, estado de la delegación (verificada, y el aviso del usuario de que ya delegó) |
+| `FiscalIdentity` | Emisor: CUIT, razón social, **nombre de fantasía**, condición IVA, IIBB, domicilio, estado de la delegación (verificada, y el aviso del usuario de que ya delegó) |
 | `Customer` | Receptor |
 | `InvoiceTemplate` | Emisor + cliente + punto de venta + concepto (la letra se deduce) |
 | `InvoiceTemplateLine` | Descripción, cantidad, precio unitario, alícuota, posición |

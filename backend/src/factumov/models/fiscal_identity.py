@@ -28,6 +28,19 @@ class FiscalIdentity(Base, TimestampMixin):
     # cuenta, que es la unidad que va a decidir si se borra en cascada o se anonimiza.
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
     name: Mapped[str] = mapped_column(String(150))
+    # El nombre de fantasía: cómo se llama el negocio, que no siempre es cómo se llama el
+    # contribuyente. "La Violeta" factura a nombre de Salvati Miguel Ángel, y el comprobante
+    # tiene que decir las dos cosas — la de arriba, grande, es esta.
+    #
+    # Nullable, y `None` es el caso más común: el monotributista que factura con su propio
+    # nombre no tiene nombre de fantasía, y ahí el comprobante imprime la razón social donde
+    # iría este campo. Guardar una copia del `name` para no tener el NULL diría que eligió
+    # llamarse igual, que es distinto de no haber elegido nada — y dejaría dos columnas para
+    # sincronizar cada vez que corrige la razón social.
+    #
+    # No viene del padrón: ARCA conoce la razón social, no cómo se llama el local. Por eso
+    # `FiscalIdentityLookup` no lo trae y lo carga siempre el usuario.
+    trade_name: Mapped[str | None] = mapped_column(String(150))
     condicion_iva: Mapped[CondicionIva] = mapped_column(Enum(CondicionIva))
     tax_id: Mapped[str] = mapped_column(String(11))
     address: Mapped[str | None] = mapped_column(String(200))

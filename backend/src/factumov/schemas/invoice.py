@@ -89,6 +89,10 @@ class InvoiceRead(BaseModel):
     total: Decimal
 
     issuer_name: str
+    # El nombre de fantasía **tal como salió impreso**, no el que la ficha tiene hoy: es una
+    # copia, igual que el resto de los `issuer_*`. `None` cuando el emisor no tiene ninguno, y
+    # entonces el comprobante imprime la razón social en ese renglón.
+    issuer_trade_name: str | None
     issuer_tax_id: str
     issuer_condicion_iva: CondicionIva
     issuer_address: str | None

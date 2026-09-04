@@ -38,6 +38,31 @@ def test_create_answers_201_with_the_stored_identity(client):
     assert body["start_date"] is None
 
 
+def test_create_stores_the_trade_name(client):
+    """Cómo se llama el negocio, que no siempre es cómo se llama el contribuyente."""
+    response = client.post(URL, json=payload(trade_name="La Violeta"))
+
+    assert response.status_code == 201
+    assert response.json()["trade_name"] == "La Violeta"
+
+
+def test_create_without_a_trade_name_leaves_it_null(client):
+    """Es opcional: el monotributista que factura con su propio nombre no tiene ninguno."""
+    response = client.post(URL, json=payload())
+
+    assert response.status_code == 201
+    assert response.json()["trade_name"] is None
+
+
+def test_a_blank_trade_name_is_stored_as_null(client):
+    """`""` y "no tiene" no son lo mismo para una columna que admite NULL: un formulario que
+    se dejó vacío manda la cadena vacía, y guardarla diría que el negocio se llama ""."""
+    response = client.post(URL, json=payload(trade_name="   "))
+
+    assert response.status_code == 201
+    assert response.json()["trade_name"] is None
+
+
 def test_create_rejects_a_duplicate_name(user, client, db):
     factories.make_fiscal_identity(db, user.id, name="Acme SRL")
 
@@ -123,6 +148,25 @@ def test_patch_touches_only_the_fields_it_was_given(client, fiscal_identity):
     assert body["address"] == "Aroma 2312"
     assert body["tax_id"] == original_tax_id
     assert body["condicion_iva"] == CondicionIva.INSCRIPTO.value
+
+
+def test_patch_can_clear_the_trade_name(client, db, user):
+    """`null` explícito es "sacalo"; no mandar el campo es "no lo toques"."""
+    identity = factories.make_fiscal_identity(db, user.id, trade_name="La Violeta")
+
+    response = client.patch(f"{URL}/{identity.id}", json={"trade_name": None})
+
+    assert response.status_code == 200
+    assert response.json()["trade_name"] is None
+
+
+def test_patch_without_the_trade_name_leaves_it_alone(client, db, user):
+    identity = factories.make_fiscal_identity(db, user.id, trade_name="La Violeta")
+
+    response = client.patch(f"{URL}/{identity.id}", json={"address": "Aroma 2312"})
+
+    assert response.status_code == 200
+    assert response.json()["trade_name"] == "La Violeta"
 
 
 def test_patch_into_a_duplicate_name_is_a_409(user, client, db, fiscal_identity):
