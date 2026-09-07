@@ -130,6 +130,19 @@ function InvoiceScreen({ id }: { id: string }) {
     }
   }
 
+  // El texto que el botón de email dejó de mostrar al volverse ícono: a qué casilla va, si es
+  // un reenvío, o por qué no se puede. Va al `title` y al `aria-label` del sobre.
+  const emailTitle =
+    data === undefined
+      ? ''
+      : data.customer_email === null
+        ? 'Este cliente no tiene email cargado'
+        : sending
+          ? 'Mandando el mail…'
+          : data.sent_at !== null
+            ? `Mandar de nuevo por email a ${data.customer_email}`
+            : `Mandar por email a ${data.customer_email}`
+
   return (
     <div className="page">
       <Link className="back" to="/facturas">
@@ -226,45 +239,54 @@ function InvoiceScreen({ id }: { id: string }) {
           </div>
 
           <div className="card stack">
-            {/* Un `<a>` común y no un fetch a blob: la cookie de sesión viaja sola porque el
-                proxy de Vite deja todo en el mismo origen, y el navegador abre su visor de
-                PDF. Bajarlo a mano quedaría a un toque igual. */}
-            <a className="button-link secondary-link" href={`/api/invoices/${id}/pdf`}
-               target="_blank" rel="noreferrer">
-              Ver el PDF
-            </a>
+            {/* Tres íconos en una línea: ver el PDF, compartirlo por la hoja nativa del
+                celular y mandarlo por email. Antes eran tres botones de ancho completo
+                apilados; son acciones cortas y conocidas —una hoja, la flecha de compartir,
+                un sobre— y una al lado de la otra se abarcan de un vistazo. Lo que cada botón
+                decía con texto (la casilla de destino, "mandar de nuevo", el motivo de estar
+                deshabilitado) baja al `title`/`aria-label` y a las notas de abajo. */}
+            <div className="action-icons">
+              {/* Un `<a>` común y no un fetch a blob: la cookie de sesión viaja sola porque
+                  el proxy de Vite deja todo en el mismo origen, y el navegador abre su visor
+                  de PDF. */}
+              <a href={`/api/invoices/${id}/pdf`} target="_blank" rel="noreferrer"
+                 title="Ver el PDF" aria-label="Ver el PDF">
+                🧾
+              </a>
 
-            {/* Solo en el celular: en el escritorio `CAN_SHARE_FILES` es `false` y el botón no
-                existe. Comparte el PDF de verdad —el archivo, no un link—, que es lo que
-                esperan WhatsApp o Drive del otro lado. */}
-            {CAN_SHARE_FILES && (
-              <button className="secondary" onClick={() => share(data.label)} disabled={sharing}>
-                {sharing ? 'Preparando…' : 'Compartir el PDF'}
+              {/* Solo en el celular: en el escritorio `CAN_SHARE_FILES` es `false` y el
+                  ícono no aparece. Comparte el archivo de verdad —no un link—, y ahí
+                  WhatsApp, Drive o Gmail salen como opción. */}
+              {CAN_SHARE_FILES && (
+                <button type="button" onClick={() => share(data.label)} disabled={sharing}
+                        title="Compartir el PDF" aria-label="Compartir el PDF">
+                  {sharing ? '⏳' : '📤'}
+                </button>
+              )}
+
+              {/* Sin email en la ficha, el sobre queda deshabilitado y el `title` dice por
+                  qué; el aviso con el link para cargarlo va abajo, igual que antes. */}
+              <button type="button" onClick={send}
+                      disabled={sending || data.customer_email === null}
+                      title={emailTitle} aria-label={emailTitle}>
+                {sending ? '⏳' : '✉️'}
               </button>
-            )}
+            </div>
+
             <Notice kind="error">{shareError}</Notice>
 
-            {data.customer_email !== null ? (
-              <>
-                <button onClick={send} disabled={sending}>
-                  {sending
-                    ? 'Mandando…'
-                    : data.sent_at !== null
-                      ? 'Mandar de nuevo'
-                      : `Mandar por email a ${data.customer_email}`}
-                </button>
-                {data.customer_cc_emails.length > 0 && (
-                  <p className="totals-note" style={{ margin: 0 }}>
-                    Con copia a {data.customer_cc_emails.join(', ')}.{' '}
-                    <Link to={`/clientes/${data.customer_id}`}>Editar</Link>
-                  </p>
-                )}
-              </>
-            ) : (
+            {data.customer_email === null ? (
               <Notice kind="warn">
                 Este cliente no tiene email cargado.{' '}
                 <Link to={`/clientes/${data.customer_id}`}>Agregáselo</Link> y volvé.
               </Notice>
+            ) : (
+              data.customer_cc_emails.length > 0 && (
+                <p className="totals-note" style={{ margin: 0 }}>
+                  Con copia a {data.customer_cc_emails.join(', ')}.{' '}
+                  <Link to={`/clientes/${data.customer_id}`}>Editar</Link>
+                </p>
+              )
             )}
 
             <Notice kind="error">{sendError}</Notice>

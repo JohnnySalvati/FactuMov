@@ -253,21 +253,38 @@ corrección del template. Cuesta unas décimas de segundo y se pide pocas veces.
 - **`inline` y no `attachment` en el endpoint del PDF**: en el celular abre el visor del
   navegador, que es lo que uno quiere antes de mandarlo. Bajarlo sigue estando a un toque.
 
-### Compartir el PDF por la hoja nativa (2026-09-07)
-La pantalla de la factura emitida tiene, además de "Ver el PDF", un botón **"Compartir el
-PDF"** que abre la hoja de "compartir con…" de Android/iOS (WhatsApp, Drive, Gmail). Es el
-camino para mandar el comprobante a alguien que **no es** el cliente de la ficha —un contador,
-un socio— sin pasar por el envío por email.
+### La factura emitida se ve, se comparte y se manda desde tres íconos (2026-09-07)
+Abajo del detalle hay una fila de íconos (`.action-icons` en `index.css`), no tres botones de
+ancho completo apilados:
+
+- **🧾 Ver el PDF** — un `<a target="_blank">` al endpoint del PDF. La cookie de sesión viaja
+  sola porque el proxy de Vite deja todo en el mismo origen.
+- **📤 Compartir el PDF** — abre la hoja nativa de "compartir con…" de Android/iOS (WhatsApp,
+  Drive, Gmail). Es el camino para mandarle el comprobante a alguien que **no es** el cliente
+  de la ficha —un contador, un socio— sin pasar por el envío por email.
+- **✉️ Mandar por email** — el mismo `POST /invoices/{id}/send` de siempre.
+
+Lo que cada botón decía con texto —la casilla de destino, "mandar de nuevo", "este cliente no
+tiene email"— vive ahora en el `title`/`aria-label` (`emailTitle`) y en las notas que quedan
+debajo de la fila.
+
+Sobre el **📤 Compartir**:
 
 - **Web Share API, no un link.** `navigator.share({ files: [...] })` comparte el archivo de
-  verdad; compartir la URL dejaría al otro lado con un link que pide sesión. El front hace un
-  `fetch` crudo del endpoint del PDF (no `api.get`, que parsea JSON), arma un `File` y lo pasa.
-- **El botón solo aparece si el navegador puede.** `CAN_SHARE_FILES` se resuelve una vez con
+  verdad; compartir la URL dejaría al otro lado con un link que pide sesión —el router de
+  `invoices` está entero detrás de `get_current_user` y no hay link público de la factura—.
+  El front hace un `fetch` crudo del endpoint del PDF (no `api.get`, que parsea JSON), arma un
+  `File` y lo pasa.
+- **No se puede "compartir directo a WhatsApp".** La hoja nativa no se puede apuntar a una app
+  de antemano y `wa.me` solo lleva texto, nunca un adjunto. Por eso hay un solo botón de
+  compartir y no uno por app.
+- **El ícono solo aparece si el navegador puede.** `CAN_SHARE_FILES` se resuelve una vez con
   un `canShare` de prueba: `true` en Chrome/Android y Safari iOS 15+ (también como PWA),
-  `false` en el escritorio. Ahí no se muestra nada y queda "Ver el PDF".
+  `false` en el escritorio. Ahí no se renderiza y quedan dos íconos.
 - **`navigator.share` consume la activación del toque.** Si el `render_pdf` del backend tardara
   segundos, el navegador rechazaría el share; como tarda décimas, alcanza. El `catch` ignora
-  el `AbortError` (el usuario canceló la hoja) y para todo lo demás manda a "Ver el PDF".
+  el `AbortError` (el usuario canceló la hoja) y para todo lo demás muestra un cartel que
+  manda a "Ver el PDF".
 
 ### El nombre de fantasía del emisor (2026-09-04, migración `e9b4d1c76a20`)
 El renglón grande de arriba del comprobante es cómo se llama el **negocio**, que no siempre es

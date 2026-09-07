@@ -1396,13 +1396,39 @@ button.mic.wide {
   text-decoration: none;
 }
 
-/* La variante secundaria del link-botón: la acción existe pero no es la principal de la
-   pantalla. "Ver el PDF" al lado de "Mandar por email" — mirar es gratis, mandar sale para
-   afuera. */
-.button-link.secondary-link {
-  background: transparent;
-  color: var(--accent);
+/* --- Fila de acciones de la factura emitida --------------------------------------- */
+/*
+ * Ver el PDF, compartirlo y mandarlo por email como tres íconos en una línea, en vez de tres
+ * botones de ancho completo apilados. Ocupan el ancho entre los tres —`flex: 1`— como cualquier
+ * otro botón de la app, así que se lee como una barra de acciones y no como tres adornos
+ * sueltos. En el escritorio el de compartir no se renderiza y quedan dos.
+ */
+.action-icons {
+  display: flex;
+  gap: 0.6rem;
+}
+
+.action-icons > a,
+.action-icons > button {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--touch);
+  padding: 0.6rem;
+  font-size: 1.3rem;
+  line-height: 1;
   border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.action-icons > button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 /* --- Instructivos ilustrados de la delegación en ARCA ------------------------------- */
