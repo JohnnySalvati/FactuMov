@@ -31,6 +31,21 @@ export function InvoicePage() {
   return id ? <InvoiceScreen key={id} id={id} /> : <Navigate to="/facturas" replace />
 }
 
+/**
+ * ¿El navegador puede abrir la hoja nativa de "compartir con…" con un archivo adjunto?
+ *
+ * Se resuelve una sola vez, al cargar el módulo, con un PDF vacío de prueba: `canShare` mira
+ * el tipo, no el contenido. Da `true` en Chrome/Android y en Safari de iOS 15+ (también como
+ * PWA en la pantalla de inicio); da `false` en el escritorio y en navegadores viejos, y ahí
+ * el botón directamente no se muestra —queda "Ver el PDF", que nunca se fue—.
+ */
+const CAN_SHARE_FILES =
+  typeof navigator !== 'undefined' &&
+  typeof navigator.canShare === 'function' &&
+  navigator.canShare({
+    files: [new File([new Blob()], 'probe.pdf', { type: 'application/pdf' })],
+  })
+
 function InvoiceScreen({ id }: { id: string }) {
   const fetcher = useCallback(() => api.get<Invoice>(`/invoices/${id}`), [id])
   const invoice = useResource(fetcher)
@@ -40,6 +55,41 @@ function InvoiceScreen({ id }: { id: string }) {
   const [sendError, setSendError] = useState<string>()
   const [justSent, setJustSent] = useState(false)
   const [registering, setRegistering] = useState(false)
+
+  const [sharing, setSharing] = useState(false)
+  const [shareError, setShareError] = useState<string>()
+
+  /**
+   * Baja el PDF y lo pasa a la hoja de compartir de Android/iOS (WhatsApp, Drive, Gmail…).
+   *
+   * Es un `fetch` crudo y no `api.get`: el cliente HTTP siempre parsea la respuesta como JSON,
+   * y acá lo que vuelve son los bytes del PDF. La cookie de sesión viaja igual con
+   * `credentials: 'include'`.
+   *
+   * `navigator.share` necesita que todavía "cuente" el toque del usuario, así que el
+   * `render_pdf` del backend —décimas de segundo— tiene que terminar rápido; si tarda de más
+   * el navegador lo rechaza y cae en el cartel, que manda a "Ver el PDF" como salida.
+   */
+  async function share(label: string) {
+    if (sharing) return
+    setSharing(true)
+    setShareError(undefined)
+    try {
+      const response = await fetch(`/api/invoices/${id}/pdf`, { credentials: 'include' })
+      if (!response.ok) throw new Error('fetch')
+      const blob = await response.blob()
+      const file = new File([blob], `FactuMov-${label}.pdf`, { type: 'application/pdf' })
+      if (!navigator.canShare?.({ files: [file] })) throw new Error('unsupported')
+      await navigator.share({ files: [file], title: label })
+    } catch (caught) {
+      // Cancelar la hoja de compartir tira `AbortError`. No es un error: el usuario decidió no
+      // compartir y no hay nada que avisarle.
+      if (caught instanceof DOMException && caught.name === 'AbortError') return
+      setShareError('No se pudo compartir el PDF. Abrilo con "Ver el PDF" y compartilo desde ahí.')
+    } finally {
+      setSharing(false)
+    }
+  }
 
   async function send() {
     if (sending) return
@@ -183,6 +233,16 @@ function InvoiceScreen({ id }: { id: string }) {
                target="_blank" rel="noreferrer">
               Ver el PDF
             </a>
+
+            {/* Solo en el celular: en el escritorio `CAN_SHARE_FILES` es `false` y el botón no
+                existe. Comparte el PDF de verdad —el archivo, no un link—, que es lo que
+                esperan WhatsApp o Drive del otro lado. */}
+            {CAN_SHARE_FILES && (
+              <button className="secondary" onClick={() => share(data.label)} disabled={sharing}>
+                {sharing ? 'Preparando…' : 'Compartir el PDF'}
+              </button>
+            )}
+            <Notice kind="error">{shareError}</Notice>
 
             {data.customer_email !== null ? (
               <>
