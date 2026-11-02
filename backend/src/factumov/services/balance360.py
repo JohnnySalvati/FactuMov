@@ -33,6 +33,7 @@ from factumov.crud import balance360_connection as connection_crud
 from factumov.crud import invoice as invoice_crud
 from factumov.exceptions import Balance360Error, SecretDecryptionError, SecretsNotConfiguredError
 from factumov.models.invoice import Invoice
+from factumov.schemas.balance360 import Balance360Entity
 from factumov.services import secrets
 
 logger = logging.getLogger(__name__)
@@ -242,10 +243,16 @@ def build_payload(invoice: Invoice) -> dict[str, Any]:
     esa columna es "el número del documento" —convive con `doc_type`, que dice de cuál—. Y es
     además lo que evita que cada factura B a un consumidor final cree un contacto nuevo.
     """
+    entity_id = invoice.fiscal_identity.balance360_entity_id
     return {
         # El id de esta factura es la clave de idempotencia: reintentar no duplica.
         "external_id": str(invoice.id),
         "issuer_tax_id": invoice.issuer_tax_id,
+        # La entidad elegida para el CUIT, o `None` para que la deduzca Balance360. Sale de la
+        # ficha y no de una copia en la factura, al revés que el emisor: no es algo que ARCA
+        # autorizó ni que salió impreso, es a qué balance va la copia, y elegirla es justamente
+        # lo que destraba un registro que falló.
+        "entity_id": str(entity_id) if entity_id else None,
         "customer": {
             "name": invoice.customer_name,
             "tax_id": invoice.customer_doc_number,
@@ -320,6 +327,62 @@ def _post(token: str, payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(body, dict) or "id" not in body:
         raise Balance360Error("Balance360 contestó algo que no entendimos.")
     return body
+
+
+def entity_options(db: Session, user_id: uuid.UUID, tax_id: str) -> list[Balance360Entity] | None:
+    """Entre qué entidades de Balance360 se pueden registrar los comprobantes de ese CUIT.
+
+    `None` si el usuario no tiene Balance360 conectado. Lo demás —el token que no se lee, el
+    CUIT que allá no está cargado, Balance360 caído— levanta `Balance360Error` con un mensaje
+    para el usuario.
+
+    La lista la arma Balance360 con la misma regla que aplica al registrar, así que lo que la
+    pantalla ofrece es exactamente lo que el registro después acepta. Pedirla acá, en vez de
+    que la pantalla le hable a Balance360, es lo de siempre: el token no sale de este servidor.
+    """
+    connection = connection_crud.get_for_user(db, user_id)
+    if connection is None:
+        return None
+    try:
+        token = secrets.decrypt(connection.encrypted_token)
+    except (SecretsNotConfiguredError, SecretDecryptionError) as error:
+        logger.error("No se pudo descifrar el token de Balance360: %s", error)
+        raise Balance360Error(
+            "El servidor no puede leer el token guardado. Volvé a conectar la cuenta.",
+            retryable=False,
+        ) from error
+
+    try:
+        response = requests.get(
+            f"{_require_base_url()}/api/invoices/issued/entities",
+            params={"issuer_tax_id": tax_id},
+            headers=_headers(token),
+            timeout=TIMEOUT_SECONDS,
+        )
+    except RequestException as error:
+        raise Balance360Error("No pudimos conectarnos con Balance360.") from error
+
+    if response.status_code == 401:
+        raise Balance360Error(
+            "Balance360 no aceptó el token. Volvé a conectar la cuenta desde Ajustes.",
+            retryable=False,
+        )
+    if response.status_code == 404:
+        # Un Balance360 anterior a este endpoint: la dirección contesta pero no lo conoce.
+        raise Balance360Error(
+            "Ese Balance360 todavía no sabe listar las entidades de un CUIT. Hay que actualizarlo.",
+            retryable=False,
+        )
+    if not response.ok:
+        # El 400 de un CUIT que allá no está cargado entra por acá, con el mensaje de
+        # Balance360, que dice qué cargar.
+        raise Balance360Error(_detail(response), retryable=response.status_code >= 500)
+
+    try:
+        body = response.json()
+        return [Balance360Entity.model_validate(item) for item in body]
+    except (ValueError, TypeError) as error:
+        raise Balance360Error("Balance360 contestó algo que no entendimos.") from error
 
 
 def register(db: Session, invoice: Invoice) -> RegistrationResult | None:

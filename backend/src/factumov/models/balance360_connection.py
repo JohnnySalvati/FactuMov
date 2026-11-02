@@ -18,19 +18,17 @@ class Balance360Connection(Base, TimestampMixin):
     tener uno por identidad fiscal sería pedirle N veces la misma credencial para que el
     ruteo lo siga haciendo el CUIT igual.
 
-    Queda un caso sin resolver a propósito: el mismo CUIT ligado a dos entidades de Balance360
-    en las que el usuario está. Ahí la otra app no puede elegir y contesta que se elija — el
-    contrato acepta una entidad explícita, pero acá no hay dónde guardarla todavía. Una tabla
-    de mapeo CUIT → entidad se agrega el día que ese caso exista de verdad; hoy sería una
-    tabla, una pantalla y una migración a cuenta de una situación hipotética, y el error de
-    Balance360 llega con el texto que explica qué hacer.
+    El caso que la deducción no cubre —el mismo CUIT ligado a dos entidades de Balance360 en las
+    que el usuario está— se resuelve en la identidad fiscal y no acá: la elección es por CUIT, y
+    vive en `FiscalIdentity.balance360_entity_id`. Ver *La entidad de Balance360 se elige por
+    CUIT* en `docs/balance360.md`.
 
     **El token va cifrado, no hasheado.** Es el único secreto ajeno de la app que hay que
     poder volver a leer, porque viaja en cada request; el porqué del cifrado y qué pasa si se
     pierde la clave están en `services/secrets.py`.
 
-    No lleva `fiscal_identity_id` ni `entity_id`: todo el ruteo lo hace el CUIT que ya viaja
-    en el comprobante.
+    No lleva `fiscal_identity_id` ni `entity_id`: el ruteo lo hace el CUIT que ya viaja en el
+    comprobante, más la entidad elegida en la identidad fiscal cuando el CUIT no alcanza.
     """
 
     __tablename__ = "balance360_connections"

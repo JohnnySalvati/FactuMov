@@ -92,3 +92,24 @@ class Balance360RegisterPendingResult(BaseModel):
     attempted: int
     registered: int
     failed: int
+
+
+class Balance360Entity(BaseModel):
+    """Una entidad de Balance360 a la que pueden ir los comprobantes de un CUIT."""
+
+    id: UUID
+    name: str
+
+
+class Balance360EntityOptions(BaseModel):
+    """Entre qué entidades de Balance360 se puede elegir para una identidad fiscal.
+
+    `connected` en `false` es "no hay cuenta conectada", que es un estado normal y no un
+    error —igual que `connection: null` en `Balance360Settings`—: la pantalla de la identidad
+    simplemente no muestra la tarjeta.
+    """
+
+    connected: bool
+    # Ordenadas por nombre, como las manda Balance360. Vacía con `connected` es un CUIT que
+    # allá está cargado pero no asociado a ninguna entidad del usuario.
+    entities: list[Balance360Entity]

@@ -88,6 +88,18 @@ class FiscalIdentity(Base, TimestampMixin):
     # que se busca. Postgres deja repetir el NULL, que es lo que tienen casi todas las filas.
     delegation_claim_token_hash: Mapped[str | None] = mapped_column(String(64), unique=True)
 
+    # A qué entidad de Balance360 van los comprobantes de este CUIT, cuando allá el CUIT está
+    # asociado a más de una. `None` = que la deduzca Balance360, que es lo normal: con una
+    # sola candidata no hay nada que elegir. Se elige de la lista que da Balance360
+    # (`GET /fiscal-identities/{id}/balance360-entities`) y viaja como `entity_id` en cada
+    # registro.
+    #
+    # Sin FK, porque es un id de la base de la otra app. Y acá y no en
+    # `balance360_connections`: la elección es por CUIT, y en esta base el CUIT es la
+    # identidad fiscal. Si del otro lado la entidad deja de ser del CUIT, el registro lo
+    # rechaza con un mensaje que manda a elegirla de nuevo.
+    balance360_entity_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+
     invoice_templates: Mapped[list["InvoiceTemplate"]] = relationship(
         back_populates="fiscal_identity", passive_deletes="all"
     )

@@ -15,6 +15,7 @@ import uuid
 from decimal import Decimal
 
 import pytest
+from requests.exceptions import ConnectionError as RequestsConnectionError
 
 from factumov.enums import Balance360Status, CondicionIva, IvaAliquot, VoucherType
 from factumov.models.balance360_connection import Balance360Connection
@@ -64,8 +65,8 @@ def http(monkeypatch):
         ),
     }
 
-    def fake_get(url, headers=None, timeout=None):
-        calls.append({"method": "GET", "url": url, "headers": headers or {}})
+    def fake_get(url, params=None, headers=None, timeout=None):
+        calls.append({"method": "GET", "url": url, "headers": headers or {}, "params": params})
         result = responses["get"]
         if isinstance(result, Exception):
             raise result
@@ -641,3 +642,154 @@ def test_el_estado_pendiente_se_persiste_como_nombre(db, user, issuer):
 
     stored = db.query(Invoice).filter(Invoice.id == invoice.id).one()
     assert stored.balance360_status is Balance360Status.PENDING
+
+
+# --- La entidad de Balance360 de cada CUIT ----------------------------------------------
+#
+# El caso que lo motivó: un CUIT asociado allá a dos entidades (InSoft y Comida). Balance360
+# no puede deducir a cuál va el comprobante y pide que se elija acá.
+
+ENTITY_INSOFT = str(uuid.uuid4())
+ENTITY_COMIDA = str(uuid.uuid4())
+
+
+def test_el_payload_deja_que_balance360_deduzca_la_entidad(db, user, issuer):
+    identity, customer = issuer
+
+    assert balance360.build_payload(make_invoice(db, identity, customer))["entity_id"] is None
+
+
+def test_el_payload_lleva_la_entidad_elegida_en_la_identidad(db, user, issuer):
+    identity, customer = issuer
+    identity.balance360_entity_id = uuid.UUID(ENTITY_COMIDA)
+    db.flush()
+
+    payload = balance360.build_payload(make_invoice(db, identity, customer))
+
+    assert payload["entity_id"] == ENTITY_COMIDA
+
+
+def test_elegir_la_entidad_destraba_un_registro_que_fallo(db, user, issuer, http):
+    """Lo que se elige en la ficha vale también para lo ya emitido: es lo que hace el
+    "Reintentar el registro" de una factura que falló por la ambigüedad."""
+    identity, customer = issuer
+    make_balance360_connection(db, user.id)
+    invoice = make_invoice(db, identity, customer)
+    http["responses"]["post"] = FakeResponse(
+        400, {"detail": "Ese CUIT factura para más de una entidad (Comida, InSoft)."}
+    )
+    balance360.register(db, invoice)
+    assert "más de una entidad" in (invoice.balance360_error or "")
+
+    identity.balance360_entity_id = uuid.UUID(ENTITY_COMIDA)
+    http["responses"]["post"] = registered_response()
+    balance360.register(db, invoice)
+
+    assert http["calls"][-1]["json"]["entity_id"] == ENTITY_COMIDA
+    assert invoice.balance360_status is Balance360Status.REGISTERED
+
+
+def entities_url(identity):
+    return f"/fiscal-identities/{identity.id}/balance360-entities"
+
+
+def test_sin_cuenta_conectada_no_hay_nada_que_elegir(client, issuer, http):
+    identity, _ = issuer
+
+    response = client.get(entities_url(identity))
+
+    assert response.status_code == 200
+    assert response.json() == {"connected": False, "entities": []}
+    assert http["calls"] == []
+
+
+def test_la_lista_sale_de_balance360_con_el_cuit_y_el_token(client, db, user, issuer, http):
+    identity, _ = issuer
+    make_balance360_connection(db, user.id, token="b360_secreto")
+    http["responses"]["get"] = FakeResponse(
+        200, [{"id": ENTITY_COMIDA, "name": "Comida"}, {"id": ENTITY_INSOFT, "name": "InSoft"}]
+    )
+
+    response = client.get(entities_url(identity))
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "connected": True,
+        "entities": [
+            {"id": ENTITY_COMIDA, "name": "Comida"},
+            {"id": ENTITY_INSOFT, "name": "InSoft"},
+        ],
+    }
+    (call,) = http["calls"]
+    assert call["url"] == "https://balance.test/api/invoices/issued/entities"
+    assert call["params"] == {"issuer_tax_id": "20182810674"}
+    assert call["headers"]["Authorization"] == "Bearer b360_secreto"
+
+
+def test_el_mensaje_de_balance360_llega_entero(client, db, user, issuer, http):
+    """El CUIT que allá no está cargado: el texto de Balance360 dice qué cargar."""
+    identity, _ = issuer
+    make_balance360_connection(db, user.id)
+    detail = "El CUIT 20182810674 no está cargado como identidad fiscal en Balance360."
+    http["responses"]["get"] = FakeResponse(400, {"detail": detail})
+
+    response = client.get(entities_url(identity))
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == detail
+
+
+def test_un_balance360_viejo_dice_que_hay_que_actualizarlo(client, db, user, issuer, http):
+    identity, _ = issuer
+    make_balance360_connection(db, user.id)
+    http["responses"]["get"] = FakeResponse(404, {"detail": "Not Found"})
+
+    response = client.get(entities_url(identity))
+
+    assert response.status_code == 502
+    assert "actualizarlo" in response.json()["detail"]
+
+
+def test_balance360_caido_no_es_un_500(client, db, user, issuer, http):
+    identity, _ = issuer
+    make_balance360_connection(db, user.id)
+    http["responses"]["get"] = RequestsConnectionError("apagado")
+
+    response = client.get(entities_url(identity))
+
+    assert response.status_code == 502
+
+
+def test_la_lista_de_una_identidad_ajena_es_404(client, db, other_user, http):
+    ajena = make_fiscal_identity(db, other_user.id, tax_id="20182810674")
+
+    assert client.get(entities_url(ajena)).status_code == 404
+    assert http["calls"] == []
+
+
+def test_la_entidad_se_guarda_y_se_borra_con_el_patch(client, issuer):
+    identity, _ = issuer
+    url = f"/fiscal-identities/{identity.id}"
+
+    chosen = client.patch(url, json={"balance360_entity_id": ENTITY_COMIDA})
+    assert chosen.status_code == 200
+    assert chosen.json()["balance360_entity_id"] == ENTITY_COMIDA
+
+    # El formulario de la ficha no la manda, y guardarlo no la toca.
+    assert client.patch(url, json={"name": "Otro nombre"}).json()["balance360_entity_id"] == (
+        ENTITY_COMIDA
+    )
+
+    cleared = client.patch(url, json={"balance360_entity_id": None})
+    assert cleared.json()["balance360_entity_id"] is None
+
+
+def test_cambiar_el_cuit_suelta_la_entidad_elegida(client, issuer):
+    """Se eligió para un CUIT: arrastrarla a otro mandaría sus comprobantes a donde no van."""
+    identity, _ = issuer
+    url = f"/fiscal-identities/{identity.id}"
+    client.patch(url, json={"balance360_entity_id": ENTITY_COMIDA})
+
+    response = client.patch(url, json={"tax_id": "27245678906"})
+
+    assert response.json()["balance360_entity_id"] is None

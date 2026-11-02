@@ -76,7 +76,12 @@ def create(db: Session, data: FiscalIdentityCreate, user_id: uuid.UUID) -> Fisca
 def update(
     db: Session, fiscal_identity: FiscalIdentity, data: FiscalIdentityUpdate
 ) -> FiscalIdentity:
-    for field, value in data.model_dump(exclude_unset=True).items():
+    changes = data.model_dump(exclude_unset=True)
+    # La entidad de Balance360 se eligió para un CUIT. Si el CUIT cambia, la elección no se
+    # arrastra al nuevo: sería mandar sus comprobantes a una entidad elegida para otro.
+    if "tax_id" in changes and changes["tax_id"] != fiscal_identity.tax_id:
+        changes.setdefault("balance360_entity_id", None)
+    for field, value in changes.items():
         setattr(fiscal_identity, field, value)
     db_flush(db, exception_map)
     return fiscal_identity

@@ -71,6 +71,8 @@ class FiscalIdentityRead(BaseModel):
     # permite a la pantalla tener tres estados en vez de dos, que es la diferencia entre
     # decirle "andá a delegar" a alguien que ya delegó y decirle que espere.
     delegation_claimed_at: datetime | None
+    # La entidad de Balance360 elegida para este CUIT. `None` = que la deduzca Balance360.
+    balance360_entity_id: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
 
@@ -124,6 +126,10 @@ class FiscalIdentityUpdate(BaseModel):
     address: str | None = Field(default=None, max_length=200)
     iibb: str | None = Field(default=None, max_length=50)
     start_date: date | None = None
+    # `null` explícito es "que la deduzca Balance360". No se valida contra Balance360 acá: la
+    # pantalla ofrece solo lo que Balance360 listó, y el registro rechaza con un mensaje claro
+    # cualquier otra cosa. Validar al guardar sería una llamada de red para repetir eso.
+    balance360_entity_id: uuid.UUID | None = None
 
     @field_validator("trade_name")
     @classmethod

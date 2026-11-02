@@ -7,6 +7,7 @@ import {
   CONDICION_IVA_LABELS,
   CondicionIva,
   EMISOR_CONDICIONES,
+  type Balance360EntityOptions,
   type DelegationStatus,
   type FiscalIdentity,
   type FiscalIdentityLookup,
@@ -153,6 +154,9 @@ function FiscalIdentityScreen({ id }: { id?: string }) {
           {/* La verificación solo tiene sentido sobre una fila que ya existe: la llamada a ARCA
               va contra el CUIT guardado. */}
           {identity !== null && <DelegationCard identity={identity} onChanged={setIdentity} />}
+          {identity !== null && (
+            <Balance360EntityCard identity={identity} onChanged={setIdentity} />
+          )}
         </>
       )}
     </div>
@@ -687,6 +691,149 @@ function DelegationCard({
           hagas nada más.
         </Notice>
       )}
+    </div>
+  )
+}
+
+/**
+ * A qué entidad de Balance360 van los comprobantes de este CUIT.
+ *
+ * **Casi nunca hace falta**, y la tarjeta lo refleja: sin Balance360 conectado no aparece, y
+ * con el CUIT en una sola entidad solo dice adónde van. El desplegable aparece cuando allá el
+ * CUIT está en más de una —el caso de InSoft y Comida—, que es cuando el registro no puede
+ * deducirla y falla pidiendo que se elija acá.
+ *
+ * La lista la da Balance360 con la misma regla que aplica al registrar, así que no se puede
+ * elegir nada que después se rechace. Elegir guarda en el momento, con su propio PATCH: no es
+ * parte del formulario de arriba, que guarda los datos fiscales con su botón.
+ */
+function Balance360EntityCard({
+  identity,
+  onChanged,
+}: {
+  identity: FiscalIdentity
+  onChanged: (identity: FiscalIdentity) => void
+}) {
+  // `undefined` mientras se consulta. Depende del CUIT y no del id: si el formulario de arriba
+  // le cambia el CUIT, el backend suelta la entidad elegida y la lista es otra.
+  const [options, setOptions] = useState<Balance360EntityOptions>()
+  const [loadError, setLoadError] = useState<string>()
+  const [error, setError] = useState<string>()
+  const [busy, setBusy] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    api
+      .get<Balance360EntityOptions>(`/fiscal-identities/${identity.id}/balance360-entities`)
+      .then((found) => {
+        if (cancelled) return
+        setOptions(found)
+        setLoadError(undefined)
+      })
+      .catch((caught: unknown) => {
+        if (cancelled) return
+        setLoadError(
+          caught instanceof ApiError ? caught.detail : 'No se pudo consultar Balance360.',
+        )
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [identity.id, identity.tax_id])
+
+  async function choose(entityId: string | null) {
+    setBusy(true)
+    setError(undefined)
+    setSaved(false)
+    try {
+      onChanged(
+        await api.patch<FiscalIdentity>(`/fiscal-identities/${identity.id}`, {
+          balance360_entity_id: entityId,
+        }),
+      )
+      setSaved(true)
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.detail : 'No se pudo guardar.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // Sin cuenta conectada no hay nada que elegir: la tarjeta ni aparece. Tampoco mientras carga,
+  // para no mostrar el título de algo que en la mayoría de las cuentas no existe.
+  if (loadError === undefined && (options === undefined || !options.connected)) return null
+
+  const entities = options?.entities ?? []
+  const chosen = identity.balance360_entity_id
+  // Una elegida que Balance360 ya no lista: la sacaron del CUIT, o dejó de ser del usuario. El
+  // registro la va a rechazar, así que se avisa y el desplegable vuelve a "sin elegir".
+  const stale = chosen !== null && options !== undefined && !entities.some((e) => e.id === chosen)
+  const value = stale ? '' : (chosen ?? '')
+  // Con una sola candidata el desplegable sobra, salvo que haya una elegida: tiene que poder
+  // volver a "la que deduzca Balance360".
+  const showPicker = entities.length > 1 || (entities.length === 1 && chosen !== null)
+
+  return (
+    <div className="card stack">
+      <h2>Balance360</h2>
+
+      {loadError !== undefined && <Notice kind="error">{loadError}</Notice>}
+
+      {options !== undefined && entities.length === 0 && (
+        <Notice kind="warn">
+          En Balance360 este CUIT no está asociado a ninguna de tus entidades. Asociálo allá para
+          que se registren los comprobantes.
+        </Notice>
+      )}
+
+      {options !== undefined && entities.length === 1 && chosen === null && (
+        // Sin el margen propio del `<p>`: el espaciado lo pone el `gap` de `.stack`, y sumados
+        // dejaban un hueco bajo el título que las otras tarjetas no tienen.
+        <p className="muted" style={{ margin: 0 }}>
+          Los comprobantes de este CUIT se registran en <strong>{entities[0].name}</strong>.
+        </p>
+      )}
+
+      {options !== undefined && showPicker && (
+        <>
+          {stale && (
+            <Notice kind="warn">
+              La entidad elegida ya no está asociada a este CUIT en Balance360. Elegí otra.
+            </Notice>
+          )}
+          <div>
+            <label htmlFor="fi-b360-entity">Entidad donde se registran los comprobantes</label>
+            <select
+              id="fi-b360-entity"
+              value={value}
+              disabled={busy}
+              onChange={(event) => void choose(event.target.value || null)}
+            >
+              <option value="">
+                {entities.length > 1 ? 'Elegí una entidad' : 'La que deduzca Balance360'}
+              </option>
+              {entities.map((entity) => (
+                <option key={entity.id} value={entity.id}>
+                  {entity.name}
+                </option>
+              ))}
+            </select>
+            {entities.length > 1 ? (
+              <span className="field-hint">
+                En Balance360 este CUIT está en más de una entidad, y hay que decir a cuál va lo
+                que emitís. Una factura que no se registró por esto se registra con «Reintentar el
+                registro».
+              </span>
+            ) : (
+              <span className="field-hint">Con una sola entidad no hace falta elegir.</span>
+            )}
+          </div>
+        </>
+      )}
+
+      {error !== undefined && <Notice kind="error">{error}</Notice>}
+      {saved && <Notice kind="ok">Guardado.</Notice>}
     </div>
   )
 }

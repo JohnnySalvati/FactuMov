@@ -16,6 +16,7 @@ from factumov.dependencies import (
 from factumov.enums import CondicionIva
 from factumov.exceptions import (
     ArcaError,
+    Balance360Error,
     DuplicateError,
     DuplicateFiscalIdentityNameError,
     DuplicateFiscalIdentityTaxIdError,
@@ -26,6 +27,7 @@ from factumov.exceptions import (
 )
 from factumov.models.fiscal_identity import FiscalIdentity
 from factumov.models.user import User
+from factumov.schemas.balance360 import Balance360EntityOptions
 from factumov.schemas.fiscal_identity import (
     DelegationAcceptance,
     DelegationAcceptanceRequest,
@@ -37,7 +39,7 @@ from factumov.schemas.fiscal_identity import (
     PointOfSaleRead,
     PointsOfSale,
 )
-from factumov.services import arca, notifications, padron, wsfe
+from factumov.services import arca, balance360, notifications, padron, wsfe
 from factumov.services import subscription as subscription_service
 from factumov.services.rate_limit import RateLimiter
 from factumov.services.security import generate_opaque_token, hash_opaque_token
@@ -180,6 +182,29 @@ def update_fiscal_identity(
     except DuplicateError:
         raise HTTPException(status_code=409, detail="Duplicado")
     return fiscal_identity
+
+
+@router.get("/{fiscal_identity_id}/balance360-entities", response_model=Balance360EntityOptions)
+def list_balance360_entities(
+    fiscal_identity: FiscalIdentityDep, db: SessionDep, user: CurrentUserDep
+) -> Balance360EntityOptions:
+    """Entre qué entidades de Balance360 se pueden registrar los comprobantes de este CUIT.
+
+    Es lo que alimenta el desplegable de la tarjeta "Balance360" de la identidad: cuando allá
+    el CUIT está en más de una entidad, el registro no puede deducir a cuál va y pide que se
+    elija acá. La elegida se guarda con el PATCH de siempre (`balance360_entity_id`).
+
+    Sin cuenta conectada contesta 200 con `connected: false`, no un error: es el estado de la
+    mayoría. Lo que Balance360 conteste mal —el CUIT que no tiene cargado, el token que ya no
+    sirve, que no esté— va como **502** con su mensaje, igual que al conectar.
+    """
+    try:
+        entities = balance360.entity_options(db, user.id, fiscal_identity.tax_id)
+    except Balance360Error as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    if entities is None:
+        return Balance360EntityOptions(connected=False, entities=[])
+    return Balance360EntityOptions(connected=True, entities=entities)
 
 
 @router.delete("/{fiscal_identity_id}", status_code=204)

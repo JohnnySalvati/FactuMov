@@ -117,6 +117,11 @@ export interface FiscalIdentity {
    * así que este campo es lo único que distingue «no delegó» de «está esperándonos».
    */
   delegation_claimed_at: string | null
+  /**
+   * A qué entidad de Balance360 van los comprobantes de este CUIT, cuando allá está en más de
+   * una. `null` = que la deduzca Balance360. Se elige en la tarjeta "Balance360" de la ficha.
+   */
+  balance360_entity_id: string | null
   created_at: string
   updated_at: string
 }
@@ -660,6 +665,22 @@ export interface Balance360RegisterPendingResult {
   attempted: number
   registered: number
   failed: number
+}
+
+/** Una entidad de Balance360 a la que pueden ir los comprobantes de un CUIT. */
+export interface Balance360Entity {
+  id: string
+  name: string
+}
+
+/**
+ * Lo que devuelve `GET /fiscal-identities/{id}/balance360-entities`. Espejo de
+ * `Balance360EntityOptions`. `connected: false` es "no hay cuenta conectada": no es un error,
+ * y la tarjeta no se muestra.
+ */
+export interface Balance360EntityOptions {
+  connected: boolean
+  entities: Balance360Entity[]
 }
 
 /* --- El plan ------------------------------------------------------------------------ */

@@ -70,12 +70,34 @@ del emisor entre las entidades de las que el dueño del token es miembro. Un tok
 los CUIT de la persona, y tener uno por identidad fiscal sería pedir N veces la misma credencial
 para que el ruteo lo siga haciendo el CUIT igual.
 
-Queda un caso sin resolver **a propósito**: el mismo CUIT ligado a dos entidades de Balance360
-en las que el usuario está. Ahí la otra app no puede elegir y contesta que se elija; el contrato
-acepta una entidad explícita pero acá no hay dónde guardarla. Una tabla de mapeo CUIT → entidad
-se agrega el día que el caso exista: hoy serían una tabla, una pantalla y una migración a cuenta
-de una situación hipotética, y mientras tanto el mensaje de Balance360 llega entero a la
-pantalla y explica qué hacer.
+El caso que la deducción no cubre —el mismo CUIT ligado a dos entidades de Balance360 en las que
+el usuario está— quedó sin resolver a propósito hasta que existió: ver la sección siguiente.
+
+## La entidad de Balance360 se elige por CUIT (2026-11-02)
+
+Pasó con el CUIT de Miguel, asociado en Balance360 a InSoft y a Comida: el registro fallaba con
+"Elegí en FactuMov cuál registra los comprobantes", y acá no había dónde. Ahora la ficha de la
+identidad fiscal tiene una tarjeta **Balance360** con un desplegable.
+
+- **`fiscal_identities.balance360_entity_id`**, nullable y sin FK (es un id de la otra base).
+  `NULL` es "que la deduzca Balance360", que sigue siendo lo normal. Va en la identidad fiscal y
+  no en `balance360_connections` porque la elección es por CUIT, y acá el CUIT es la identidad.
+- **La lista la da Balance360** (`GET /api/invoices/issued/entities`), con la misma regla que
+  aplica al registrar: no se puede elegir nada que después se rechace. FactuMov la pide por
+  `GET /fiscal-identities/{id}/balance360-entities`, que contesta `connected: false` sin cuenta
+  conectada y **502** con el mensaje de Balance360 cuando algo falla allá —el CUIT sin cargar, un
+  Balance360 anterior a ese endpoint—. El token sigue sin salir del servidor.
+- **Viaja como `entity_id` en cada registro**, leído de la ficha y no de una copia en la factura:
+  no es algo que ARCA autorizó, es a qué balance va la copia, y elegirla es justamente lo que
+  destraba una factura que ya falló. Después de elegir, "Reintentar el registro" la registra.
+- **La tarjeta casi nunca pide nada.** Sin Balance360 conectado no aparece; con el CUIT en una
+  sola entidad dice adónde van; el desplegable aparece con más de una. Si la elegida deja de
+  estar en la lista, avisa y vuelve a "sin elegir".
+- **Elegir guarda en el momento**, con su propio PATCH, y el formulario de arriba no la manda:
+  guardar los datos fiscales no la toca. **Cambiar el CUIT la suelta** (`crud.update`): se eligió
+  para otro.
+- **No se valida contra Balance360 al guardar**: la pantalla solo ofrece lo listado, y el
+  registro rechaza cualquier otra cosa con un mensaje que manda a elegirla de nuevo.
 
 ## El token va cifrado, no hasheado
 
