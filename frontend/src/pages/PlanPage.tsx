@@ -4,6 +4,7 @@ import { Link, useSearchParams } from 'react-router'
 import { ApiError, api } from '../api/client'
 import {
   BillingInterval,
+  BillingProvider,
   SubscriptionStatus,
   type CheckoutStart,
   type PlanOffer,
@@ -47,7 +48,8 @@ function periodLabel(plan: Subscription): string {
     case SubscriptionStatus.trialing:
       return plan.is_pro ? 'La prueba termina el' : 'La prueba terminó el'
     case SubscriptionStatus.active:
-      return 'Se renueva el'
+      // El `manual` no tiene débito automático: llegada la fecha no se cobra, se termina.
+      return plan.provider === BillingProvider.manual ? 'Pago hasta el' : 'Se renueva el'
     case SubscriptionStatus.past_due:
       return 'Estaba paga hasta el'
     case SubscriptionStatus.canceled:

@@ -498,7 +498,33 @@ Están el modelo, la política, los dos gates, la baja completa, el checkout, el
 pantallas. Falta:
 
 - **Los avisos del trial** por mail, en el día ~23 y el ~28, con el link de pago ya armado.
-- **La conciliación a mano de `BillingProvider.MANUAL`**, que hoy no tiene por dónde entrar: el
-  modelo lo contempla y ningún endpoint lo escribe.
+- **La conciliación a mano de `BillingProvider.MANUAL`** tiene por dónde entrar desde el
+  2026-11-02 —`scripts/grant_pro.py`, ver la sección siguiente—, pero el cobro no queda en
+  `subscription_payments`: falta registrar qué transferencia pagó cada año.
 - **Emitir las propias facturas de las suscripciones** con FactuMov, que es la mejor prueba de
   producto que el proyecto puede darse.
+
+## Pro a mano: `scripts/grant_pro.py` (2026-11-02)
+
+Deja una cuenta en Pro anual sin pasar por Mercado Pago: la fila queda `ACTIVE`, `YEARLY`,
+`MANUAL`, con el período hasta dentro de un año (`--days` cambia el largo, `--dry-run` muestra
+sin guardar). Sirve para el anual pagado por transferencia y para una cuenta a la que se le
+regala el plan; nació de la segunda —la de Miguel—. Se corre en la VM:
+
+```bash
+docker compose -f docker-compose.prod.yml exec app python scripts/grant_pro.py miguelsalvati@gmail.com
+```
+
+- **Un script y no un endpoint**, por lo mismo que `schemas/subscription.py` no tiene schema de
+  entrada: un endpoint que escribe el plan es un endpoint para hacerse Pro gratis. La lógica
+  vive en `subscription.grant_manual`, que es lo que testean los tests; el script solo la
+  llama.
+- **Rechaza un débito automático vivo** (`ACTIVE` o `PAST_DUE` con `preapproval`): Mercado Pago
+  lo seguiría cobrando, y su webhook pisaría la fecha con la de su próximo cobro. Primero se da
+  de baja desde *Tu plan*. Uno ya dado de baja no molesta.
+- **Nunca acorta**: si la cuenta ya es Pro hasta más lejos, no toca nada.
+- **No escribe en `subscription_payments`**: esa tabla es lo que informó el proveedor, y un
+  regalo no tiene ni proveedor ni cobro.
+- **La pantalla dice "Pago hasta el" y no "Se renueva el"** cuando el proveedor es `MANUAL`
+  (`GET /subscription` ahora devuelve `provider`): no hay débito, y llegada la fecha —más los
+  días de gracia, como cualquier `ACTIVE`— la cuenta pasa a Free.

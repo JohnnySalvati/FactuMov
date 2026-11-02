@@ -25,8 +25,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from factumov.crud import subscription as subscription_crud
-from factumov.enums import BillingInterval, SubscriptionStatus
-from factumov.exceptions import PlanLimitReachedError
+from factumov.enums import BillingInterval, BillingProvider, SubscriptionStatus
+from factumov.exceptions import ManualGrantError, PlanLimitReachedError
 from factumov.models.fiscal_identity import FiscalIdentity
 from factumov.models.invoice import Invoice
 from factumov.models.subscription import Subscription
@@ -104,6 +104,9 @@ class Entitlements:
     is_pro: bool
     status: SubscriptionStatus | None
     current_period_end: datetime | None
+    # Por dónde entró lo pago. La pantalla lo necesita para no decir "se renueva" de un
+    # plan `MANUAL`, que no se renueva solo.
+    provider: BillingProvider | None
     invoices_used: int
     invoices_limit: int | None
     fiscal_identities_used: int
@@ -239,6 +242,7 @@ def entitlements(db: Session, user_id: uuid.UUID) -> Entitlements:
         is_pro=pro,
         status=subscription.status if subscription else None,
         current_period_end=subscription.current_period_end if subscription else None,
+        provider=subscription.provider if subscription else None,
         invoices_used=count_invoices_this_month(db, user_id, datetime.now(UTC)),
         invoices_limit=None if pro else FREE_MONTHLY_INVOICES,
         fiscal_identities_used=count_fiscal_identities(db, user_id),
@@ -315,3 +319,61 @@ def check_can_add_fiscal_identity(db: Session, user_id: uuid.UUID) -> None:
     entitled = entitlements(db, user_id)
     if not entitled.can_add_fiscal_identity:
         raise PlanLimitReachedError(fiscal_identity_limit_detail())
+
+
+# --- El Pro que se da a mano ------------------------------------------------------------
+
+
+def grant_manual(db: Session, user_id: uuid.UUID, until: datetime) -> Subscription:
+    """Deja la cuenta en Pro anual hasta `until`, sin que medie Mercado Pago.
+
+    Es la escritura que `BillingProvider.MANUAL` tenía reservada y que nada hacía: el anual
+    pagado por transferencia, o una cuenta a la que se le regala el plan. La fila queda igual
+    que la de un anual cobrado —`ACTIVE`, `YEARLY`— con `MANUAL` como proveedor, que es lo que
+    hace que la pantalla diga "Pago hasta el" en vez de "Se renueva el": esto no se renueva.
+
+    **Lo llama `scripts/grant_pro.py` y ningún endpoint.** El módulo de schemas lo explica: un
+    endpoint que escribe el plan es un endpoint para hacerse Pro gratis. El script lo corre
+    quien tiene acceso a la base.
+
+    No escribe en `subscription_payments`: esa tabla es lo que informó el proveedor, y acá no
+    hay proveedor ni, en el caso de un regalo, un cobro.
+
+    Dos casos se rechazan en vez de pisarse:
+
+    - **Un débito automático vivo.** Mercado Pago lo seguiría cobrando, y su webhook volvería a
+      escribir la fecha de su próximo cobro encima de esta. Primero se da de baja.
+    - **Un Pro que ya llega más lejos.** Darle un año a quien ya lo tiene pago por dos sería
+      quitarle uno.
+    """
+    subscription = subscription_crud.get_for_user(db, user_id)
+    if subscription is None:
+        # El caso anómalo que `entitlements` trata como Free. Se le crea la fila en vez de
+        # rechazar: para una cuenta que está por pasar a Pro, la ausencia no protege nada.
+        subscription = subscription_crud.create_trialing(db, user_id, current_period_end=until)
+    elif (
+        subscription.provider is BillingProvider.MERCADO_PAGO
+        and subscription.provider_subscription_id is not None
+        and subscription.status in (SubscriptionStatus.ACTIVE, SubscriptionStatus.PAST_DUE)
+    ):
+        raise ManualGrantError(
+            "La cuenta tiene un débito automático de Mercado Pago vivo. Dalo de baja desde "
+            "Tu plan antes, o Mercado Pago lo va a seguir cobrando."
+        )
+    elif is_pro(subscription) and subscription.current_period_end >= until:
+        raise ManualGrantError(
+            f"La cuenta ya es Pro hasta el {_local_date(subscription.current_period_end)}, "
+            "que es después de la fecha pedida. No se cambia nada."
+        )
+
+    return subscription_crud.activate(
+        db,
+        subscription,
+        current_period_end=until,
+        billing_interval=BillingInterval.YEARLY,
+        provider=BillingProvider.MANUAL,
+    )
+
+
+def _local_date(moment: datetime) -> str:
+    return moment.astimezone(_ARGENTINA).strftime("%d/%m/%Y")

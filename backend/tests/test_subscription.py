@@ -15,6 +15,8 @@ import pytest
 
 from factumov.crud import subscription as subscription_crud
 from factumov.enums import BillingInterval, BillingProvider, CondicionIva, SubscriptionStatus
+from factumov.exceptions import ManualGrantError
+from factumov.models.subscription import Subscription
 from factumov.services import arca
 from factumov.services import subscription as subscription_service
 from tests.factories import (
@@ -501,3 +503,95 @@ def test_make_user_alone_leaves_no_subscription(db):
     created = make_user(db)
 
     assert subscription_crud.get_for_user(db, created.id) is None
+
+
+# --- grant_manual: el Pro que se da a mano (scripts/grant_pro.py) ---------------------------
+
+
+def a_year_from_now():
+    return datetime.now(UTC) + timedelta(days=365)
+
+
+def row_of(db, user_id) -> Subscription:
+    subscription = subscription_crud.get_for_user(db, user_id)
+    assert subscription is not None
+    return subscription
+
+
+def test_granting_leaves_a_yearly_manual_pro(db, user):
+    until = a_year_from_now()
+
+    subscription = subscription_service.grant_manual(db, user.id, until)
+
+    assert subscription.status is SubscriptionStatus.ACTIVE
+    assert subscription.billing_interval is BillingInterval.YEARLY
+    assert subscription.provider is BillingProvider.MANUAL
+    assert subscription.current_period_end == until
+    assert subscription_service.is_pro(subscription)
+
+
+def test_granting_rescues_an_expired_trial(db, user, free_plan):
+    subscription = subscription_service.grant_manual(db, user.id, a_year_from_now())
+
+    assert subscription_service.entitlements(db, user.id).invoices_limit is None
+    assert subscription.status is SubscriptionStatus.ACTIVE
+
+
+def test_granting_creates_the_missing_row(db, user):
+    """La cuenta sin fila es la anómala: para pasarla a Pro, la ausencia no protege nada."""
+    db.delete(row_of(db, user.id))
+    db.flush()
+
+    subscription_service.grant_manual(db, user.id, a_year_from_now())
+
+    assert row_of(db, user.id).provider is BillingProvider.MANUAL
+
+
+def test_granting_refuses_a_live_automatic_debit(db, user):
+    """Mercado Pago lo seguiría cobrando, y su webhook pisaría la fecha con la de su cobro."""
+    subscription = row_of(db, user.id)
+    subscription_crud.activate(
+        db,
+        subscription,
+        current_period_end=datetime.now(UTC) + timedelta(days=20),
+        billing_interval=BillingInterval.MONTHLY,
+        provider=BillingProvider.MERCADO_PAGO,
+        provider_subscription_id="preapproval-1",
+    )
+
+    with pytest.raises(ManualGrantError, match="débito automático"):
+        subscription_service.grant_manual(db, user.id, a_year_from_now())
+    assert subscription.provider is BillingProvider.MERCADO_PAGO
+
+
+def test_granting_accepts_a_cancelled_automatic_debit(db, user):
+    """Dado de baja, Mercado Pago ya no cobra: no hay nada que pisar."""
+    subscription = row_of(db, user.id)
+    subscription.provider = BillingProvider.MERCADO_PAGO
+    subscription.provider_subscription_id = "preapproval-1"
+    subscription_crud.cancel(db, subscription)
+
+    subscription_service.grant_manual(db, user.id, a_year_from_now())
+
+    assert subscription.status is SubscriptionStatus.ACTIVE
+    assert subscription.canceled_at is None
+
+
+def test_granting_never_shortens_a_longer_pro(db, user):
+    subscription = row_of(db, user.id)
+    two_years = datetime.now(UTC) + timedelta(days=730)
+    subscription.current_period_end = two_years
+    db.flush()
+
+    with pytest.raises(ManualGrantError, match="ya es Pro"):
+        subscription_service.grant_manual(db, user.id, a_year_from_now())
+    assert subscription.current_period_end == two_years
+
+
+def test_the_plan_says_how_it_was_paid(client, db, user):
+    """Lo lee la pantalla: un `manual` no se renueva, y no puede decir "se renueva el"."""
+    assert client.get("/subscription").json()["provider"] is None
+
+    subscription_service.grant_manual(db, user.id, a_year_from_now())
+
+    assert client.get("/subscription").json()["provider"] == "manual"

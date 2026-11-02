@@ -18,7 +18,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
-from factumov.enums import BillingInterval, SubscriptionStatus
+from factumov.enums import BillingInterval, BillingProvider, SubscriptionStatus
 
 
 class SubscriptionRead(BaseModel):
@@ -40,6 +40,9 @@ class SubscriptionRead(BaseModel):
     # cobro falla, los días de gracia se suman después de esta fecha. La pantalla la usa para
     # "se renueva el …", que es la pregunta que el usuario tiene.
     current_period_end: datetime.datetime | None
+    # `manual` es el anual que no pasa por Mercado Pago y no se renueva solo: la pantalla dice
+    # "pago hasta el" y no "se renueva el". `null` mientras nunca hubo un cobro.
+    provider: BillingProvider | None
     invoices_used: int
     # `null` = sin límite, o sea Pro. Cero sería lo contrario, así que la pantalla tiene que
     # leer la ausencia y no la falsedad.

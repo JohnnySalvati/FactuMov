@@ -679,6 +679,16 @@ export const SubscriptionStatus = {
 export type SubscriptionStatus = (typeof SubscriptionStatus)[keyof typeof SubscriptionStatus]
 
 /**
+ * Por dónde entró lo pago. Espejo de `BillingProvider`. `manual` es el anual que no pasa por
+ * Mercado Pago —una transferencia, o un plan regalado— y no se renueva solo.
+ */
+export const BillingProvider = {
+  mercado_pago: 'mercado_pago',
+  manual: 'manual',
+} as const
+export type BillingProvider = (typeof BillingProvider)[keyof typeof BillingProvider]
+
+/**
  * Lo que devuelven `GET /subscription` y `POST /subscription/cancel`. Espejo de
  * `SubscriptionRead`.
  *
@@ -701,6 +711,8 @@ export interface Subscription {
    * usuario tiene.
    */
   current_period_end: string | null
+  /** `null` mientras nunca hubo un cobro, o sea durante la prueba. */
+  provider: BillingProvider | null
   invoices_used: number
   /** `null` = sin límite, o sea Pro. Cero sería lo contrario: hay que leer la ausencia. */
   invoices_limit: number | null

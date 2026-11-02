@@ -101,6 +101,15 @@ class PlanLimitReachedError(Exception):
     """
 
 
+class ManualGrantError(Exception):
+    """No se puede dar Pro a mano a esta cuenta, y el mensaje dice por qué.
+
+    La levanta `subscription.grant_manual`, que solo corre desde `scripts/grant_pro.py`: no
+    llega a ningún router, así que no tiene status HTTP. El script la muestra tal cual y sale
+    sin escribir nada.
+    """
+
+
 class UnknownReferenceError(Exception):
     pass
 
