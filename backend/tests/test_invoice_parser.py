@@ -17,7 +17,6 @@ never claimed to work.
 
 from datetime import date, timedelta
 from decimal import Decimal
-from pathlib import Path
 
 import pytest
 
@@ -33,8 +32,7 @@ from factumov.services.invoice_parser import (
     parse_invoice_pdf,
 )
 from factumov.services.invoice_pdf import render_pdf
-
-SAMPLES = Path(__file__).parent / "samples"
+from tests.sample_pdfs import SAMPLES, read_sample
 
 
 @pytest.mark.parametrize(
@@ -112,7 +110,7 @@ SAMPLES = Path(__file__).parent / "samples"
     ],
 )
 def test_invoice_parser(file, data):
-    file_bytes = (SAMPLES / file).read_bytes()
+    file_bytes = read_sample(file)
 
     parsed = parse_invoice_pdf(file_bytes)
 

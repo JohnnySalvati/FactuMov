@@ -5,16 +5,13 @@ the database to resolve the issuer and the customer, but writes nothing: the dra
 proposal the user reviews and then confirms with `POST /invoice-templates`.
 """
 
-from pathlib import Path
-
 from sqlalchemy import func, select
 
 from factumov.enums import DocType, IvaAliquot, VoucherType
 from factumov.models.customer import Customer
 from factumov.routers import invoice_template
 from tests import factories
-
-SAMPLES = Path(__file__).parent / "samples"
+from tests.sample_pdfs import read_sample
 
 # Factura C, punto de venta 1, one exempt line, and a billed period — which is what makes
 # the expected `concepto` "services" rather than "products".
@@ -43,7 +40,7 @@ def post_import(client, filename=SAMPLE, content=None, content_type="application
     `content` replaces the body without touching the declared type, which is what lets a
     guard test send something that is not a PDF while still claiming to be one.
     """
-    file_bytes = (SAMPLES / filename).read_bytes() if content is None else content
+    file_bytes = read_sample(filename) if content is None else content
     return client.post(
         "/invoice-templates/import",
         files={"file": (filename, file_bytes, content_type)},
@@ -249,7 +246,10 @@ def test_import_rejects_an_upload_over_the_size_limit(client, monkeypatch):
     """
     monkeypatch.setattr(invoice_template, "MAX_UPLOAD_BYTES", 100)
 
-    response = post_import(client)
+    # Un PDF ilegible y no una factura de `samples/`, que no viaja al repo: debajo del límite
+    # este mismo contenido contesta 200 con un borrador vacío, así que el 413 solo puede venir
+    # del tamaño.
+    response = post_import(client, content=UNREADABLE_PDF + b" " * 200)
 
     assert response.status_code == 413
 
